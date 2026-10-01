@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-The V1 Voice Core provides the initial reliable voice input layer of Asena.
+The V1 Voice Core provides the initial reliable voice input layer of KYRIN.
 
 Its responsibility is to capture speech from the system microphone, convert the captured audio into text through a replaceable Speech-to-Text (STT) provider, and return a provider-independent result for downstream command processing.
 
@@ -206,4 +206,4 @@ V1 Voice Core is complete when:
 
 ## 12. Success Definition
 
-V1 succeeds when Asena can reliably perform repeated voice-to-text operations while maintaining clear architectural separation between audio capture, speech recognition, and downstream command processing.
+V1 succeeds when KYRIN can reliably perform repeated voice-to-text operations while maintaining clear architectural separation between audio capture, speech recognition, and downstream command processing.
