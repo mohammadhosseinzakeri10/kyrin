@@ -1,10 +1,18 @@
 # V1 Voice Core — Problem Analysis & Requirements
 
+This document describes the V1 target, not a claim that every capability below
+already exists. See `PROJECT_CONTEXT.md` for implemented state. The earlier
+manual, one-attempt recognition flow was superseded by the decision to listen
+continuously without a mandatory wake word or microphone button.
+
 ## 1. Purpose
 
-The V1 Voice Core provides the initial reliable voice input layer of Asena.
+The V1 Voice Core provides the initial reliable voice input layer of KYRIN.
 
-Its responsibility is to capture speech from the system microphone, convert the captured audio into text through a replaceable Speech-to-Text (STT) provider, and return a provider-independent result for downstream command processing.
+Its responsibility is to capture audio continuously from the system microphone,
+pass it to a replaceable offline Speech-to-Text (STT) provider as it arrives,
+and return provider-independent partial and final text for downstream command
+processing.
 
 The Voice Core is limited to voice input only. It does not perform desktop automation, visual analysis, memory management, or autonomous task execution.
 
@@ -12,11 +20,12 @@ The Voice Core is limited to voice input only. It does not perform desktop autom
 
 The V1 Voice Core aims to:
 
-- Capture user speech through the system microphone.
-- Convert captured speech into text.
-- Present the recognized text to the user.
+- Listen continuously while the application is running, without a mandatory
+  wake word or microphone button for each command.
+- Convert incoming speech into partial and final text while listening continues.
+- Present recognized text to the user as appropriate.
 - Handle microphone and speech-recognition failures safely.
-- Allow manual retry after recoverable failures.
+- Allow application-controlled recovery after recoverable failures.
 - Produce provider-independent transcription results.
 
 ## 3. Scope
@@ -24,12 +33,13 @@ The V1 Voice Core aims to:
 Included in V1:
 
 - Microphone initialization.
-- Audio capture.
-- Speech-to-Text processing.
+- Continuous audio capture and controlled shutdown.
+- Bounded transfer from capture to processing with explicit overflow handling.
+- Streaming Speech-to-Text processing using an offline provider.
 - Recognition result handling.
 - User-visible transcription output.
 - Recoverable error handling.
-- Manual retry.
+- Restart after a recoverable capture or recognition failure.
 
 The Speech-to-Text provider must be replaceable without changing higher-level Voice Core behavior.
 
@@ -54,29 +64,29 @@ The following features are intentionally excluded from V1:
 
 ### Successful Flow
 
-User
+User speaks at any time
   ↓
-Voice Core
+Continuous microphone capture and audio processing
   ↓
-STT Provider
+Streaming STT Provider
   ↓
-Transcription Result
+Partial and final transcription results
   ↓
-Voice Core
+Voice Core and higher-level command understanding
   ↓
 User
 
 ### Recoverable Failure Flow
 
-User
+Audio source or provider
   ↓
 Voice Core
   ↓
 Controlled Error
   ↓
-User
+Application reports the failure and safely resets the affected stream
   ↓
-Manual Retry
+Listening can restart under application control
 
 The Voice Core does not interpret commands or decide which action should be executed.
 
@@ -85,8 +95,7 @@ The Voice Core does not interpret commands or decide which action should be exec
 The Voice Core accepts:
 
 - Audio input from the system microphone.
-- A user-initiated request to start a recognition attempt.
-- A user-initiated request to retry a failed recognition attempt.
+- Application-level start, stop, and recovery control.
 
 It does not directly accept application-level commands such as "Open Telegram". Command interpretation belongs to a higher-level command or agent layer.
 
@@ -94,9 +103,9 @@ It does not directly accept application-level commands such as "Open Telegram". 
 
 The Voice Core produces:
 
-- A successful transcription result.
+- Partial and final transcription results as speech is processed.
 - A controlled error result.
-- User-visible feedback for successful and failed recognition attempts.
+- User-visible feedback for successful and failed streaming sessions.
 
 Outputs remain independent of the underlying STT provider.
 
@@ -106,31 +115,36 @@ Outputs remain independent of the underlying STT provider.
 
 - The application must not crash.
 - A controlled microphone error must be returned.
-- The user must be able to retry later.
+- The application must be able to retry capture later.
 
 ### F-2 — No Usable Speech
 
-- The attempt must end gracefully.
-- A controlled input failure must be returned.
-- Manual retry must remain available.
+- Silence is a normal listening state, not an error or a reason to clear
+  conversation context.
 
 ### F-3 — Recognition Failure
 
 - The provider error must be converted into a Voice Core error.
 - Application stability must be preserved.
-- Retry must remain available.
+- The application must be able to restart the affected stream.
 
 ### F-4 — Provider Unavailable
 
 - A controlled provider-unavailable result must be returned.
 - Provider-specific details must not leak into higher-level logic.
-- Retry must remain available.
+- The application must be able to retry provider initialization.
 
 ### F-5 — Recognition Timeout
 
-- The current attempt must terminate safely.
+- The stalled provider operation must fail safely.
 - A controlled timeout result must be returned.
-- A new attempt must be possible.
+- The application must remain able to listen or restart the affected provider.
+
+### F-6 — Capture Queue Overflow
+
+- Audio loss must be reported explicitly; incomplete audio must not silently
+  become a valid command.
+- The affected stream can be stopped and restarted safely.
 
 ## 9. Architectural Constraints
 
@@ -162,15 +176,18 @@ Expected runtime failures must be represented as controlled states rather than u
 
 ### AC-1 — Microphone Initialization
 
-Given an available supported microphone, the Voice Core initializes the microphone and begins an audio capture attempt successfully.
+Given an available supported microphone, the Voice Core starts continuous
+capture under application control.
 
 ### AC-2 — Audio Capture
 
-Given a functioning microphone, the Voice Core captures a valid speech sample.
+Given a functioning microphone, the Voice Core forwards audio in order while
+the user speaks or pauses.
 
 ### AC-3 — Speech Recognition
 
-Given a valid speech sample, the Voice Core produces a transcription result.
+Given valid incoming speech, the Voice Core produces provider-independent
+partial and final transcription results.
 
 ### AC-4 — User Feedback
 
@@ -180,13 +197,16 @@ A successful transcription is presented to the user.
 
 Microphone, capture, recognition, provider, and timeout failures do not crash the application and produce controlled failure states.
 
-### AC-6 — Manual Retry
+### AC-6 — Continuous Listening
 
-After a recoverable failure, the user can begin a new recognition attempt without restarting the application.
+After a pause or completed command, listening continues without a new wake word
+or button press. After a recoverable failure, application control can restart
+the affected stream without restarting the application.
 
 ### AC-7 — Repeated Operation
 
-The Voice Core remains stable across repeated successful and failed recognition attempts during normal operation.
+The Voice Core remains stable across repeated commands and recoverable failures
+during normal operation.
 
 ### AC-8 — Provider Independence
 
@@ -197,7 +217,7 @@ Replacing the underlying STT implementation does not require changes to higher-l
 V1 Voice Core is complete when:
 
 - AC-1 through AC-8 are satisfied.
-- Repeated recognition attempts remain stable during normal operation.
+- Continuous listening remains stable across commands and pauses.
 - Recoverable failures do not crash the application.
 - The STT implementation is replaceable behind a stable abstraction.
 - Required automated and integration tests pass.
@@ -206,4 +226,6 @@ V1 Voice Core is complete when:
 
 ## 12. Success Definition
 
-V1 succeeds when Asena can reliably perform repeated voice-to-text operations while maintaining clear architectural separation between audio capture, speech recognition, and downstream command processing.
+V1 succeeds when KYRIN can reliably listen and transcribe speech continuously
+and offline while maintaining clear architectural separation between audio
+capture, speech recognition, and downstream command processing.
