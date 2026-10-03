@@ -28,11 +28,14 @@
 - **Current major engineering area:** V1 voice/audio pipeline.
 - **Current completed foundation:** audio capture, core PCM data model,
   streaming mono INT16 sample-rate conversion, configurable audio framing,
-  an offline VAD adapter, continuous speech-activity monitoring, and a bounded
-  capture-to-processing pipeline.
-- **Current next direction:** validate the new live VAD/STT composition with a
-  real microphone and continue multilingual STT evaluation before selecting a
-  production default.
+  an offline VAD adapter, continuous speech-activity monitoring, replaceable
+  STT contracts, and a bounded live VAD/STT pipeline.
+- **Current next direction:** design a platform adapter for fresh active-app
+  observations where available, and localized response presentation before
+  connecting live voice commands to the action executor. Windows, macOS,
+  and Android adapters remain future work.
+  Device-specific stop behavior and multilingual STT quality still require
+  separate evaluation.
 
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
 is to understand voice, vision, and text and interact naturally with the
@@ -64,7 +67,7 @@ SpeechActivityMonitor (continuous audio and stable activity transitions)
 
 `ContinuousAudioPipeline` composes the components above for one stream.
 
-The current planned downstream direction is:
+The implemented live STT composition is:
 
 ```text
 Microphone
@@ -72,27 +75,20 @@ Microphone
 MicrophoneInput
     ↓
 AudioCaptureQueue
-    ↓
-AudioData
-    ↓
-SampleRateConverter
-    ↓
-AudioFramer (when the downstream engine needs fixed windows)
-    ↓
-VoiceActivityDetector (currently SileroVad)
-    ↓
-SpeechActivityMonitor
-    ↓
-Streaming STT (planned)
-    ↓
-Semantic command/turn decisions (planned)
+    ├──→ AudioBacklog → STT worker → SpeechToTextSession
+    └──→ SampleRateConverter → AudioFramer → VoiceActivityDetector
+                                           ↓
+                                  SpeechActivityMonitor
+
+Both branches → live events → command decision layer (implemented, dry-run)
 ```
 
 `SampleRateConverter` and `AudioFramer` are separate downstream components.
 The capture-to-activity pipeline, replaceable STT contract, optional Vosk
 adapter, and backend-independent live VAD/STT composition exist. The desktop
-application has not yet been wired to run them; semantic turn decisions are
-not implemented.
+application has not yet been wired to run them. A separate command coordinator
+now accepts transcript updates. A separate Linux app launcher exists, but is
+not yet wired to the live microphone diagnostic or application runtime.
 A downstream engine that accepts variable-size chunks may bypass `AudioFramer`.
 
 ### Architectural boundary
@@ -526,6 +522,7 @@ Current scripts:
 ```text
 scripts/audio/microphone/check_audio_rates.py
 scripts/audio/microphone/check_microphone_stream.py
+scripts/audio/check_live_speech.py
 ```
 
 ### `check_audio_rates.py`
@@ -911,24 +908,19 @@ does not count as silence. Another window after that partial requires an
 explicit stream reset. The monitor does not transcribe audio, decide whether
 a command is complete, or execute actions.
 
-Semantic turn/command decisions are not implemented. They will need streaming
-STT and must be able to act on sufficiently clear partial text while listening
-continues. A pause is an activity signal, not a mandatory command boundary.
+The new command coordinator interprets streaming transcript updates and emits
+replaceable candidates plus final resolutions. It does not execute actions.
+A pause is an activity signal, not a mandatory command boundary.
 
-The intended high-level sequence is currently:
+The current high-level composition is:
 
 ```text
-SampleRateConverter
-    ↓
-AudioFramer (if required by the VAD)
-    ↓
-VAD
-    ↓
-SpeechActivityMonitor (every audio window remains available)
-    ↓
-Streaming STT
-    ↓
-Semantic command/turn decisions
+Audio capture ──→ VAD / SpeechActivityMonitor ──→ activity events
+       └───────→ streaming STT ────────────────→ TranscriptUpdate
+                                                   ↓
+                                          CommandCoordinator
+                                                   ↓
+                                   candidate / resolution / response request
 ```
 
 Silence or absence of speech must eventually be treated as a normal listening
@@ -946,8 +938,8 @@ The following engineering decisions are still open:
 - Will downstream consumers require sample representation or channel conversion?
 - What distribution steps will be required for the `soxr` license?
 - What exact framing-window durations will downstream consumers require?
-- What semantic command/turn policy should use partial STT results and VAD
-  activity while preserving conversation context across pauses?
+- Which reversible commands, if any, may execute from a provisional partial
+  candidate, and how should a later correction be reconciled?
 - Which STT engine will be used?
 - What retry/recovery behavior should occur after microphone device failure?
 - How will default microphone selection work across operating systems?
@@ -1017,44 +1009,59 @@ TranscriptUpdate and CPU/GPU device preferences
 VoskEngine / VoskSession (optional CPU-only experimental STT adapter)
 AudioBacklog (duration-bounded pending STT audio and wait/ready notices)
 LiveSpeechPipeline (one capture, independent VAD/STT workers)
+CommandInterpreter / CommandCoordinator (dry-run command decisions)
+DemoCommandInterpreter (limited example phrases, not a product NLP engine)
+ActionPolicy / ActionGate (final-only, allowlisted requests and result tracking)
+ActionExecutor / LinuxDesktopEntryExecutor (separate, limited OPEN_APP launcher)
+ContextResolver / CommandContext (dialogue history versus fresh active-app state)
 Audio error hierarchy
 hardware diagnostic scripts
 unit-test foundation
 ```
 
-Latest quality state:
+Latest focused quality checks for the command and action-gate changes:
 
 ```text
 Ruff   -> passing
 Mypy   -> passing
-Pytest -> 90 passing tests (Linux development environment)
+Pytest -> 61 focused action/command/STT/live-pipeline tests passing
 ```
+
+The earlier full-suite result was 90 passing tests. A new full-suite attempt
+in the current isolated environment did not complete collection because
+PortAudio could not connect to PulseAudio. This does not validate or invalidate
+the hardware-dependent tests; they need a normal audio environment.
 
 ### Current next step
 
-Evaluate and implement:
+Evaluate before wiring the OS executor into the live application:
 
 ```text
-Real-device validation of live VAD/STT integration, plus broader multilingual
-and command-oriented STT evaluation
+Design a fresh active-app observation adapter and a localized response
+presenter; keep live voice action execution disabled until the app state and
+feedback can be handled honestly
 ```
 
 The standalone Vosk adapter works with a locally supplied model. The live
 pipeline accepts any engine implementing the STT contract, including Vosk;
 it is not yet selected as the production default.
 Selection still requires measured multilingual accuracy, command-relevant
-partial-result latency, CPU/GPU use, and offline packaging. Semantic command
-decisions remain later.
+partial-result latency, CPU/GPU use, and offline packaging. The first semantic
+command layer exists as a dry-run contract and coordinator; its demo interpreter
+recognizes only a few example phrases and is not a production language engine.
 Additional audio-format conversions should be implemented only when a
 downstream requirement is known.
 
 ### Current blocker
 
-No known blocker prevents evaluating offline STT engines. The current
-pipeline was tested with fake audio sources and a mocked microphone stream,
-not with a long-running real microphone session. Real-speech quality,
-end-to-end latency, recovery after device failure, and packaging on other
-operating systems remain to be validated.
+No known blocker prevents evaluating offline STT engines. Short real
+microphone runs produced partial and final transcripts through the live
+pipeline; a repeated short Persian sentence matched the user's reference
+closely, but this is not a representative accuracy benchmark. A direct ALSA
+input device failed to stop cleanly; the corresponding PulseAudio source
+stopped successfully. Long-running stability, precise end-to-end latency,
+recovery after device failure, and packaging on other operating systems
+remain to be validated.
 
 ---
 
@@ -1204,10 +1211,11 @@ KYRIN's runtime dependencies or code. Vosk small-fa-0.42 produced streaming
 partials and a 3.0% corpus CER on that small subset; faster-whisper multilingual
 base/int8 produced 32.5%; small/int8 produced a provisional 17.0%, pending
 verification of its tokenizer after a network TLS error. These numbers cannot
-establish multilingual or conversational suitability. The subsequent optional
-Vosk adapter does not make Vosk the production default, and it is not integrated
-with live capture. A labeled multilingual command corpus and meaningful
-live-command latency measurement remain necessary before selection.
+establish multilingual or conversational suitability. The optional Vosk
+adapter can now be used through `LiveSpeechPipeline`, but it is not the
+production default or wired into a desktop application. A labeled multilingual
+command corpus and meaningful live-command latency measurement remain
+necessary before selection.
 
 ---
 
@@ -1254,5 +1262,167 @@ thresholds are provisional and must be measured on real devices.
 
 Deterministic tests cover one capture and ordered delivery to both branches,
 independent sample rates, warning/recovery, explicit sustained-overflow
-failure, early stop, and continued STT session across a speech pause. This
-does not establish real-time latency or multilingual recognition quality.
+failure, early stop, and continued STT session across a speech pause. The
+bounded diagnostic `scripts/audio/check_live_speech.py` was then run on a real
+microphone. One 20-second PulseAudio run with a locally supplied Persian Vosk
+model emitted streaming partials and three final segments while continuing
+across pauses, without backlog or stop errors. A separate direct ALSA input
+run received audio but failed to stop within the current timeout. The model's
+own WAV test file produced partial and final text through the same pipeline.
+Device IDs, model files under `/tmp`, and these observations are local and
+temporary. No raw microphone recording or private transcript was committed.
+One additional 35-second run of a short, repeated Persian sentence produced
+two matching final texts close to the user's reference without backlog or
+stop errors. General command accuracy, exact audio-to-text latency,
+multilingual quality, and long-duration behavior remain unvalidated. See
+`docs/audio/LIVE_SPEECH_PIPELINE_FA.md` for the commands and observations.
+
+A controlled live test with three Persian desktop commands produced three
+final transcripts without backlog or stop errors. Two matched their references
+apart from punctuation/spacing. The first transcribed the spoken wake name
+imperfectly, and a partial transcript briefly contained incorrect words before
+correcting itself. This supports cautious partial-command handling and wake
+name evaluation, not a production STT selection. Reference phrases and
+results are in `docs/stt/STT_LIVE_COMMAND_SMOKE_2026-10-03_FA.md`.
+
+---
+
+## 30. Model-Independent Command Decisions
+
+`src/kyrin/commands/` now contains a replaceable `CommandInterpreter`
+contract, a `CommandCoordinator` for one ordered STT stream at a time, and a
+limited offline `DemoCommandInterpreter`. The contract receives text, optional
+language, dialogue context plus any fresh active-app observation, and an
+outstanding clarification.
+It returns a ready command, a question, an incomplete/unclear command, or
+ordinary speech. It does not import Vosk or operate the desktop.
+
+The first ready partial interpretation produces a replaceable
+`CommandCandidateUpdate`; repeated identical partials produce no duplicate.
+Later partials may replace or retract it. A final
+transcript produces `CommandResolution` for the same `(stream_id, segment_id)`.
+Candidates are advisory and never authorize execution by themselves. Later
+partial changes can retract a candidate; final resolution supersedes it.
+Repeated final updates for the same segment are ignored. VAD pauses do not
+clear dialogue state. `start_new_stream()` increments the stream ID and resets
+segment IDs after an STT restart while keeping an outstanding clarification.
+The coordinator keeps the last app referenced in a final command separately
+from an active-app observation. A previous action result or spoken proposal is
+not a fresh foreground observation for a later command.
+
+The limited demo recognizes only a few Persian and English app/chat phrases,
+with or without a wake name. It is not the multilingual production engine.
+Ambiguous chat commands ask which app; incomplete or unclear final text asks
+for repetition; ordinary speech remains silent. Response events specify
+text-only or text-and-voice delivery, but UI and TTS are not implemented.
+The Linux app executor exists separately; no live desktop integration exists.
+See
+`docs/commands/COMMAND_UNDERSTANDING_FA.md` for behavior and limitations.
+Focused command, STT, and live-pipeline tests passed (35 tests); Ruff and Mypy
+passed. Full-suite collection was blocked by unavailable PulseAudio in the
+isolated execution environment.
+
+The bounded diagnostic `scripts/audio/check_live_speech.py` now has a
+`commands` mode. It feeds live `TranscriptUpdate` events into the coordinator
+and prints command candidates, final resolutions, and response requests. It
+uses the limited demo interpreter and does not infer verified application
+state or execute any action. A hardware-free integration test replays a
+partial command that later becomes negated through `LiveSpeechPipeline` and
+checks candidate retraction. A user-coordinated, 35-second microphone run
+then confirmed four final decisions: a separately transcribed wake word did
+not trigger an action; open Telegram was proposed; opening Ali's chat asked
+which app and accepted "Telegram" as the answer; a negated open command did
+not become an action. Under the rule used at that time, there were no
+provisional candidates because each complete ready partial appeared only once
+before its final update. The rule was subsequently changed to emit the first
+ready partial as a retractable candidate. A second 25-second user-coordinated
+microphone run produced a candidate for "open Telegram" about 0.72 seconds
+before the final decision and no open candidate for "do not open Telegram".
+The run did not observe a live candidate retraction; that behavior remains
+covered by deterministic tests. These are local event timestamps, not exact
+audio-to-action latency measurements. No action or voice response was executed.
+See `docs/commands/COMMAND_LIVE_SMOKE_2026-10-03_FA.md` for exact test text,
+observations, and limits. No action or voice response was executed.
+
+---
+
+## 31. Dry-Run Action Gate
+
+`src/kyrin/actions/` now contains `ActionPolicy`, `ActionGate`, and structured
+request/notice/result/feedback types. The gate consumes command events but
+only a final `CommandResolution` may produce an `ActionRequest`. Partial
+candidates and command response requests cannot authorize work. The policy
+defaults to denying everything and has explicit allowed app identifiers for
+`OPEN_APP` and `OPEN_CHAT`. An optional per-command-kind confirmation rule
+returns a notice until an explicit trusted confirmation decision arrives.
+
+The gate deduplicates resolutions by `(stream_id, segment_id)` within one
+coordinator/gate lifetime. Pending confirmations and issued requests are
+bounded by `max_pending`; reaching the limit returns a visible busy notice.
+No shell command or OS call is derived from recognized speech here.
+
+`ActionResult` must match an outstanding request. Only a successful result
+that explicitly reports the observed active app updates `VerifiedContext`;
+failure leaves prior context intact. `ActionFeedback` carries structured
+success/failure and the requested text/voice channel for a later localized
+presenter. Unit tests use synthetic results, not actual desktop actions.
+No executor is connected to the live voice diagnostic. No confirmation
+interface, UI, or TTS is connected. See
+`docs/actions/ACTION_GATE_FA.md` for the rules and limitations.
+
+The microphone diagnostic's `commands` mode now feeds live command events to
+the gate and prints allowed or blocked dry-run decisions. Its small diagnostic
+allowlist covers `telegram` and `browser` for app opening and `telegram` for
+chat opening. It records no synthetic success, so it does not invent verified
+application context. A real three-phrase microphone run observed an authorized
+dry-run request for "open Telegram", no action for "do not open Telegram",
+and a clarification request for "open Ali's chat". No app launched in that run.
+
+---
+
+## 32. Limited Linux App Executor
+
+`ActionExecutor` is a platform-neutral request/result protocol. Its first
+implementation, `LinuxDesktopEntryExecutor`, handles only `OPEN_APP` on Linux.
+Trusted configuration maps internal app IDs to absolute `.desktop` file paths;
+the executor invokes `gio launch` with separate arguments and no shell. Other
+commands or unconfigured apps return controlled errors. Windows, macOS, and
+Android will need separate adapters behind the same contract.
+
+`ActionOutcome` distinguishes `CONFIRMED`, `LAUNCH_ACCEPTED`, `UNKNOWN`, and
+`FAILED`. A zero exit status from the Linux launcher means only
+`LAUNCH_ACCEPTED`, not that a window opened or became active. The executor
+never fabricates `observed_active_app`; the gate updates verified context only
+from an independently confirmed active app. A new app launch that is accepted
+or uncertain invalidates the previously verified active app. See
+`docs/actions/OS_EXECUTOR_FA.md` for behavior and limitations.
+
+Focused deterministic tests and static checks pass. A manual launch request
+for the installed Telegram desktop entry returned `LAUNCH_ACCEPTED` twice;
+the first visual check was inconclusive because Telegram was already open.
+After closing Telegram, the user confirmed it opened again on the second
+request. This is a human observation on one Linux desktop, not an automatic
+foreground-app verification mechanism. No live voice command is yet connected
+to this executor.
+
+---
+
+## 33. Chat-App Context Resolution
+
+`CommandContext` separates the last app mentioned in final dialogue from a
+fresh, optional `observed_active_app` supplied for the current transcript
+update. `CommandCoordinator` retains the dialogue reference across silence
+and STT stream restarts; partial text never changes it. The interpreter uses
+an explicitly named app first. For an omitted chat app, `ContextResolver`
+uses a supported fresh foreground observation if dialogue history does not
+conflict. If the last referenced app is Telegram but the newly observed app
+is WhatsApp, the demo interpreter asks which one the user means. With no
+fresh observation, dialogue history alone cannot authorize an implicit app.
+
+This is a language-neutral resolution boundary with limited Persian demo
+phrases; it does not read the actual foreground app or search contacts.
+The dry-run microphone tool supplies no foreground observation. An adapter
+for each supported platform must supply current app evidence where possible;
+otherwise the safe path is a clarification question. No `OPEN_CHAT` desktop
+executor exists yet. Focused tests cover conflict, explicit choice, missing
+observation, partial correction, and context surviving an STT restart.
