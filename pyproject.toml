@@ -24,6 +24,9 @@ dependencies = [
 
 
 [project.optional-dependencies]
+stt-vosk = [
+    "vosk>=0.3.45,<0.4",
+]
 dev = [
     "coverage>=7.0",
     "mypy>=2.0",

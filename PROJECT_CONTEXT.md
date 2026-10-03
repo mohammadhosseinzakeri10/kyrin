@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-02.
+> Updated: 2026-10-03.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -30,8 +30,9 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, and a bounded
   capture-to-processing pipeline.
-- **Current next direction:** design the replaceable offline streaming STT
-  contract and its integration with the continuous audio pipeline.
+- **Current next direction:** validate the new live VAD/STT composition with a
+  real microphone and continue multilingual STT evaluation before selecting a
+  production default.
 
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
 is to understand voice, vision, and text and interact naturally with the
@@ -88,8 +89,10 @@ Semantic command/turn decisions (planned)
 ```
 
 `SampleRateConverter` and `AudioFramer` are separate downstream components.
-The capture-to-activity pipeline exists, but semantic turn decisions and STT
-do not. The desktop application has not yet been wired to run the pipeline.
+The capture-to-activity pipeline, replaceable STT contract, optional Vosk
+adapter, and backend-independent live VAD/STT composition exist. The desktop
+application has not yet been wired to run them; semantic turn decisions are
+not implemented.
 A downstream engine that accepts variable-size chunks may bypass `AudioFramer`.
 
 ### Architectural boundary
@@ -436,6 +439,8 @@ Current automated test areas include:
 - `ContinuousAudioPipeline`
 - `SileroVad`
 - `SpeechActivityMonitor`
+- replaceable STT contract and transcript/device value types
+- optional Vosk adapter behavior and lifecycle
 
 Current behaviors covered include:
 
@@ -479,10 +484,10 @@ ruff check src tests scripts
 → All checks passed!
 
 mypy src tests
-→ Success: no issues found in 28 source files
+→ Success: no issues found in 36 source files
 
 pytest -q
-→ 72 passed (full suite requires access to the system audio service)
+→ 90 passed (full suite requires access to the system audio service)
 ```
 
 **Status:** CONFIRMED.
@@ -650,44 +655,53 @@ KYRIN/
 ├── src/
 │   └── kyrin/
 │       ├── __init__.py
-│       └── audio/
-│           ├── audio_data.py
-│           ├── audio_errors.py
-│           ├── audio_framer.py
-│           ├── audio_format.py
-│           ├── audio_input.py
-│           ├── audio_capture_queue.py
-│           ├── continuous_audio_pipeline.py
-│           ├── sample_rate_converter.py
-│           ├── activity/
-│           │   ├── voice_activity_detector.py
-│           │   ├── silero_vad.py
-│           │   ├── speech_activity_monitor.py
-│           │   └── models/
-│           │       └── silero_vad.onnx
-│           ├── microphone/
-│           │   ├── input.py
-│           │   └── errors.py
+│       ├── audio/
+│       │   ├── audio_data.py
+│       │   ├── audio_errors.py
+│       │   ├── audio_framer.py
+│       │   ├── audio_format.py
+│       │   ├── audio_input.py
+│       │   ├── audio_capture_queue.py
+│       │   ├── continuous_audio_pipeline.py
+│       │   ├── sample_rate_converter.py
+│       │   ├── activity/
+│       │   │   ├── voice_activity_detector.py
+│       │   │   ├── silero_vad.py
+│       │   │   ├── speech_activity_monitor.py
+│       │   │   └── models/
+│       │   │       └── silero_vad.onnx
+│       │   └── microphone/
+│       │       ├── input.py
+│       │       └── errors.py
+│       └── stt/
+│           ├── capabilities.py
+│           ├── contracts.py
+│           ├── device.py
+│           ├── errors.py
+│           └── transcript.py
 └── tests/
     ├── test_package.py
-    └── audio/
-        ├── test_audio_data.py
-        ├── test_audio_framer.py
-        ├── test_audio_format.py
-        ├── test_sample_rate_converter.py
-        ├── activity/
-        │   ├── test_silero_vad.py
-        │   └── test_speech_activity_monitor.py
-        └── microphone/
-            ├── test_input.py
-            └── test_errors.py
+    ├── audio/
+    │   ├── test_audio_data.py
+    │   ├── test_audio_framer.py
+    │   ├── test_audio_format.py
+    │   ├── test_sample_rate_converter.py
+    │   ├── activity/
+    │   │   ├── test_silero_vad.py
+    │   │   └── test_speech_activity_monitor.py
+    │   └── microphone/
+    │       ├── test_input.py
+    │       └── test_errors.py
+    └── stt/
+        └── test_contracts.py
 ```
 
 The tree lists representative files. Shared audio contracts and processing
 remain in `kyrin.audio`. Microphone-specific acquisition and errors live in
 `kyrin.audio.microphone`; VAD, speech-activity monitoring, and the bundled
 Silero model live in `kyrin.audio.activity`. This leaves room for a future
-file-based source without tying processing to the microphone.
+file-based source without tying processing to the microphone. STT contracts
+are isolated in `kyrin.stt`; no backend library is imported there.
 
 ---
 
@@ -998,6 +1012,11 @@ SileroVad (bundled offline ONNX model)
 SpeechActivityMonitor (continuous, smoothed VAD observations)
 AudioCaptureQueue (bounded capture worker and explicit overflow error)
 ContinuousAudioPipeline (capture-to-activity composition)
+SpeechToTextEngine / SpeechToTextSession (replaceable STT contracts)
+TranscriptUpdate and CPU/GPU device preferences
+VoskEngine / VoskSession (optional CPU-only experimental STT adapter)
+AudioBacklog (duration-bounded pending STT audio and wait/ready notices)
+LiveSpeechPipeline (one capture, independent VAD/STT workers)
 Audio error hierarchy
 hardware diagnostic scripts
 unit-test foundation
@@ -1008,24 +1027,30 @@ Latest quality state:
 ```text
 Ruff   -> passing
 Mypy   -> passing
-Pytest -> 72 passing tests (Linux development environment)
+Pytest -> 90 passing tests (Linux development environment)
 ```
 
 ### Current next step
 
-Study and design:
+Evaluate and implement:
 
 ```text
-Replaceable offline streaming STT contract and pipeline integration
+Real-device validation of live VAD/STT integration, plus broader multilingual
+and command-oriented STT evaluation
 ```
 
-before selecting an STT engine or implementing semantic command decisions.
+The standalone Vosk adapter works with a locally supplied model. The live
+pipeline accepts any engine implementing the STT contract, including Vosk;
+it is not yet selected as the production default.
+Selection still requires measured multilingual accuracy, command-relevant
+partial-result latency, CPU/GPU use, and offline packaging. Semantic command
+decisions remain later.
 Additional audio-format conversions should be implemented only when a
 downstream requirement is known.
 
 ### Current blocker
 
-No known blocker prevents designing streaming STT integration. The current
+No known blocker prevents evaluating offline STT engines. The current
 pipeline was tested with fake audio sources and a mocked microphone stream,
 not with a long-running real microphone session. Real-speech quality,
 end-to-end latency, recovery after device failure, and packaging on other
@@ -1115,3 +1140,119 @@ restarts. Tests use deterministic fake audio sources and a mocked microphone
 stream. Queue capacity, real microphone latency, and recovery behavior still
 need validation on target systems. A bounded queue protects short processing
 bursts but cannot fix sustained processing slower than audio arrival.
+
+---
+
+## 26. Replaceable Speech-to-Text Contract
+
+The core `kyrin.stt` modules contain backend-independent contracts and value
+types. An optional concrete adapter lives under `kyrin.stt.backends`. No model
+weights, runtime download, or microphone logic have been added to STT.
+
+`SpeechToTextEngine.capabilities` reports the configured model's supported
+devices, known languages (if enumerable), partial-update support, and
+automatic language-detection support. Declared GPU support does not guarantee
+that a usable GPU exists on the current machine. Language coverage does not
+guarantee accuracy, and an unknown language list never means all languages.
+
+`SpeechToTextEngine.open_session(options)` creates one
+`SpeechToTextSession` for one ordered audio stream. The session declares its
+required `AudioFormat`, its actual CPU or GPU device, and whether it can emit
+partial updates. It accepts `AudioData` chunks, returns newly available
+`TranscriptUpdate` values, flushes pending results through `finish()` when the
+stream truly ends, and releases session resources through `close()`. The engine
+also has `close()` for its loaded model. Pauses within a continuing stream do
+not call `finish()` and do not clear conversation memory.
+
+Each transcript update carries a segment ID, text, `PARTIAL` or `FINAL`
+status, and an optional language. A later update for the same segment may
+replace partial text. `FINAL` seals that text segment, not the conversation.
+No confidence score or timing field is required because candidate engines
+have not yet been validated to provide those values consistently.
+
+`SpeechToTextOptions` requests `AUTO`, `CPU`, or `GPU` and may include a language
+hint. An adapter must honor an explicit device choice or raise
+`DeviceUnavailableError`; the actual choice made for `AUTO` is reported by the
+session. The contract does not prescribe a particular GPU API, model path, or
+sample rate. Tests use fake partial/GPU and final-only/CPU engines to verify
+that one consumer can use both through the same contract.
+
+`ContinuousAudioPipeline` remains an activity-only API. `LiveSpeechPipeline`
+adds a separate STT path, so engines receive their own requested sample rate
+without being forced through Silero's fixed windows. STT inference runs on its
+own worker. Engine selection, multilingual quality, latency, device
+availability, offline model packaging, and integration with file input remain
+OPEN.
+
+---
+
+## 27. Offline STT Evaluation Preparation
+
+`docs/stt/STT_EVALUATION_FA.md` records the candidate shortlist, comparable
+measurements, and observed limitations of the current development machine.
+This is an evaluation plan, not an engine-selection decision or a claim of
+measured recognition quality. The repository contains no STT model or labeled
+speech benchmark yet. The local NVIDIA GPU is visible via PCI, but
+`nvidia-smi` cannot communicate with its driver; GPU STT results cannot be
+reported from this environment until that is resolved. No runtime dependency
+or application behavior changed during this preparation.
+
+The subsequent CPU-only smoke test is documented in
+`docs/stt/STT_CPU_SMOKE_2026-10-03_FA.md`. It used 12 public Persian read-speech
+clips and disposable models/dependencies under `/tmp`, without changing
+KYRIN's runtime dependencies or code. Vosk small-fa-0.42 produced streaming
+partials and a 3.0% corpus CER on that small subset; faster-whisper multilingual
+base/int8 produced 32.5%; small/int8 produced a provisional 17.0%, pending
+verification of its tokenizer after a network TLS error. These numbers cannot
+establish multilingual or conversational suitability. The subsequent optional
+Vosk adapter does not make Vosk the production default, and it is not integrated
+with live capture. A labeled multilingual command corpus and meaningful
+live-command latency measurement remain necessary before selection.
+
+---
+
+## 28. Experimental Vosk Adapter
+
+`src/kyrin/stt/backends/vosk.py` implements the portable STT engine/session
+contracts for a locally provided Vosk model. `pyproject.toml` exposes Vosk as
+the optional `stt-vosk` dependency; the default project install is unchanged.
+The adapter accepts mono INT16 PCM at the configured model sample rate, emits
+revisable partial updates and final segment updates, and never ends a session
+merely because speech pauses. It supports CPU only and one configured language
+per model instance. A GPU request or a mismatched language hint fails
+explicitly. It does not download a model or access microphone hardware.
+
+The adapter's design and use are documented in `docs/stt/VOSK_ADAPTER_FA.md`.
+Its deterministic tests use a fake Vosk API. A separate run with the actual
+Persian model and a public WAV produced partials and a correct final transcript
+while network connection attempts were blocked. Live microphone throughput,
+multilingual switching, and production model selection remain unvalidated.
+
+---
+
+## 29. Live VAD/STT Composition and Backpressure
+
+`LiveSpeechPipeline` opens one `AudioInput` source through `AudioCaptureQueue`.
+A VAD worker sends each source chunk to `AudioBacklog` before independently
+resampling and framing it for the existing `SpeechActivityMonitor`. An STT
+worker consumes the same ordered source chunks from the backlog and resamples
+them to the session's declared input format. Only confirmed activity
+transitions are emitted to the caller; every VAD window is still examined.
+Partial and final transcript updates are also emitted. A speech pause never
+calls `session.finish()`; only natural source completion does. Exiting the
+context early stops the source and closes the session.
+
+The STT backlog includes audio currently under inference. Its default warning,
+recovery, and hard limits are 1000, 250, and 5000 ms of source PCM. It emits
+`BacklogNotice(WAIT)` once when the warning threshold is crossed and
+`BacklogNotice(READY)` once after processing catches up. The UI must decide
+how to display those notices; no UI is wired yet. A hard limit raises
+`AudioQueueOverflowError` rather than silently dropping speech. Capture
+itself retains its separate chunk-count limit, so unusually slow VAD or an
+unresponsive event consumer may still trigger a capture overflow. These
+thresholds are provisional and must be measured on real devices.
+
+Deterministic tests cover one capture and ordered delivery to both branches,
+independent sample rates, warning/recovery, explicit sustained-overflow
+failure, early stop, and continued STT session across a speech pause. This
+does not establish real-time latency or multilingual recognition quality.
