@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-03.
+> Updated: 2026-10-05.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -30,9 +30,10 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** design a platform adapter for fresh active-app
-  observations where available, and localized response presentation before
-  connecting live voice commands to the action executor. Windows, macOS,
+- **Current next direction:** validate the GNOME active-app prototype with real
+  windows and design localized response presentation before
+  connecting live voice commands to the action executor. A GNOME 50 prototype
+  now exists but needs validation with real foreground windows. Windows, macOS,
   and Android adapters remain future work.
   Device-specific stop behavior and multilingual STT quality still require
   separate evaluation.
@@ -1037,9 +1038,9 @@ the hardware-dependent tests; they need a normal audio environment.
 Evaluate before wiring the OS executor into the live application:
 
 ```text
-Design a fresh active-app observation adapter and a localized response
-presenter; keep live voice action execution disabled until the app state and
-feedback can be handled honestly
+Validate the GNOME active-app prototype with real foreground windows and
+design a localized response presenter; keep live voice action execution
+disabled until the app state and feedback can be handled honestly
 ```
 
 The standalone Vosk adapter works with a locally supplied model. The live
@@ -1421,8 +1422,32 @@ fresh observation, dialogue history alone cannot authorize an implicit app.
 
 This is a language-neutral resolution boundary with limited Persian demo
 phrases; it does not read the actual foreground app or search contacts.
-The dry-run microphone tool supplies no foreground observation. An adapter
-for each supported platform must supply current app evidence where possible;
-otherwise the safe path is a clarification question. No `OPEN_CHAT` desktop
+The dry-run microphone tool supplies no foreground observation. A GNOME
+prototype now exists but needs live focus validation; other supported
+platforms need their own adapters where possible. Otherwise the safe path is
+a clarification question. No `OPEN_CHAT` desktop
 executor exists yet. Focused tests cover conflict, explicit choice, missing
 observation, partial correction, and context surviving an STT restart.
+
+---
+
+## 34. GNOME Active-App Observation Prototype
+
+`kyrin.desktop.active_app.ActiveAppObserver` is a minimal cross-platform contract for a
+fresh active-app observation. `GnomeShellActiveAppObserver` queries a tiny GNOME
+Shell extension over the existing `org.gnome.Shell` session D-Bus connection.
+The extension returns only the focused app's desktop ID, never window titles or
+screen content. The Python adapter maps only configured external IDs to KYRIN
+app IDs; an absent extension, missing focus, unknown app, malformed response,
+or timeout returns `None`. It does not cache observations or execute actions.
+No new Python dependency was added. The diagnostic under `scripts/desktop/`
+prints raw desktop IDs as focus changes.
+
+Seven focused deterministic tests, Ruff, and Mypy passed. A separate headless
+GNOME Shell 50 session loaded the extension and returned `unknown` when no
+window was focused. An attempt to focus Calculator in that headless session
+also returned `unknown`, so nonempty app-ID reporting has not been validated.
+The current live Wayland session did not recognize the
+newly installed extension without a new login, so an in-session Telegram/Chrome
+focus-switch test has **not** passed. The temporary user installation was
+removed after this attempt. See `docs/desktop/ACTIVE_APP_OBSERVATION.md`.

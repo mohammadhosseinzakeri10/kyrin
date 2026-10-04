@@ -1,0 +1,6 @@
+{
+  "uuid": "active-app@kyrin.local",
+  "name": "KYRIN Active App",
+  "description": "Expose only the focused application's desktop ID to KYRIN.",
+  "shell-version": ["50"]
+}
