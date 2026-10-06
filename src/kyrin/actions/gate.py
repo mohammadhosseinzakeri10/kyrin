@@ -131,6 +131,7 @@ class ActionGate:
             else ResponseChannel.TEXT_AND_VOICE,
             result.error_code,
             request.language,
+            result.observed_active_app,
         )
 
     @property

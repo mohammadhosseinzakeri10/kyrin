@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from kyrin.actions.models import ActionFeedback, ActionNotice
+from kyrin.actions.models import ActionFeedback, ActionNotice, ActionOutcome
 from kyrin.commands.models import (
     CommandKind,
     ResponseChannel,
@@ -32,6 +32,7 @@ _TEXT: dict[str, dict[str, str]] = {
             "نادرست، ادامه ندادم."
         ),
         "confirmed": "انجام شد.",
+        "confirmed_active_app": "برنامهٔ موردنظر اکنون فعال است.",
         "launch_accepted": (
             "درخواست انجام کار پذیرفته شد؛ نتیجهٔ آن هنوز تأیید نشده است."
         ),
@@ -79,6 +80,7 @@ _TEXT: dict[str, dict[str, str]] = {
             "before opening the chat."
         ),
         "confirmed": "Done.",
+        "confirmed_active_app": "The requested app is now active.",
         "launch_accepted": (
             "The request was accepted; completion has not been confirmed."
         ),
@@ -151,12 +153,19 @@ class ResponsePresenter:
             stream_id, segment_id = None, None
         else:
             # error_code is diagnostic data; never expose it as user text.
-            text = (
-                messages["unsupported_chat"]
-                if event.error_code == "unsupported_action"
+            if (
+                event.outcome is ActionOutcome.CONFIRMED
+                and event.intent.kind is CommandKind.OPEN_APP
+                and event.observed_active_app == event.intent.target
+            ):
+                text = messages["confirmed_active_app"]
+            elif (
+                event.error_code == "unsupported_action"
                 and event.intent.kind is CommandKind.OPEN_CHAT
-                else messages[event.outcome.value]
-            )
+            ):
+                text = messages["unsupported_chat"]
+            else:
+                text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id
         return PresentedResponse(stream_id, segment_id, text, event.channel, language)
 

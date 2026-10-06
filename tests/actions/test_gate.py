@@ -46,7 +46,11 @@ def test_candidate_never_issues_action_and_final_issues_once() -> None:
     assert gate.record_result(
         ActionResult(key, ActionOutcome.CONFIRMED, "telegram")
     ) == ActionFeedback(
-        key, TELEGRAM, ActionOutcome.CONFIRMED, ResponseChannel.TEXT_ONLY
+        key,
+        TELEGRAM,
+        ActionOutcome.CONFIRMED,
+        ResponseChannel.TEXT_ONLY,
+        observed_active_app="telegram",
     )
     assert gate.verified_context == VerifiedContext(active_app="telegram")
     with pytest.raises(ValueError, match="outstanding"):

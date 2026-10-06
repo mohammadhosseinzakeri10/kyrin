@@ -1,4 +1,5 @@
 from threading import Event, Thread
+from time import sleep
 from types import TracebackType
 
 import pytest
@@ -88,6 +89,19 @@ class BlockingRawInputStream(FakeRawInputStream):
     def abort(self) -> None:
         BlockingRawInputStream.aborted = True
         BlockingRawInputStream.released.set()
+
+
+class ShortReadRawInputStream(FakeRawInputStream):
+    entered = Event()
+    aborted = False
+
+    def read(self, frames: int) -> tuple[bytes, bool]:
+        ShortReadRawInputStream.entered.set()
+        sleep(0.03)
+        return b"fake audio", False
+
+    def abort(self) -> None:
+        ShortReadRawInputStream.aborted = True
 
 
 def test_capture_yields_audio_data(monkeypatch: MonkeyPatch) -> None:
@@ -286,6 +300,32 @@ def test_stop_capture_interrupts_a_pending_read(monkeypatch: MonkeyPatch) -> Non
     assert finished.is_set()
     assert BlockingRawInputStream.aborted
     assert not worker.is_alive()
+
+
+def test_stop_capture_allows_short_read_to_finish_without_abort(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ShortReadRawInputStream.entered.clear()
+    ShortReadRawInputStream.aborted = False
+    monkeypatch.setattr(
+        "kyrin.audio.microphone.input.sd.RawInputStream", ShortReadRawInputStream
+    )
+    microphone = MicrophoneInput(5, AudioFormat(16000, 1, AudioSampleFormat.INT16), 512)
+    finished = Event()
+
+    def capture_one() -> None:
+        assert list(microphone.capture()) == []
+        finished.set()
+
+    worker = Thread(target=capture_one)
+    worker.start()
+    assert ShortReadRawInputStream.entered.wait(1)
+
+    microphone.stop_capture()
+    worker.join(1)
+
+    assert finished.is_set()
+    assert not ShortReadRawInputStream.aborted
 
 
 def test_stopped_microphone_cannot_silently_restart() -> None:

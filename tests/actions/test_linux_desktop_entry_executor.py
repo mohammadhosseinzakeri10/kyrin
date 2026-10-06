@@ -46,6 +46,7 @@ def test_known_app_launches_only_configured_desktop_entry(
                 "stderr": subprocess.DEVNULL,
                 "check": False,
                 "timeout": 1.5,
+                "start_new_session": True,
             },
         )
     ]

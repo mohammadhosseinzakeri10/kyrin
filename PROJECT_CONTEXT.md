@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-05.
+> Updated: 2026-10-06.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -34,8 +34,10 @@
   installed Whisper `small` CPU adapter while keeping Vosk replaceable. This is
   a development choice, not a packaged default or a general accuracy claim.
   The command diagnostic now prints localized responses and can speak them
-  through an offline Ubuntu adapter. Desktop actions remain dry-run in that
-  diagnostic. Model packaging, multilingual setup, product UI, broader live
+  through an offline Ubuntu adapter. Desktop actions remain dry-run by default
+  in that diagnostic; an explicit allowlisted Ubuntu open-app launch path is
+  now available and has passed a local microphone-to-desktop smoke test.
+  Model packaging, multilingual setup, product UI, broader live
   validation, and Windows/macOS/mobile adapters remain future work.
 
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
@@ -88,8 +90,9 @@ Both branches → live events → command decision layer (implemented, dry-run)
 The capture-to-activity pipeline, replaceable STT contract, optional Vosk
 adapter, and backend-independent live VAD/STT composition exist. The desktop
 application has not yet been wired to run them. A separate command coordinator
-now accepts transcript updates. A separate Linux app launcher exists, but is
-not yet wired to the live microphone diagnostic or application runtime.
+now accepts transcript updates. The Linux app launcher is available to the
+live microphone diagnostic only through explicit execution and app-binding
+flags; it is not wired to an application runtime.
 A downstream engine that accepts variable-size chunks may bypass `AudioFramer`.
 
 ### Architectural boundary
@@ -1118,8 +1121,9 @@ Do not preserve stale documentation merely for historical consistency.
 ## 25. Continuous Capture and Processing Pipeline
 
 `AudioInput` now includes `stop_capture()`, which may be called from another
-thread. `MicrophoneInput.stop_capture()` sets a stop signal and aborts an active
-blocking `RawInputStream.read()`. A stopped `MicrophoneInput` is one-use; create
+thread. `MicrophoneInput.stop_capture()` sets a stop signal, briefly allows the
+current read to finish, and aborts the active stream only if capture does not
+end promptly. A stopped `MicrophoneInput` is one-use; create
 a new instance for a restarted capture session. Its hardware stream remains
 owned by the capture thread and is never opened in `__init__`.
 
@@ -1882,3 +1886,77 @@ unsupported chat step gives a specific localized notice after an earlier app
 step. The microphone diagnostic prints this plan and per-step dry-run gate
 decisions, but still executes no desktop actions. Focused tests use a fake
 executor. See `docs/commands/MULTI_STEP_COMMANDS.md`.
+
+## 51. Controlled Ubuntu Live Open-App Dispatch
+
+The owner approved a bounded microphone-to-application integration after
+reviewing the existing dry-run command and action layers. The live diagnostic
+still defaults to dry-run. With `--mode commands`, `--execute-actions`, and
+explicit `--launch-app KYRIN_APP_ID=/absolute/path.desktop` bindings, a final
+command decision may launch only a bound app through the existing
+`LinuxDesktopEntryExecutor`. The action policy uses those same app IDs as its
+allowlist. No dependency or core action contract changed.
+
+Single-step finals pass through `ActionGate`, `ActionExecutor`, and
+`record_result`; ordered plans pass through `ActionPlanRunner`. Partial
+transcripts never reach execution. The diagnostic prints localized action
+feedback, preserving the distinction between `LAUNCH_ACCEPTED` and confirmed
+completion. Chat and all other desktop actions remain unsupported. Focused
+tests cover final-only execution, correction from a partial open command to a
+negated final, unknown text, allowlist denial, duplicate suppression, and
+ordered-plan stopping behavior without touching desktop hardware. In an owner
+validated microphone smoke test, Whisper finalized `Open Telegram.` and the
+launcher returned `LAUNCH_ACCEPTED`; the owner confirmed the Telegram window
+opened. This is a single local observation, not a general STT accuracy claim.
+The initial 45-second run then failed while stopping microphone capture. A
+short graceful-read wait with abort fallback was added; a later five-second VAD
+run and eight-second Whisper run both ended normally with exit code zero. The
+full voice-to-action run was repeated during the queued-dispatch work below. See
+`docs/actions/LIVE_OPEN_APP_INTEGRATION.md`.
+
+## 52. Bounded Ordered Action Worker
+
+The owner approved moving live OS actions off the microphone event consumer
+before making KYRIN a persistent listener. In explicit execution mode, final
+single-step decisions and ordered plans enter a small bounded FIFO. One
+`QueuedActionDispatcher` worker owns the existing `ActionGate` and Linux
+executor, preserving their order and avoiding shared mutable policy state.
+Partial transcripts and no-command finals are not enqueued. A full queue
+returns a localized `BUSY` notice; on shutdown, commands that have not started
+receive `CANCELLED` notices, and an active action gets bounded completion time.
+Dry-run mode remains synchronous and never invokes an executor. No new
+dependency or platform action was added. Focused tests cover blocking executor
+behavior, order, capacity, cancellation, and an ordered plan. A 25-second live
+Whisper-to-queued-action run finalized `Open Telegram.`, produced
+`LAUNCH_ACCEPTED`, and exited with code zero. The owner confirmed Telegram
+opened or became active. Automated window verification and broader latency
+measurements remain open. See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`.
+
+## 53. Fresh Foreground Confirmation After App Launch
+
+An optional `ObservedAppExecutor` wraps the platform launcher only when an
+exact GNOME active-app binding is configured. After a `LAUNCH_ACCEPTED` result,
+it makes a small bounded set of fresh foreground observations. A match with
+the requested internal app ID produces `CONFIRMED` and carries
+`observed_active_app` through `ActionGate` into user feedback; otherwise the
+accepted result is unchanged. Only feedback with a matching observed app says
+the requested app is now active. This confirms foreground state at observation
+time, not whether the launcher created a new window or caused focus to change.
+No new dependency was added. Unit tests cover matching, delayed, missing, and
+mismatched focus. A 30-second live Whisper command finalized `Open telegram.`,
+reported `CONFIRMED`, and exited cleanly. The owner confirmed Telegram became
+active. See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`.
+
+## 54. Consecutive Live Commands and App Process Lifetime
+
+A 45-second live microphone test recognized and dispatched four separate final
+commands in one listening session: Telegram, browser, Telegram, browser. The
+owner confirmed the same foreground sequence. The first two launches returned
+`LAUNCH_ACCEPTED`; fresh observations confirmed the later two. Listening did
+not stop after the first action. The owner also noticed Chrome closing at the
+end of the diagnostic. A local reproduction showed Chrome running in the
+diagnostic's process session and exiting when that session ended. Starting
+`gio launch` in a separate process session kept Chrome open after the launching
+command exited. The Linux executor now requests a new session for the launcher;
+focused automated tests assert that invocation. This does not change action
+result semantics or claim portability beyond the observed Ubuntu/GNOME setup.

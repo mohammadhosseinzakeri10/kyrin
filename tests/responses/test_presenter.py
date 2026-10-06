@@ -119,6 +119,22 @@ def test_confirmed_action_has_a_distinct_message() -> None:
     assert ResponsePresenter("fa").present(feedback).text == "انجام شد."
 
 
+def test_observed_active_app_has_a_precise_message() -> None:
+    feedback = ActionFeedback(
+        KEY,
+        TELEGRAM,
+        ActionOutcome.CONFIRMED,
+        ResponseChannel.TEXT_ONLY,
+        observed_active_app="telegram",
+    )
+    assert ResponsePresenter("fa").present(feedback).text == (
+        "برنامهٔ موردنظر اکنون فعال است."
+    )
+    assert ResponsePresenter("en").present(feedback).text == (
+        "The requested app is now active."
+    )
+
+
 @pytest.mark.parametrize("outcome", (ActionOutcome.FAILED, ActionOutcome.UNKNOWN))
 def test_action_errors_do_not_expose_diagnostic_codes(outcome: ActionOutcome) -> None:
     feedback = ActionFeedback(

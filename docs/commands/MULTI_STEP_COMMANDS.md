@@ -43,12 +43,13 @@ require a fresh foreground-app observation immediately before a supported
 `OPEN_CHAT` step. Without an observer, or if focus differs, it stops. This
 avoids navigating the wrong application even if an earlier launch succeeded.
 
-The live microphone diagnostic remains a **dry run**: it prints the plan and
-per-step gate decisions but never calls an OS executor. `ActionPlanRunner` is
-tested using a fake executor; no live microphone-to-desktop execution is wired
-yet. The separate Ubuntu launcher remains available for a later controlled
-integration step. The selected experimental Kitten voice is also not wired
-into the product.
+The live microphone diagnostic remains a **dry run by default**. An explicit
+`--execute-actions` flag plus `--launch-app` bindings now connect final plan
+steps to the Ubuntu launcher. Only bound `OPEN_APP` steps can execute; chat
+steps still return an unsupported notice. `ActionPlanRunner` is tested using a
+fake executor, and the diagnostic's action dispatch is tested without hardware.
+See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`. The selected experimental
+Kitten voice is not wired into the product.
 
 ## Deliberate limits
 

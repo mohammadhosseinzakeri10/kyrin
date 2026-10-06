@@ -101,3 +101,4 @@ class ActionFeedback:
     channel: ResponseChannel
     error_code: str | None = None
     language: str | None = None
+    observed_active_app: str | None = None

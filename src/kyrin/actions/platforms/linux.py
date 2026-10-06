@@ -54,6 +54,7 @@ class LinuxDesktopEntryExecutor:
                 stderr=subprocess.DEVNULL,
                 check=False,
                 timeout=self._timeout_s,
+                start_new_session=True,
             )
         except subprocess.TimeoutExpired:
             return ActionResult(

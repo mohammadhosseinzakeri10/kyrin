@@ -27,6 +27,7 @@ class MicrophoneInput:
         self.audio_format = audio_format
         self.frames_per_chunk = frames_per_chunk
         self._stop_requested = Event()
+        self._capture_finished = Event()
         self._stream_lock = Lock()
         self._active_stream: _AbortableStream | None = None
 
@@ -35,6 +36,11 @@ class MicrophoneInput:
         if self._stop_requested.is_set():
             return
         self._stop_requested.set()
+        with self._stream_lock:
+            if self._active_stream is None:
+                return
+        if self._capture_finished.wait(0.15):
+            return
         with self._stream_lock:
             if self._active_stream is not None:
                 try:
@@ -45,6 +51,7 @@ class MicrophoneInput:
     def capture(self) -> Iterator[AudioData]:
         if self._stop_requested.is_set():
             raise MicrophoneError("Stopped microphone input cannot be restarted")
+        self._capture_finished.clear()
         try:
             with sd.RawInputStream(
                 device=self.device,
@@ -54,34 +61,34 @@ class MicrophoneInput:
             ) as stream:
                 with self._stream_lock:
                     self._active_stream = stream
-                try:
-                    while not self._stop_requested.is_set():
-                        try:
-                            data, overflowed = stream.read(self.frames_per_chunk)
-                        except sd.PortAudioError:
-                            if self._stop_requested.is_set():
-                                return
-                            raise
-
+                while not self._stop_requested.is_set():
+                    try:
+                        data, overflowed = stream.read(self.frames_per_chunk)
+                    except sd.PortAudioError:
                         if self._stop_requested.is_set():
                             return
+                        raise
 
-                        if overflowed:
-                            raise MicrophoneOverflowError("Microphone input overflowed")
+                    if self._stop_requested.is_set():
+                        return
 
-                        audio_bytes = bytes(data)
+                    if overflowed:
+                        raise MicrophoneOverflowError("Microphone input overflowed")
 
-                        audio_chunk = AudioData(
-                            data=audio_bytes,
-                            audio_format=self.audio_format,
-                        )
+                    audio_bytes = bytes(data)
 
-                        yield audio_chunk
-                finally:
-                    with self._stream_lock:
-                        self._active_stream = None
+                    audio_chunk = AudioData(
+                        data=audio_bytes,
+                        audio_format=self.audio_format,
+                    )
+
+                    yield audio_chunk
 
         except sd.PortAudioError as exc:
             if self._stop_requested.is_set():
                 return
             raise MicrophoneError("Microphone input failed") from exc
+        finally:
+            with self._stream_lock:
+                self._active_stream = None
+            self._capture_finished.set()
