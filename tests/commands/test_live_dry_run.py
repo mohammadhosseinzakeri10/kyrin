@@ -103,7 +103,7 @@ def test_live_partial_correction_retracts_without_executing_anything() -> None:
     assert decisions == [
         CommandCandidateUpdate(0, CommandIntent(CommandKind.OPEN_APP, "telegram")),
         CommandCandidateUpdate(0, None),
-        CommandResolution(0, None),
+        CommandResolution(0, None, language="fa"),
     ]
     assert session.accepted == 3
     assert session.closed

@@ -8,7 +8,7 @@ import pytest
 from kyrin.audio.activity.speech_activity_monitor import SpeechActivityFrame
 from kyrin.audio.audio_backlog import AudioBacklog, BacklogNotice, BacklogState
 from kyrin.audio.audio_data import AudioData
-from kyrin.audio.audio_errors import AudioQueueOverflowError
+from kyrin.audio.audio_errors import AudioCaptureStopError, AudioQueueOverflowError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.live_speech_pipeline import LiveSpeechPipeline
 from kyrin.stt.capabilities import SpeechToTextCapabilities
@@ -221,6 +221,56 @@ def test_early_stop_releases_capture_and_closes_stt_without_finishing() -> None:
     assert not session.finished
 
 
+def test_external_stop_ends_stream_and_releases_capture() -> None:
+    class WaitingSource(Source):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.released = Event()
+
+        def capture(self) -> Iterator[AudioData]:
+            yield AudioData(bytes(320), FORMAT)
+            assert self.released.wait(2)
+
+        def stop_capture(self) -> None:
+            super().stop_capture()
+            self.released.set()
+
+    source = WaitingSource()
+    session = Session()
+    pipeline = LiveSpeechPipeline(
+        source,
+        FORMAT,
+        Detector([True]),
+        Engine(session),
+        start_confirm_ms=1,
+    )
+
+    with pipeline.open() as stream:
+        assert isinstance(next(stream), SpeechActivityFrame)
+        pipeline.stop()
+        assert list(stream) == []
+
+    assert session.closed
+    assert source.stop_count >= 1
+
+
+def test_failed_stt_session_close_is_unsafe_for_recovery() -> None:
+    class BrokenSession(Session):
+        def close(self) -> None:
+            raise RuntimeError("native backend did not close")
+
+    pipeline = LiveSpeechPipeline(
+        Source([AudioData(bytes(320), FORMAT)]),
+        FORMAT,
+        Detector([False]),
+        Engine(BrokenSession()),
+    )
+
+    with pytest.raises(AudioCaptureStopError, match="STT session did not close"):
+        with pipeline.open() as stream:
+            list(stream)
+
+
 def test_vad_and_stt_receive_their_own_sample_rates() -> None:
     source_format = AudioFormat(48000, 1, AudioSampleFormat.INT16)
     stt_format = AudioFormat(8000, 1, AudioSampleFormat.INT16)
@@ -272,3 +322,43 @@ def test_speech_pause_does_not_finish_stt_session() -> None:
         assert not session.finished
 
     assert session.closed
+
+
+def test_turn_aware_session_receives_audio_then_boundaries_in_order() -> None:
+    class TurnSession(Session):
+        def __init__(self) -> None:
+            super().__init__()
+            self.order: list[str] = []
+
+        def accept_audio(self, chunk: AudioData) -> Sequence[TranscriptUpdate]:
+            self.order.append("audio")
+            return ()
+
+        def start_turn(self) -> Sequence[TranscriptUpdate]:
+            self.order.append("start")
+            return ()
+
+        def end_turn(self) -> Sequence[TranscriptUpdate]:
+            self.order.append("end")
+            return [TranscriptUpdate(0, "hello", TranscriptStatus.FINAL)]
+
+    session = TurnSession()
+    source = Source([AudioData(bytes(320 * 3), FORMAT)])
+    pipeline = LiveSpeechPipeline(
+        source,
+        FORMAT,
+        Detector([True, True, False]),
+        Engine(session),
+        start_confirm_ms=1,
+        pause_confirm_ms=1,
+    )
+
+    with pipeline.open() as stream:
+        events = list(stream)
+
+    assert session.order == ["audio", "start", "audio", "audio", "end"]
+    assert any(
+        isinstance(event, TranscriptUpdate) and event.status is TranscriptStatus.FINAL
+        for event in events
+    )
+    assert session.finished and session.closed

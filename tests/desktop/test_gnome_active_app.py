@@ -1,11 +1,13 @@
 """The GNOME adapter never treats an absent or unknown app as verified focus."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
+from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 
 
 def _reply(app_id: str) -> subprocess.CompletedProcess[str]:
@@ -25,6 +27,24 @@ def test_each_observation_reads_fresh_focus_and_maps_only_known_apps() -> None:
         assert observer.observe_active_app() == "telegram"
         assert observer.observe_active_app() is None
     assert run.call_count == 2
+
+
+def test_catalog_can_reject_a_stale_binding(tmp_path: Path) -> None:
+    app_dir = tmp_path / "applications"
+    app_dir.mkdir()
+    (app_dir / "known.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Known\n", encoding="utf-8"
+    )
+    observer = GnomeShellActiveAppObserver(
+        {"known.desktop": "known", "removed.desktop": "removed"},
+        catalog=XdgDesktopAppCatalog((tmp_path,)),
+    )
+    with patch(
+        "kyrin.desktop.platforms.gnome.subprocess.run",
+        side_effect=[_reply("known.desktop"), _reply("removed.desktop")],
+    ):
+        assert observer.observe_active_app() == "known"
+        assert observer.observe_active_app() is None
 
 
 @pytest.mark.parametrize(

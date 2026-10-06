@@ -30,13 +30,13 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** validate the GNOME active-app prototype with real
-  windows and design localized response presentation before
-  connecting live voice commands to the action executor. A GNOME 50 prototype
-  now exists but needs validation with real foreground windows. Windows, macOS,
-  and Android adapters remain future work.
-  Device-specific stop behavior and multilingual STT quality still require
-  separate evaluation.
+- **Current next direction:** continue English V1 development with the locally
+  installed Whisper `small` CPU adapter while keeping Vosk replaceable. This is
+  a development choice, not a packaged default or a general accuracy claim.
+  The command diagnostic now prints localized responses and can speak them
+  through an offline Ubuntu adapter. Desktop actions remain dry-run in that
+  diagnostic. Model packaging, multilingual setup, product UI, broader live
+  validation, and Windows/macOS/mobile adapters remain future work.
 
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
 is to understand voice, vision, and text and interact naturally with the
@@ -1035,19 +1035,17 @@ the hardware-dependent tests; they need a normal audio environment.
 
 ### Current next step
 
-Evaluate before wiring the OS executor into the live application:
-
-```text
-Validate the GNOME active-app prototype with real foreground windows and
-design a localized response presenter; keep live voice action execution
-disabled until the app state and feedback can be handled honestly
-```
+Broaden the English command corpus and validate the owner-selected Vosk
+`lgraph` default candidate on ordinary CPU hardware before bundling it. The
+current replay includes errors in confirmed command names. Then design a
+user-facing model manager and optional language installation. Keep live voice
+action execution disabled until app state and feedback are handled honestly.
 
 The standalone Vosk adapter works with a locally supplied model. The live
 pipeline accepts any engine implementing the STT contract, including Vosk;
-it is not yet selected as the production default.
-Selection still requires measured multilingual accuracy, command-relevant
-partial-result latency, CPU/GPU use, and offline packaging. The first semantic
+the owner's product direction chooses Vosk for English V1, but no runtime
+default is wired yet. Acceptance still requires measured command accuracy,
+partial-result latency, resource use, and offline packaging. The first semantic
 command layer exists as a dry-run contract and coordinator; its demo interpreter
 recognizes only a few example phrases and is not a production language engine.
 Additional audio-format conversions should be implemented only when a
@@ -1365,7 +1363,7 @@ No shell command or OS call is derived from recognized speech here.
 `ActionResult` must match an outstanding request. Only a successful result
 that explicitly reports the observed active app updates `VerifiedContext`;
 failure leaves prior context intact. `ActionFeedback` carries structured
-success/failure and the requested text/voice channel for a later localized
+success/failure and the requested text/voice channel for the localized
 presenter. Unit tests use synthetic results, not actual desktop actions.
 No executor is connected to the live voice diagnostic. No confirmation
 interface, UI, or TTS is connected. See
@@ -1422,10 +1420,12 @@ fresh observation, dialogue history alone cannot authorize an implicit app.
 
 This is a language-neutral resolution boundary with limited Persian demo
 phrases; it does not read the actual foreground app or search contacts.
-The dry-run microphone tool supplies no foreground observation. A GNOME
-prototype now exists but needs live focus validation; other supported
-platforms need their own adapters where possible. Otherwise the safe path is
-a clarification question. No `OPEN_CHAT` desktop
+The dry-run microphone tool can now supply foreground observations on final
+transcripts when explicitly configured with exact GNOME desktop-ID bindings.
+The GNOME observer was validated with live focus switching; the combined
+microphone-to-context path still needs a coordinated live test. Other platforms
+need their own adapters where possible. Otherwise the safe path is a
+clarification question. No `OPEN_CHAT` desktop
 executor exists yet. Focused tests cover conflict, explicit choice, missing
 observation, partial correction, and context surviving an STT restart.
 
@@ -1444,10 +1444,441 @@ No new Python dependency was added. The diagnostic under `scripts/desktop/`
 prints raw desktop IDs as focus changes.
 
 Seven focused deterministic tests, Ruff, and Mypy passed. A separate headless
-GNOME Shell 50 session loaded the extension and returned `unknown` when no
-window was focused. An attempt to focus Calculator in that headless session
-also returned `unknown`, so nonempty app-ID reporting has not been validated.
-The current live Wayland session did not recognize the
-newly installed extension without a new login, so an in-session Telegram/Chrome
-focus-switch test has **not** passed. The temporary user installation was
-removed after this attempt. See `docs/desktop/ACTIVE_APP_OBSERVATION.md`.
+GNOME Shell 50 session loaded the extension and returned an empty app ID when
+no window was focused; the diagnostic displayed `unknown`. An attempt to focus
+Calculator in that headless session also displayed `unknown`, so that run did
+not validate nonempty app-ID reporting.
+The first live Wayland session did not recognize the newly installed extension.
+After the user restarted the system, GNOME Shell 50.1 recognized and enabled
+it. In a 20-second test, the observed IDs alternated between Chrome and
+Telegram as the user confirmed switching between those windows. The extension
+is enabled in that user session. No command was executed. See
+`docs/desktop/ACTIVE_APP_OBSERVATION.md`.
+
+---
+
+## 35. XDG Installed-App Catalog
+
+`kyrin.desktop.app_catalog.AppCatalog` is a small platform-independent
+discovery contract. `XdgDesktopAppCatalog` reads XDG `.desktop` entries with
+the standard library, including the user's data directory before system data
+directories. It derives exact desktop IDs, honors `Hidden=true`, and returns
+base display names. The active-app diagnostic can now show a registered name
+beside a freshly observed ID. On this device it found the local Telegram ID
+and two Chrome IDs with the same display name. Display names are therefore
+not trusted to infer a KYRIN command target. `AppIdentityResolver` applies
+explicit exact-ID bindings, with an optional catalog-presence check; the GNOME
+observer delegates to it without breaking its existing constructor. A
+read-only live probe mapped the freshly observed `chatgpt.desktop` to `codex`
+with a test binding and catalog validation. At that stage, no live command
+integration or desktop action was added. No new runtime dependency was added.
+
+---
+
+## 36. Optional Active-App Context in Live Command Dry Run
+
+`src/kyrin/desktop/command_bridge.py` supplies a fresh active-app observation
+to `CommandCoordinator` only for final transcript updates. Partial updates
+remain advisory and do not wait for the desktop. The microphone diagnostic's
+`commands` mode accepts repeated, explicit `--active-app-binding`
+`DESKTOP_ID=KYRIN_APP_ID` values and composes the GNOME observer with the XDG
+catalog. Without bindings it preserves the old behavior. Missing focus,
+unrecognized IDs, or an unavailable extension give `None`, so ambiguous chat
+commands still ask for clarification. The action gate remains a dry run and
+no executor is connected.
+
+Deterministic bridge tests cover final-only observation and an unknown
+observation after a previously known app. The CLI option was parsed in the
+user session without opening the microphone. A read-only probe combined the
+real GNOME observer with a synthetic final Persian chat transcript while
+Codex was focused. It returned `None` for the Telegram binding and asked
+which app to use; no action was executed. A coordinated real microphone test
+is still pending because the local Persian Vosk model directory was not found
+after the restart. This change does not establish STT accuracy or actual
+desktop-action behavior.
+
+---
+
+## 37. Localized Response Text
+
+`ResponseRequest` now carries a `ResponseKind` and structured chat details,
+not a prewritten Persian sentence. `PendingClarification` retains the chat
+target and candidate app IDs, so the demo interpreter and coordinator no
+longer choose output wording. `ResponsePresenter` turns a command response,
+`ActionNotice`, or `ActionFeedback` into `PresentedResponse` with text, channel,
+locale, and stream/segment identity. The component has no microphone, OS,
+UI, or TTS access and adds no dependency. The live-command diagnostic prints
+the localized response text and still executes no actions or voice output.
+
+Persian and English text are currently available; unsupported locales fall
+back to the supported session preference, or English. This is presentation
+coverage, not multilingual STT or command-understanding coverage.
+`LAUNCH_ACCEPTED` text explicitly says that
+completion is unconfirmed. `error_code` stays internal and is never copied
+to user-facing text. Focused command/action/desktop-bridge/presenter tests
+pass. A real active-app microphone test remains pending because the local
+Persian Vosk model used earlier under `/tmp` was not found after restart.
+
+---
+
+## 38. Per-Command Response Language and Process Notices
+
+Final transcript language now travels with `CommandResolution` and
+`ResponseRequest`. `ActionGate` retains it in requests, notices, pending
+confirmations, and eventual feedback, so late results do not adopt the
+language of a later command. The presenter uses a supported event language,
+then the session preference, then English. The actual output language remains
+visible in `PresentedResponse.language`. Vosk's language tag is the configured
+model language, not evidence of automatic language detection.
+
+`SystemNotice` and focused adapters classify backlog wait/ready states and
+known audio/STT failures without displaying raw exception text. The backlog
+warning requests a pause with text and voice; recovery is text-only. A queue
+overflow says that speech may have been lost. The live diagnostic prints
+localized text, accepts an independent `--response-language`, and still does
+not synthesize audio, show a product UI, or execute recognized commands.
+It now loads the audio runtime after parsing CLI arguments, so a startup
+failure can be reported as a localized microphone error.
+Only Persian and English catalogs exist. Additional language catalogs and
+offline TTS voices remain future work; no new dependency was added. See
+`docs/responses/RESPONSE_LANGUAGE.md`.
+
+---
+
+## 39. Bounded Recovery of Live Speech Sessions
+
+`SpeechSessionController` now supervises one bounded listening run. It uses a
+factory to construct a fresh `LiveSpeechPipeline` and microphone source after
+recoverable capture, queue-overflow, or STT failures. The shared STT engine
+opens a fresh session for each attempt; Silero VAD is reset by the monitor at
+each new stream. Default recovery is two retries with a one-second delay, and
+the live diagnostic exposes both values as CLI options. The diagnostic's
+duration applies to the full supervised run. The VAD-only diagnostic is not
+under this controller.
+
+A `SpeechSessionEnded` boundary tells the command consumer to retract partial
+candidates and increment its stream ID while retaining dialogue reference
+and pending clarification. A failed capture stop, failed STT-session close,
+worker shutdown failure, or unavailable compute device is terminal; the
+controller does not risk reusing an uncertain native resource. System notices
+give localized text for recoverable errors and an impending retry. No real
+command is executed or voice output produced.
+
+Focused deterministic tests cover fresh attempts, retry limits, interruption
+of backoff, active stop, and unsafe-close classification. A real microphone
+recovery run is still pending: the temporary Persian Vosk model used in
+earlier sessions is no longer present after restart, and the sandbox does not
+expose the desktop audio server. No new dependency was added. See
+`docs/audio/LIVE_SPEECH_PIPELINE_FA.md`.
+
+---
+
+## 40. Reproducible Offline STT Evaluation Tool
+
+`kyrin.stt.evaluation` reads a labeled CSV manifest and local mono 16-bit PCM
+WAV files, feeds audio through the existing sample-rate converter and any
+`SpeechToTextEngine`, and computes normalized character error from final
+transcripts. The default paced run reports first partial/final event times
+relative to file replay; unpaced mode measures processing without simulated
+capture timing. The Vosk CLI in `scripts/stt/evaluate_offline_stt.py` adds no
+dependency and never downloads a model or audio. Focused tests use a fake
+engine and generated PCM files; they do not establish recognition quality.
+
+The temporary `/tmp/kyrin-stt-eval-20261003` corpus/model directory is absent
+in the current environment. No STT model weights are tracked in Git. An
+official `vosk-model-small-fa-0.42` ZIP was downloaded and kept in the ignored
+local `models/archive/` directory. Its extracted files live in `models/local/`;
+ZIP CRC passed and the bundled WAV/reference
+were processed with paced 20 ms chunks. Vosk loaded and produced “من عرضه این
+کار رو ندارم” against “من عرضه اين کارو ندارم”; the defined character metric
+counted 2 edits in 22 normalized characters. The one-file result shows that
+this local model runs, not that it is suitable for KYRIN commands or other
+languages. A small six-command Persian corpus was then recorded with explicit
+consent using one USB microphone and kept under Git-ignored
+`datasets/stt/recordings/`. The speaker confirmed the `fa-05` reference. On
+these six clips, Vosk exactly matched four; aggregate normalized CER was
+12/133 (9.0%). It misheard “کایرین” as “طاهری” and the `fa-05` phrase
+“چت علی را در واتساپ” as “ساعت علی را در صبح”. This is a local baseline, not a
+representative quality claim. A first cross-engine file comparison has now
+been run, but representative multilingual samples and live comparison remain
+open. See `docs/stt/STT_EVALUATION_FA.md`.
+
+The repository now tracks `models/README.md` and `models/.gitignore` so the
+development model location and recorded ZIP checksum are discoverable while
+the large weights remain outside Git. This is a development storage
+convention, not a product default model or installed-app storage decision.
+
+---
+
+## 41. Experimental Whisper CPU Comparison
+
+The user requested a Whisper comparison and emphasized that the eventual
+product should also work on ordinary machines without a 16 GB GPU. No existing
+Whisper weight file was found in the project or common local model caches.
+`whisper.cpp` tag `v1.9.4` was built for CPU under ignored `build/tools/`;
+CMake was installed only in the ignored project virtual environment. No
+production dependency, STT contract or live pipeline was changed. Two
+multilingual weights are retained under ignored `models/local/whisper.cpp/`:
+full-precision `ggml-small.bin` (487,601,967 bytes) and quantized
+`ggml-large-v3-turbo-q5_0.bin` (574,041,195 bytes). Paths and hashes are in
+`models/README.md`. An aborted large-turbo download was removed.
+
+On the same six consented recordings converted to common 16 kHz mono PCM,
+normalized CER was 8/133 (6.0%) for Vosk, 18/133 (13.5%) for Whisper small,
+and 25/133 (18.8%) for quantized Whisper turbo. The earlier Vosk test using
+KYRIN's own resampler gave 12/133 (9.0%), reproduced twice; the resampler
+path affected the `fa-05` transcript. Whisper CLI processed complete files
+on CPU with four threads: about 2.4–2.6 seconds per clip for small, and
+8.6–8.9 seconds for turbo-q5. These are local file-process measurements,
+not live partial-text latency. Peak measured RSS for one clip was about
+750 MiB and 793 MiB, respectively. Vosk's unpaced common-input processing
+took about 0.13–0.23 seconds per clip with its model already loaded, but this
+timing is not directly comparable with a separate Whisper process per clip.
+
+The six-file, one-speaker experiment does not justify selecting or rejecting
+Whisper as the product engine. `whisper.cpp` CLI was kept outside the streaming
+`SpeechToTextEngine` contract because a whole-file transcription test cannot
+demonstrate partial updates. GPU execution, broader language data, and live
+command latency remain open. Full conditions and caveats are in
+`docs/stt/WHISPER_CPP_COMPARISON_FA.md`.
+
+## 42. Initial Whisper Rolling-Window CPU Replay
+
+The user approved a multilingual corpus and a separate live-CPU diagnostic.
+English command prompts and one optional exploratory German prompt were added
+as separate templates; at that point, no new microphone recording had
+occurred. The speaker
+is fluent in Persian and English and has some German, so German speech from
+this speaker cannot serve as a definitive quality result. Public multilingual
+audio with references remains to be selected and recorded by source/license.
+
+An isolated `scripts/stt/benchmark_whisper_replay.py` now replays an existing
+consented WAV at recorded speed to a temporary loopback-only `whisper-server`
+with one preloaded CPU model. It logs each overlapping window's transcript,
+request time and lateness. No production dependency, STT contract, live
+pipeline or command execution path changed. On `ggml-small.bin`, four threads,
+the `fa-03` negative command (3.6 s) took 9.33 s overall at a 1 s window step
+and 6.26 s at a 2 s step; first nonempty text arrived at 3.05 s and 4.24 s,
+respectively, from file start. The `fa-02` positive command (2.5 s) took
+6.07 s at a 2 s step, with first text at 4.04 s. At the 1 s step, processing
+accumulated 3.70 s of dispatch lag. These are single-run, rolling-window
+diagnostics, not actual microphone or native streaming STT measurements and
+not grounds to select a product default. See
+`docs/stt/WHISPER_LIVE_REPLAY_FA.md` and local ignored JSON results.
+
+The user then explicitly authorized the first English recording, “Open
+Telegram.” A short, near-silent attempt was rejected by the recorder. A
+second 20 s capture yielded a 2.5 s crop (`en-02`, from 16.7–19.2 s); the
+original capture was retained under ignored `datasets/stt/recordings/raw/`.
+Whisper small returned the exact English reference on that crop. With a 2 s
+rolling-window step and explicit `en`, first text arrived at 3.94 s and total
+replay/processing took 5.89 s. With automatic language detection, first text
+arrived at 5.79 s and total took 9.59 s. These are individual runs on one
+English clip and cannot establish multilingual quality or a universal cost
+for automatic language detection. No other new voice or public audio was
+recorded/downloaded at that point. The English local manifest initially listed
+only `en-02`.
+
+The user also authorized recording the negative English command `en-03`.
+A 2.7 s crop (22.2–24.9 s of the 30 s capture) was retained for scoring and
+the original was preserved in the ignored recordings/raw directory. Whisper
+small transcribed the whole crop exactly. With 1 s rolling windows, explicit
+English yielded first nonempty text at 2.93 s and full reference at 4.89 s;
+auto language yielded 4.79 s and 8.61 s, respectively. Both first nonempty
+texts contained “Do not” in this one clip, but the worker accumulated 2.19 s
+and 5.91 s maximum dispatch lag, respectively. The local English manifest now
+lists `en-02` and `en-03`. No command was executed.
+
+## 43. English Vosk Desktop Default Candidate
+
+The owner selected English as the only initially installed language for V1
+desktop and chose `vosk-model-en-us-0.22-lgraph` as the intended default.
+Users should be able to add other compatible languages later; the model manager
+and application settings do not exist yet. This is a product-direction decision,
+not evidence that the model is accurate enough for KYRIN commands on ordinary
+machines. The replaceable STT contract remains unchanged.
+
+The official 130,557,655-byte ZIP was downloaded to ignored `models/archive/`,
+checked by ZIP CRC and safe-path inspection, then extracted to ignored
+`models/local/`. Its local SHA-256 and exact paths are recorded in
+`models/README.md`. No product dependency or runtime default was added.
+
+Two previously consented English commands were replayed through the existing
+Vosk evaluator on CPU, both with KYRIN's 48-to-16 kHz conversion and with
+previously prepared 16 kHz WAVs. `en-02`, “Open Telegram,” became “open filler
+drop” in both paths; `en-03`, “Do not open Telegram,” became “do not open
+telegram.” The two-file normalized CER was 8/33 (24.2%), which is not a
+representative quality estimate. The paced run loaded the model in about
+0.49 s and reached about 470 MiB peak RSS for the whole process. Detailed
+outputs and timing are in ignored `datasets/stt/results/`, summarized in
+`docs/stt/STT_EVALUATION_FA.md`. Further commands and speakers, target-machine
+memory/latency checks, and actual microphone validation are required before
+shipping this choice. No desktop command was executed in this evaluation.
+
+The speaker then consented to three more English prompts. One near-silent
+`en-01` attempt was rejected; the USB microphone input level was adjusted from
+14% to 60% and the three prompts were recorded successfully. First-utterance
+crops of `en-01`, `en-04`, and `en-05` and their original raw recordings remain
+under ignored `datasets/stt/`. Vosk transcribed `en-01` as “corinne opened the
+door,” `en-02` as “open filler drum,” `en-03` correctly, and `en-05` correctly.
+The first `en-04` crop was transcribed “open alleys charge in telegram.” The
+speaker then clarified that they actually said Telegram, not the template's
+WhatsApp. The initial five-file scoring report was therefore invalidated and
+marked `UNVERIFIED-REFERENCE`; it must not be cited as a model-error result.
+Four clips with usable references were replayed and yielded CER 20/80 (25.0%),
+still far too small and single-speaker to generalize. A later `en-04` crop
+yielded “open alleys chart in what's up,” but its exact spoken reference is
+unconfirmed and it is not scored. The model loaded in about 0.46 s and the
+whole evaluation process peaked at about 491 MiB RSS on this machine. See
+`docs/stt/STT_EVALUATION_FA.md` for the full results and limits.
+
+A new `en-06` recording then explicitly captured “Open Ali's chat in
+WhatsApp,” and the speaker confirmed the word WhatsApp. Vosk returned “open
+alleys child in what's up”: the app name was rendered as ordinary words, but
+the contact/chat phrase was wrong. A five-file replay using only confirmed
+references (`en-01`, `en-02`, `en-03`, `en-05`, `en-06`) yielded normalized CER
+29/107 (27.1%) on this one speaker. The model loaded in about 0.47 s and the
+whole process peaked at about 493 MiB RSS on this machine. This is a small
+diagnostic, not a production accuracy guarantee. No action was executed.
+
+## 44. Spoken Application Name Matching Prototype
+
+An optional `CatalogSpokenAppResolver` now reads a cached snapshot of
+registered application labels and configured spoken aliases. Only explicit
+platform-ID-to-KYRIN-ID bindings are eligible. The command interpreter can use
+it for simple English/Persian open-app phrases. Exact matches can form a final
+command; approximate matches require confirmation and ambiguous labels require
+a choice. The existing final-only `ActionGate` and explicit executor mapping
+remain separate. The microphone diagnostic exposes opt-in bindings/aliases and
+still executes no desktop actions. The similarity parameters are provisional,
+and no product settings UI or cross-platform catalog exists yet. See
+`docs/desktop/SPOKEN_APP_MATCHING.md`.
+
+## 45. Verified English Command Decision Replay
+
+On 2026-10-05 the five user-confirmed English command WAVs were replayed
+through the selected local Vosk candidate, then both the confirmed references
+and resulting transcripts were separately passed through the demo interpreter,
+catalog-assisted app-name resolver, and final-only ActionGate. STT output was
+identical to the prior five-file run (CER 29/107). No wrong action was
+authorized. Two basic Telegram requests failed because STT misheard their
+targets; two other commands failed even with perfect reference text because
+the demo parser does not cover compound navigation or that English chat form.
+No OS executor or microphone was used. The reusable decision replay tool and
+full limits are in `docs/commands/VERIFIED_ENGLISH_COMMAND_REPLAY_2026-10-05.md`.
+
+## 46. Pending English Reference Recheck and Shared-Audio STT Comparison
+
+The owner later questioned whether every word in the English WAVs matches the
+previously accepted reference text. The five clips were checked for audio
+format and signal, then converted to a shared 16 kHz PCM set. On those same
+files, local Vosk, `whisper.cpp` small, and quantized large-v3-turbo were
+compared without network or desktop actions. Both Whisper variants recognized
+the short `Open Telegram` clip where Vosk did not; small was faster than turbo
+in this file-based CPU setup. The old-reference error rates are provisional,
+and neither Whisper candidate has a production streaming adapter. The speaker
+has been asked to listen to `en-01`, `en-02`, and `en-06`; any uncertain words
+must be corrected or rerecorded before scoring. Details and limits are in
+`docs/stt/ENGLISH_AUDIO_REFERENCE_AUDIT_2026-10-05.md`.
+
+## 47. English Whisper Small Live Adapter
+
+The speaker re-listened to `en-01`, `en-02`, and `en-06` and confirmed their
+displayed reference wording. The owner chose to stop expanding the comparative
+corpus for now and proceed with the locally installed Whisper `small` weights
+for English STT development, prioritizing correct command text over the fastest
+provisional response. This supersedes the earlier English Vosk default direction
+for current development; it does not remove Vosk or choose a packaged default.
+
+`src/kyrin/stt/backends/whisper.py` now implements the existing STT engine and
+session contracts with optional turn hints. `whisper_server.py` owns a preloaded
+local, CPU-only `whisper.cpp` server bound to loopback, with no model download or
+new Python dependency. The live pipeline passes VAD-confirmed start/pause
+markers in audio order only to turn-aware sessions. Streaming sessions such as
+Vosk retain their independent source-to-STT conversion path. Whisper previews
+are partial; only a full-turn re-transcription after a confirmed pause is final.
+Turns over 30 seconds retract previews with empty final text. Listening remains
+continuous across pauses.
+
+Focused STT/pipeline tests passed. A local `en-02.wav` run produced provisional
+`Open Telephone.` and final `Open Telegram.` with the real server; a paced file
+run through Silero VAD and `LiveSpeechPipeline` produced partial and final
+`Open Telegram`. No microphone or desktop command was used in these validations.
+Measured live microphone latency, performance on other hardware, GPU support,
+multi-language switching, and packaging remain open. See
+`docs/stt/WHISPER_LIVE_ADAPTER.md`.
+
+## 48. First Whisper Microphone Dry Run
+
+The owner read `Open Telegram.` and `Do not open Telegram.` into the selected
+USB microphone during a 25-second local, no-save, no-action diagnostic. The
+first turn finalized as `Open Telegram.` and was authorized only as a dry-run
+request. The negative turn finalized as `to open telegram.` despite the owner
+confirming they spoke `Do not open Telegram.` exactly. The interpreter produced
+no command for that text, so no action was authorized. Each final arrived
+about 3.5 seconds after its VAD pause; backlog wait appeared near 1024 ms and
+then recovered. A separate recorded-speed replay of the previously confirmed
+`en-03.wav` through the same new pipeline preserved `Do not open telegram.`.
+The live failure remains unexplained because the microphone audio was not
+saved. The owner then consented to one 15-second local, Git-ignored WAV of the
+same negative sentence at `datasets/stt/recordings/raw/live-negation-2026-10-05.wav`.
+VAD found one speech interval; recorded-speed replay through the full new
+pipeline finalized correctly as `Do not open telegram.` The original failure
+did not reproduce and its exact cause remains unknown. A focused scheduler
+fix now excludes pre-roll from the first-preview timer. On one subsequent
+recorded-speed `en-02.wav` run, the correct final arrived about 1.92 seconds
+after VAD pause. This is not a live microphone latency guarantee. See the
+live-adapter document for conditions and limits.
+
+## 49. Offline Spoken Repeat Prompt and Playback Guard
+
+The owner approved text and offline voice feedback for unclear commands.
+`CommandCoordinator` already emitted a `REPEAT_COMMAND` request with
+`TEXT_AND_VOICE` only after an incomplete or unrecognized **final** command
+transcript; partial text and ordinary speech stay silent. The demo interpreter
+now also classifies the observed `to open telegram` STT result as unclear,
+without authorizing an open action. A clear `do not open telegram` still
+authorizes nothing.
+
+`ResponseSpeaker` is a separate, replaceable speech-output contract with a
+bounded background queue. The Ubuntu adapter uses local Speech Dispatcher and
+its `espeak-ng` module. The `commands` microphone diagnostic prints the
+localized text and speaks responses requested as `TEXT_AND_VOICE`, unless
+`--no-voice-responses` is supplied. It still never executes desktop actions.
+`PlaybackGuardInput` preserves continuous microphone capture but substitutes
+silence while a response is queued/playing and for a short tail, preventing
+the diagnostic from feeding its own voice back to VAD/STT in that interval.
+The guard also suppresses user speech during playback; barge-in is not yet
+supported. Text remains available on speech failures. No network or new
+Python dependency was introduced.
+
+Focused unit tests cover final-only repetition, the dropped-negation result,
+asynchronous speech dispatch, backend command construction, and audio guarding.
+A local `spd-say` playback command returned successfully on the development
+machine. Audible output and real microphone echo behavior still need owner
+listening validation. See `docs/responses/OFFLINE_SPEECH_OUTPUT.md`.
+
+## 50. Owner-selected TTS Trial and Ordered English Commands
+
+In a local, Git-ignored listening trial, the owner preferred the English
+Kitten v0.2 sample over Piper after adjusting their speaking rates. This is a
+**temporary voice preference**, not a product dependency, packaged voice, or
+new default. The owner deferred TTS integration and wants to revisit voice
+quality later. Trial files are under `downloads/tts-trials/`; product code was
+not changed for this comparison.
+
+The owner approved ordered commands and explicitly chose partial completion:
+when a later step is unsupported, perform an earlier supported step and tell
+the user what remains undone. `CommandPlan` and `CommandPlanResolution` now
+represent two or three ordered intents from one final utterance. The current
+demo parser recognizes exact two-step English forms such as `Open Telegram and
+open Alice chat`; it does not claim general compound-language understanding.
+`ActionPlanRunner` applies `ActionGate` and an injected executor one step at a
+time, with a distinct action key per step. It stops on a block, failure,
+unknown result, or pending confirmation. Before a supported chat step it
+requires a fresh foreground-app observation; `LAUNCH_ACCEPTED` or old context
+cannot stand in for that observation. An
+unsupported chat step gives a specific localized notice after an earlier app
+step. The microphone diagnostic prints this plan and per-step dry-run gate
+decisions, but still executes no desktop actions. Focused tests use a fake
+executor. See `docs/commands/MULTI_STEP_COMMANDS.md`.

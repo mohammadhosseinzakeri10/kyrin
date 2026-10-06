@@ -4,9 +4,11 @@ from collections.abc import Sequence
 
 from kyrin.commands.interpreter import (
     CommandInterpreter,
+    DeclinedClarification,
     IncompleteCommand,
     NeedsClarification,
     ReadyCommand,
+    ReadyPlan,
     UnrecognizedCommand,
 )
 from kyrin.commands.models import (
@@ -15,9 +17,12 @@ from kyrin.commands.models import (
     CommandEvent,
     CommandIntent,
     CommandKind,
+    CommandPlanResolution,
     CommandResolution,
+    PendingAppClarification,
     PendingClarification,
     ResponseChannel,
+    ResponseKind,
     ResponseRequest,
 )
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
@@ -36,11 +41,13 @@ class CommandCoordinator:
         self._segment_id: int | None = None
         self._finalized_through = -1
         self._emitted_candidate: CommandIntent | None = None
-        self._pending: PendingClarification | None = None
+        self._pending: PendingClarification | PendingAppClarification | None = None
         self._last_referenced_app: str | None = None
 
     @property
-    def pending_clarification(self) -> PendingClarification | None:
+    def pending_clarification(
+        self,
+    ) -> PendingClarification | PendingAppClarification | None:
         return self._pending
 
     @property
@@ -109,33 +116,86 @@ class CommandCoordinator:
         intent = (
             interpretation.intent if isinstance(interpretation, ReadyCommand) else None
         )
-        events.append(
-            CommandResolution(update.segment_id, intent, stream_id=self._stream_id)
-        )
-        if isinstance(interpretation, ReadyCommand):
-            self._pending = None
-            if intent is not None:
-                if intent.kind is CommandKind.OPEN_APP:
-                    self._last_referenced_app = intent.target
-                elif intent.kind is CommandKind.OPEN_CHAT:
-                    self._last_referenced_app = intent.app
-        elif isinstance(interpretation, NeedsClarification):
-            self._pending = interpretation.pending
+        if isinstance(interpretation, ReadyPlan):
+            if self._emitted_candidate is not None:
+                events.append(
+                    CommandCandidateUpdate(
+                        update.segment_id, None, stream_id=self._stream_id
+                    )
+                )
             events.append(
-                ResponseRequest(
+                CommandPlanResolution(
                     update.segment_id,
-                    interpretation.pending.question,
-                    ResponseChannel.TEXT_AND_VOICE,
+                    interpretation.plan,
                     stream_id=self._stream_id,
+                    language=update.language,
                 )
             )
+        else:
+            events.append(
+                CommandResolution(
+                    update.segment_id,
+                    intent,
+                    stream_id=self._stream_id,
+                    language=update.language,
+                )
+            )
+        if isinstance(interpretation, (ReadyCommand, ReadyPlan)):
+            self._pending = None
+            intents = (
+                interpretation.plan.steps
+                if isinstance(interpretation, ReadyPlan)
+                else (interpretation.intent,)
+            )
+            for item in intents:
+                if item.kind is CommandKind.OPEN_APP:
+                    self._last_referenced_app = item.target
+                elif item.kind is CommandKind.OPEN_CHAT:
+                    self._last_referenced_app = item.app
+        elif isinstance(interpretation, NeedsClarification):
+            self._pending = interpretation.pending
+            if isinstance(interpretation.pending, PendingAppClarification):
+                candidates = interpretation.pending.candidates
+                confirm = interpretation.pending.confirmation
+                events.append(
+                    ResponseRequest(
+                        update.segment_id,
+                        ResponseKind.CONFIRM_APP
+                        if confirm
+                        else ResponseKind.CHOOSE_APP,
+                        ResponseChannel.TEXT_AND_VOICE,
+                        stream_id=self._stream_id,
+                        target=candidates[0].display_name if confirm else None,
+                        app_candidates=(
+                            ()
+                            if confirm
+                            else tuple(item.display_name for item in candidates)
+                        ),
+                        language=update.language,
+                    )
+                )
+            else:
+                events.append(
+                    ResponseRequest(
+                        update.segment_id,
+                        ResponseKind.CHOOSE_CHAT_APP,
+                        ResponseChannel.TEXT_AND_VOICE,
+                        stream_id=self._stream_id,
+                        target=interpretation.pending.target,
+                        app_candidates=interpretation.pending.candidates,
+                        language=update.language,
+                    )
+                )
+        elif isinstance(interpretation, DeclinedClarification):
+            self._pending = None
         elif isinstance(interpretation, (IncompleteCommand, UnrecognizedCommand)):
             events.append(
                 ResponseRequest(
                     update.segment_id,
-                    "متوجه نشدم. لطفاً فرمان را دوباره بگویید.",
+                    ResponseKind.REPEAT_COMMAND,
                     ResponseChannel.TEXT_AND_VOICE,
                     stream_id=self._stream_id,
+                    language=update.language,
                 )
             )
         self._finalized_through = update.segment_id

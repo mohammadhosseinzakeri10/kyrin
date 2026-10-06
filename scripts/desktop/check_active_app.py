@@ -1,9 +1,10 @@
-"""Print GNOME desktop IDs as focus changes; never read window content."""
+"""Print focused GNOME app IDs and registered labels without reading windows."""
 
 import argparse
 import time
 
 from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
+from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 
 
 def main() -> None:
@@ -15,12 +16,16 @@ def main() -> None:
         parser.error("seconds must be in (0, 60] and interval in [0.1, 5]")
 
     observer = GnomeShellActiveAppObserver({})
+    catalog = XdgDesktopAppCatalog()
+    app_names = {app.platform_id: app.display_name for app in catalog.list_apps()}
     deadline = time.monotonic() + args.seconds
     previous: object = object()
     while time.monotonic() < deadline:
         current = observer.read_active_app_id()
         if current != previous:
-            print(current if current is not None else "unknown", flush=True)
+            name = app_names.get(current) if current is not None else None
+            label = f" ({name})" if name is not None else ""
+            print(f"{current}{label}" if current is not None else "unknown", flush=True)
             previous = current
         time.sleep(args.interval)
 

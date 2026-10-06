@@ -12,9 +12,10 @@ class ActionKey:
 
     stream_id: int
     segment_id: int
+    step_index: int = 0
 
     def __post_init__(self) -> None:
-        if self.stream_id < 0 or self.segment_id < 0:
+        if self.stream_id < 0 or self.segment_id < 0 or self.step_index < 0:
             raise ValueError("action key IDs must not be negative")
 
 
@@ -24,6 +25,7 @@ class ActionRequest:
 
     key: ActionKey
     intent: CommandIntent
+    language: str | None = None
 
 
 class ActionNoticeReason(StrEnum):
@@ -31,6 +33,8 @@ class ActionNoticeReason(StrEnum):
     CONFIRMATION_REQUIRED = "confirmation_required"
     BUSY = "busy"
     CANCELLED = "cancelled"
+    UNSUPPORTED = "unsupported"
+    DEPENDENCY_UNVERIFIED = "dependency_unverified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,7 @@ class ActionNotice:
     intent: CommandIntent
     reason: ActionNoticeReason
     channel: ResponseChannel = ResponseChannel.TEXT_AND_VOICE
+    language: str | None = None
 
 
 ActionDecision = ActionRequest | ActionNotice
@@ -95,3 +100,4 @@ class ActionFeedback:
     outcome: ActionOutcome
     channel: ResponseChannel
     error_code: str | None = None
+    language: str | None = None

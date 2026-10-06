@@ -13,13 +13,14 @@ from kyrin.commands.models import (
     CommandResolution,
     PendingClarification,
     ResponseChannel,
+    ResponseKind,
     ResponseRequest,
 )
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 
 def update(segment_id: int, text: str, status: TranscriptStatus) -> TranscriptUpdate:
-    return TranscriptUpdate(segment_id, text, status, language="fa")
+    return TranscriptUpdate(segment_id, text, status)
 
 
 def test_first_ready_partial_is_candidate_and_final_resolves_same_segment() -> None:
@@ -76,7 +77,10 @@ def test_chat_requires_fresh_active_app_or_asks_for_app() -> None:
     ) == (
         CommandResolution(0, None),
         ResponseRequest(
-            0, "چت را در کدام برنامه باز کنم؟", ResponseChannel.TEXT_AND_VOICE
+            0,
+            ResponseKind.CHOOSE_CHAT_APP,
+            ResponseChannel.TEXT_AND_VOICE,
+            target="علی",
         ),
     )
     assert coordinator.pending_clarification is not None
@@ -103,7 +107,7 @@ def test_previous_app_alone_does_not_resolve_chat_target() -> None:
     assert coordinator.observe(update(1, "چت علی را باز کن", TranscriptStatus.FINAL))[
         -1
     ] == ResponseRequest(
-        1, "چت را در کدام برنامه باز کنم؟", ResponseChannel.TEXT_AND_VOICE
+        1, ResponseKind.CHOOSE_CHAT_APP, ResponseChannel.TEXT_AND_VOICE, target="علی"
     )
 
 
@@ -114,7 +118,7 @@ def test_unrelated_active_app_does_not_fill_chat_app() -> None:
         observed_active_app="browser",
     )
     assert decisions[-1] == ResponseRequest(
-        0, "چت را در کدام برنامه باز کنم؟", ResponseChannel.TEXT_AND_VOICE
+        0, ResponseKind.CHOOSE_CHAT_APP, ResponseChannel.TEXT_AND_VOICE, target="علی"
     )
 
 
@@ -137,8 +141,10 @@ def test_conflicting_current_and_previous_app_requires_choice() -> None:
         CommandResolution(1, None),
         ResponseRequest(
             1,
-            "چت علی را در تلگرام باز کنم یا واتساپ؟",
+            ResponseKind.CHOOSE_CHAT_APP,
             ResponseChannel.TEXT_AND_VOICE,
+            target="علی",
+            app_candidates=("telegram", "whatsapp"),
         ),
     )
     assert coordinator.last_referenced_app == "telegram"
@@ -198,7 +204,11 @@ def test_referenced_app_survives_new_stt_stream_without_active_app_assumption() 
         -1
     ] == (
         ResponseRequest(
-            0, "چت را در کدام برنامه باز کنم؟", ResponseChannel.TEXT_AND_VOICE, 1
+            0,
+            ResponseKind.CHOOSE_CHAT_APP,
+            ResponseChannel.TEXT_AND_VOICE,
+            1,
+            target="علی",
         )
     )
 
@@ -222,7 +232,7 @@ def test_unfinished_or_unknown_command_requests_repetition_only_on_final() -> No
         CommandResolution(0, None),
         ResponseRequest(
             0,
-            "متوجه نشدم. لطفاً فرمان را دوباره بگویید.",
+            ResponseKind.REPEAT_COMMAND,
             ResponseChannel.TEXT_AND_VOICE,
         ),
     )
@@ -233,6 +243,28 @@ def test_ambient_speech_does_not_trigger_prompt() -> None:
     assert coordinator.observe(
         update(0, "امروز هوا خوب است", TranscriptStatus.FINAL)
     ) == (CommandResolution(0, None),)
+
+
+def test_dropped_negation_prefix_requests_repetition_without_authorizing() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, "to open telegram", TranscriptStatus.FINAL)
+    ) == (
+        CommandResolution(0, None),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+    )
+    assert coordinator.observe(
+        update(1, "do not open telegram", TranscriptStatus.FINAL)
+    ) == (CommandResolution(1, None),)
+
+
+@pytest.mark.parametrize("phrase", ["open", "باز کن", "Kyrin, please help"])
+def test_short_or_addressed_unclear_final_requests_repetition(phrase: str) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+    )
 
 
 def test_new_segment_retracts_unfinished_previous_candidate() -> None:
@@ -295,9 +327,38 @@ def test_interpreter_is_replaceable_and_receives_language_and_context() -> None:
     assert coordinator.observe(
         TranscriptUpdate(0, "calculadora", TranscriptStatus.FINAL, language="es"),
         observed_active_app="telegram",
-    ) == (CommandResolution(0, CommandIntent(CommandKind.OPEN_APP, "calculator")),)
+    ) == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_APP, "calculator"), language="es"
+        ),
+    )
     assert interpreter.seen == (
         "calculadora",
         "es",
         CommandContext(observed_active_app="telegram"),
+    )
+
+
+def test_each_final_event_keeps_its_own_transcript_language() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    english_events = coordinator.observe(
+        TranscriptUpdate(0, "open chat Ali", TranscriptStatus.FINAL, "en")
+    )
+    assert english_events == (
+        CommandResolution(0, None, language="en"),
+        ResponseRequest(
+            0,
+            ResponseKind.CHOOSE_CHAT_APP,
+            ResponseChannel.TEXT_AND_VOICE,
+            target="ali",
+            language="en",
+        ),
+    )
+    persian_events = coordinator.observe(
+        TranscriptUpdate(1, "تلگرام", TranscriptStatus.FINAL, "fa")
+    )
+    assert persian_events == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_CHAT, "ali", "telegram"), language="fa"
+        ),
     )

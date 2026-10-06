@@ -29,6 +29,9 @@ class ActionPolicy:
     allowed_apps: frozenset[str] = field(default_factory=frozenset)
     allowed_chat_apps: frozenset[str] = field(default_factory=frozenset)
     confirmation_required_for: frozenset[CommandKind] = field(default_factory=frozenset)
+    supported_kinds: frozenset[CommandKind] = field(
+        default_factory=lambda: frozenset({CommandKind.OPEN_APP, CommandKind.OPEN_CHAT})
+    )
     max_pending: int = 32
 
     def __post_init__(self) -> None:
@@ -44,7 +47,7 @@ class ActionGate:
     def __init__(self, policy: ActionPolicy) -> None:
         self.policy = policy
         self._last_key: ActionKey | None = None
-        self._awaiting_confirmation: dict[ActionKey, CommandIntent] = {}
+        self._awaiting_confirmation: dict[ActionKey, ActionRequest] = {}
         self._outstanding: dict[ActionKey, ActionRequest] = {}
         self._verified_context = VerifiedContext()
 
@@ -56,31 +59,51 @@ class ActionGate:
         """Accept one final resolution once; candidates never authorize work."""
         if not isinstance(event, CommandResolution):
             return None
-        key = ActionKey(event.stream_id, event.segment_id)
+        key = ActionKey(event.stream_id, event.segment_id, event.step_index)
         if self._last_key is not None and key <= self._last_key:
             return None
         self._last_key = key
         intent = event.intent
         if intent is None:
             return None
+        if intent.kind not in self.policy.supported_kinds:
+            return ActionNotice(
+                key, intent, ActionNoticeReason.UNSUPPORTED, language=event.language
+            )
         if not self._allowed(intent):
-            return ActionNotice(key, intent, ActionNoticeReason.NOT_ALLOWED)
+            return ActionNotice(
+                key, intent, ActionNoticeReason.NOT_ALLOWED, language=event.language
+            )
         if self._pending_count >= self.policy.max_pending:
-            return ActionNotice(key, intent, ActionNoticeReason.BUSY)
+            return ActionNotice(
+                key, intent, ActionNoticeReason.BUSY, language=event.language
+            )
         if intent.kind in self.policy.confirmation_required_for:
-            self._awaiting_confirmation[key] = intent
-            return ActionNotice(key, intent, ActionNoticeReason.CONFIRMATION_REQUIRED)
-        return self._issue(key, intent)
+            self._awaiting_confirmation[key] = ActionRequest(
+                key, intent, event.language
+            )
+            return ActionNotice(
+                key,
+                intent,
+                ActionNoticeReason.CONFIRMATION_REQUIRED,
+                language=event.language,
+            )
+        return self._issue(key, intent, event.language)
 
     def confirm(self, key: ActionKey, *, approved: bool) -> ActionDecision:
         """Accept an explicit decision from a future trusted confirmation flow."""
         try:
-            intent = self._awaiting_confirmation.pop(key)
+            pending = self._awaiting_confirmation.pop(key)
         except KeyError as exc:
             raise ValueError("no confirmation is pending for this action") from exc
         if not approved:
-            return ActionNotice(key, intent, ActionNoticeReason.CANCELLED)
-        return self._issue(key, intent)
+            return ActionNotice(
+                key,
+                pending.intent,
+                ActionNoticeReason.CANCELLED,
+                language=pending.language,
+            )
+        return self._issue(key, pending.intent, pending.language)
 
     def record_result(self, result: ActionResult) -> ActionFeedback:
         """Apply a matched result without treating an unverified launch as fact."""
@@ -107,6 +130,7 @@ class ActionGate:
             in (ActionOutcome.CONFIRMED, ActionOutcome.LAUNCH_ACCEPTED)
             else ResponseChannel.TEXT_AND_VOICE,
             result.error_code,
+            request.language,
         )
 
     @property
@@ -120,7 +144,9 @@ class ActionGate:
             return intent.app in self.policy.allowed_chat_apps
         return False
 
-    def _issue(self, key: ActionKey, intent: CommandIntent) -> ActionRequest:
-        request = ActionRequest(key, intent)
+    def _issue(
+        self, key: ActionKey, intent: CommandIntent, language: str | None
+    ) -> ActionRequest:
+        request = ActionRequest(key, intent, language)
         self._outstanding[key] = request
         return request

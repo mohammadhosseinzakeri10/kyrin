@@ -1,4 +1,4 @@
-import sounddevice as sd
+import sounddevice as sd  # type: ignore[import-untyped]
 
 device = 4
 sample_rate = 48000

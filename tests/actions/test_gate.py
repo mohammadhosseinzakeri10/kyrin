@@ -195,7 +195,7 @@ def test_fresh_app_observation_can_inform_the_next_command() -> None:
     first = coordinator.observe(
         TranscriptUpdate(0, "تلگرام را باز کن", TranscriptStatus.FINAL, "fa")
     )
-    assert gate.observe(first[0]) == ActionRequest(ActionKey(0, 0), TELEGRAM)
+    assert gate.observe(first[0]) == ActionRequest(ActionKey(0, 0), TELEGRAM, "fa")
     assert gate.verified_context == VerifiedContext()
 
     gate.record_result(
@@ -206,7 +206,7 @@ def test_fresh_app_observation_can_inform_the_next_command() -> None:
         TranscriptUpdate(1, "چت علی را باز کن", TranscriptStatus.FINAL, "fa"),
         observed_active_app="telegram",  # A separate fresh OS observation.
     )
-    assert gate.observe(second[0]) == ActionRequest(ActionKey(0, 1), ALI_CHAT)
+    assert gate.observe(second[0]) == ActionRequest(ActionKey(0, 1), ALI_CHAT, "fa")
 
 
 def test_policy_and_results_reject_invalid_metadata() -> None:
@@ -237,3 +237,37 @@ def test_new_stream_can_reuse_segment_id_without_dedup_collision() -> None:
     assert gate.observe(CommandResolution(0, BROWSER, stream_id=1)) == ActionRequest(
         second, BROWSER
     )
+
+
+def test_out_of_order_results_keep_the_language_of_each_command() -> None:
+    gate = ActionGate(POLICY)
+    first = ActionKey(0, 0)
+    second = ActionKey(0, 1)
+    assert gate.observe(CommandResolution(0, TELEGRAM, language="en")) == (
+        ActionRequest(first, TELEGRAM, "en")
+    )
+    assert gate.observe(CommandResolution(1, BROWSER, language="fa")) == (
+        ActionRequest(second, BROWSER, "fa")
+    )
+    second_feedback = gate.record_result(
+        ActionResult(second, ActionOutcome.FAILED, error_code="not_found")
+    )
+    first_feedback = gate.record_result(
+        ActionResult(first, ActionOutcome.LAUNCH_ACCEPTED)
+    )
+    assert second_feedback.language == "fa"
+    assert first_feedback.language == "en"
+
+
+def test_confirmation_retains_original_command_language() -> None:
+    gate = ActionGate(
+        ActionPolicy(
+            allowed_chat_apps=frozenset({"telegram"}),
+            confirmation_required_for=frozenset({CommandKind.OPEN_CHAT}),
+        )
+    )
+    key = ActionKey(0, 0)
+    notice = gate.observe(CommandResolution(0, ALI_CHAT, language="fa"))
+    assert isinstance(notice, ActionNotice)
+    assert notice.language == "fa"
+    assert gate.confirm(key, approved=True) == ActionRequest(key, ALI_CHAT, "fa")

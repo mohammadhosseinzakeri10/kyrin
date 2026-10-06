@@ -1,7 +1,7 @@
 """Small structural contracts for replaceable STT backends."""
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat
@@ -39,6 +39,15 @@ class SpeechToTextSession(Protocol):
     def close(self) -> None:
         """Release the session, including when the stream stops early."""
         ...
+
+
+@runtime_checkable
+class TurnAwareSpeechToTextSession(Protocol):
+    """Optional turn hints for windowed backends; streaming STT need not use them."""
+
+    def start_turn(self) -> Sequence[TranscriptUpdate]: ...
+
+    def end_turn(self) -> Sequence[TranscriptUpdate]: ...
 
 
 class SpeechToTextEngine(Protocol):

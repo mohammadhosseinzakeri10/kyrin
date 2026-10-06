@@ -5,6 +5,9 @@ import math
 import subprocess
 from collections.abc import Mapping
 
+from kyrin.desktop.app_catalog import AppCatalog
+from kyrin.desktop.app_identity import AppIdentityResolver
+
 _BUS_NAME = "org.gnome.Shell"
 _OBJECT_PATH = "/org/kyrin/ActiveApp"
 _INTERFACE = "org.kyrin.ActiveApp"
@@ -17,22 +20,18 @@ class GnomeShellActiveAppObserver:
         self,
         app_ids: Mapping[str, str],
         *,
+        catalog: AppCatalog | None = None,
         timeout_s: float = 1.0,
     ) -> None:
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("timeout_s must be finite and positive")
-        if any(
-            not external.strip() or not internal.strip()
-            for external, internal in app_ids.items()
-        ):
-            raise ValueError("app identifiers must not be empty")
-        self._app_ids = dict(app_ids)
+        self._identity = AppIdentityResolver(app_ids, catalog)
         self._timeout_s = timeout_s
 
     def observe_active_app(self) -> str | None:
         """Return only a configured app; never reuse an earlier observation."""
         raw_id = self.read_active_app_id()
-        return self._app_ids.get(raw_id) if raw_id is not None else None
+        return self._identity.resolve(raw_id)
 
     def read_active_app_id(self) -> str | None:
         """Return the Shell's current desktop ID, or None if unavailable."""

@@ -3,7 +3,13 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from kyrin.commands.models import CommandContext, CommandIntent, PendingClarification
+from kyrin.commands.models import (
+    CommandContext,
+    CommandIntent,
+    CommandPlan,
+    PendingAppClarification,
+    PendingClarification,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,8 +18,18 @@ class ReadyCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadyPlan:
+    plan: CommandPlan
+
+
+@dataclass(frozen=True, slots=True)
 class NeedsClarification:
-    pending: PendingClarification
+    pending: PendingClarification | PendingAppClarification
+
+
+@dataclass(frozen=True, slots=True)
+class DeclinedClarification:
+    """The user rejected a proposed application; clear the pending question."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +49,9 @@ class NotACommand:
 
 Interpretation = (
     ReadyCommand
+    | ReadyPlan
     | NeedsClarification
+    | DeclinedClarification
     | IncompleteCommand
     | UnrecognizedCommand
     | NotACommand
@@ -47,5 +65,5 @@ class CommandInterpreter(Protocol):
         *,
         language: str | None,
         context: CommandContext,
-        pending: PendingClarification | None,
+        pending: PendingClarification | PendingAppClarification | None,
     ) -> Interpretation: ...

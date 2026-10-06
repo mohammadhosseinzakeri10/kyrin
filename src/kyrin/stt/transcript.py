@@ -17,6 +17,9 @@ class TranscriptUpdate:
 
     Updates with the same segment_id replace earlier partial text. A final
     update seals that segment, not the conversation or listening session.
+    The language is attributed by the STT backend: it may be detected by a
+    multilingual model or be the configured language of a fixed-language model.
+    Its presence alone does not prove automatic language detection.
     """
 
     segment_id: int

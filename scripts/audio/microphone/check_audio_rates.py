@@ -1,4 +1,4 @@
-import sounddevice as sd
+import sounddevice as sd  # type: ignore[import-untyped]
 
 
 def check_sample_rate(device: int, rate: int) -> bool:

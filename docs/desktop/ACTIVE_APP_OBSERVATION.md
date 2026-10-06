@@ -15,10 +15,28 @@ GNOME Shell → small extension → app desktop ID over D-Bus
                                      ↓
                       telegram / whatsapp / None
                                      ↓
-                        CommandCoordinator (later)
+                CommandCoordinator (optional dry run)
 ```
 
-The extension lives under `integrations/gnome-shell/` and runs in the GNOME session. The Python adapter lives under `kyrin.desktop.platforms`, while the shared contract lives under `kyrin.desktop`. The adapter uses Ubuntu's `busctl` and adds no Python dependency. This integration is not yet connected to the microphone pipeline or command execution.
+The extension lives under `integrations/gnome-shell/` and runs in the GNOME session. The Python adapter lives under `kyrin.desktop.platforms`, while the shared contract lives under `kyrin.desktop`. The adapter uses Ubuntu's `busctl` and adds no Python dependency. An optional bridge now supplies fresh observations to final decisions in the microphone diagnostic's `commands` mode. No desktop command is executed.
+
+## Installed app discovery
+
+`kyrin.desktop.app_catalog.AppCatalog` describes the separate task of finding applications registered on a device. `XdgDesktopAppCatalog` reads Linux `.desktop` entries from the [XDG data directories](https://specifications.freedesktop.org/basedir/0.8/) using Python's standard library. It derives exact desktop IDs according to the [Desktop Entry Specification](https://specifications.freedesktop.org/desktop-entry/latest/file-naming.html), prefers user entries over system entries, and honors `Hidden=true`. An entry with `NoDisplay=true` can still describe an installed app. The short diagnostic displays a catalog name beside an observed ID when an exact ID match exists.
+
+The catalog is for discovery and labels, not proof of focus or app identity. Several entries can share a display name; this machine has two Chrome entries called “Google Chrome.” `AppIdentityResolver` applies explicit exact-ID bindings, optionally requiring that the observed ID still appears in the catalog. `GnomeShellActiveAppObserver` delegates mapping to this resolver. A name match alone must not authorize a command. Other operating systems can provide their own catalog implementation behind the same contract. This XDG reader is deliberately limited to the ID and base `Name` fields; it is not a full desktop menu implementation.
+
+## Optional command dry run
+
+The `scripts/audio/check_live_speech.py` diagnostic accepts repeated `--active-app-binding DESKTOP_ID=KYRIN_APP_ID` arguments in `commands` mode. It reads the active app only for a **final** transcript, verifies the exact desktop ID against the XDG catalog, and passes the mapped KYRIN ID to `CommandCoordinator`. Partial transcripts never block on a desktop observation. An absent extension, unknown ID, or unregistered app produces `None`, so an ambiguous chat command asks which app the user means. Without bindings, the diagnostic preserves its previous no-observation behavior. Its action gate still prints requests without executing them.
+
+Use `scripts/desktop/check_active_app.py` to discover the desktop ID on the target machine. The binding is a diagnostic input, not a hard-coded project default or automatic identity guess. For example, after replacing the placeholder with an exact ID:
+
+```bash
+.venv/bin/python scripts/audio/check_live_speech.py --mode commands \
+  --model-path /path/to/local/model --language fa --seconds 35 \
+  --active-app-binding 'TELEGRAM_DESKTOP_ID=telegram'
+```
 
 ## Manual validation
 
@@ -36,7 +54,7 @@ If the current session does not recognize the new extension, logging out and bac
 .venv/bin/python scripts/desktop/check_active_app.py --seconds 20
 ```
 
-Switch between several apps during that interval. The output should show the app that actually has focus; when no app ID can be determined, the diagnostic prints `unknown`. This test does not execute commands.
+Switch between several apps during that interval. The output should show the app that actually has focus, followed by its registered name when available; when no app ID can be determined, the diagnostic prints `unknown`. This test does not execute commands.
 
 ### Validation results on 2026-10-05
 
@@ -44,7 +62,11 @@ Switch between several apps during that interval. The output should show the app
 - A separate headless session loaded the extension with `gnome-shell-test-tool --headless --extension`. With no focused window, the D-Bus method returned an empty app ID, which the diagnostic displayed as `unknown`.
 - An attempt to focus Calculator in that headless session still produced `unknown`: the session did not provide an observable focused window. This run therefore did not verify that a real app ID can be reported.
 - The extension was installed for a user-session test, but the current GNOME Shell session did not recognize it when `gnome-extensions enable` was called. The two installed files were removed after the test; no extension remained enabled in the main session.
-- Switching between Telegram and Chrome with this extension has not yet been validated in a live session. That check requires a fresh login or a test session with an observable focused window.
+- At that point, switching between Telegram and Chrome had not yet been validated in a live session. That check required a fresh login or a test session with an observable focused window.
+
+### Live session result after restart on 2026-10-05
+
+After a system restart, GNOME Shell 50.1 recognized and enabled the extension. A D-Bus request returned `chatgpt.desktop` for the focused Codex window. During a 20-second run, the diagnostic alternated between `google-chrome.desktop` and a Telegram desktop ID with an installation-specific suffix as the user confirmed switching between Chrome and Telegram several times. The Telegram ID exactly matched a `.desktop` entry in the user's XDG application directory. The local XDG catalog also found both Chrome entries and the Telegram entry. A later one-second run of the updated diagnostic displayed `chatgpt.desktop (ChatGPT)`. A read-only end-to-end probe mapped that observed ID to `codex` through an explicit test binding and catalog verification. This verifies foreground ID reporting, catalog labeling, and exact-ID resolution in this GNOME session; it does not validate command execution or future GNOME versions.
 
 ## Limitations
 
