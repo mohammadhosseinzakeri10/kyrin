@@ -7,8 +7,7 @@ from kyrin.commands.models import (
     CommandContext,
     CommandIntent,
     CommandPlan,
-    PendingAppClarification,
-    PendingClarification,
+    PendingCommandClarification,
 )
 
 
@@ -24,7 +23,7 @@ class ReadyPlan:
 
 @dataclass(frozen=True, slots=True)
 class NeedsClarification:
-    pending: PendingClarification | PendingAppClarification
+    pending: PendingCommandClarification
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,5 +64,5 @@ class CommandInterpreter(Protocol):
         *,
         language: str | None,
         context: CommandContext,
-        pending: PendingClarification | PendingAppClarification | None,
+        pending: PendingCommandClarification | None,
     ) -> Interpretation: ...

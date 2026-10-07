@@ -46,8 +46,9 @@ The existing `scripts/audio/check_live_speech.py --mode commands` invocation
 speaks response requests by default when `spd-say` is installed. Its speech
 backend requires the local Speech Dispatcher `espeak-ng` module. Use
 `--no-voice-responses` when silent diagnostics are needed. STT/VAD-only modes
-remain silent, and the tool never executes desktop actions or saves microphone
-audio. A later application UI can consume the same `PresentedResponse` and
+remain silent. The diagnostic is a desktop-action dry run by default; explicit
+`--execute-actions` and `--launch-app` bindings enable limited app launch.
+It never saves microphone audio. A later application UI can consume the same `PresentedResponse` and
 `SpeechSynthesizer` contracts without reusing this diagnostic script.
 
 Only Persian and English response catalogs are present. The installed

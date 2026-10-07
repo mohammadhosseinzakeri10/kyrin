@@ -39,8 +39,9 @@ been lost**, rather than implying that it was preserved.
 
 The live microphone diagnostic prints localized notices. In `commands` mode,
 events requesting `TEXT_AND_VOICE` also use the optional local Speech Dispatcher
-output; `--no-voice-responses` keeps it text-only. This still is a dry run for
-desktop actions: no recognized command is executed and no product UI exists.
+output; `--no-voice-responses` keeps it text-only. Desktop actions are a dry
+run by default, but explicitly allowlisted app launch can be enabled with
+`--execute-actions` and `--launch-app`. No product UI exists yet.
 Speech playback and microphone echo suppression are described in
 `docs/responses/OFFLINE_SPEECH_OUTPUT.md`. The diagnostic loads `sounddevice`
 only after parsing arguments, so help works without an audio server.

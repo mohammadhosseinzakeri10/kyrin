@@ -11,7 +11,7 @@ from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
     CommandResolution,
-    PendingClarification,
+    PendingCommandClarification,
     ResponseChannel,
     ResponseKind,
     ResponseRequest,
@@ -317,7 +317,7 @@ def test_interpreter_is_replaceable_and_receives_language_and_context() -> None:
             *,
             language: str | None,
             context: CommandContext,
-            pending: PendingClarification | None,
+            pending: PendingCommandClarification | None,
         ) -> Interpretation:
             self.seen = (text, language, context)
             return ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "calculator"))

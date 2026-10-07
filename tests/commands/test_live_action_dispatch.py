@@ -19,13 +19,18 @@ from kyrin.actions.models import (
 from kyrin.actions.queued_dispatch import QueuedActionDispatcher
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
-from kyrin.commands.models import CommandEvent, CommandKind
+from kyrin.commands.models import (
+    CommandEvent,
+    CommandIntent,
+    CommandKind,
+    CommandPlanResolution,
+    CommandResolution,
+)
+from kyrin.runtime.command_runtime import dispatch_command_action, execute_final_command
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/audio/check_live_speech.py"
 NAMESPACE = run_path(str(SCRIPT))
-dispatch_command_action = NAMESPACE["dispatch_command_action"]
-execute_final_command = NAMESPACE["execute_final_command"]
 parse_args = NAMESPACE["parse_args"]
 
 
@@ -221,6 +226,7 @@ def test_queued_plan_reports_first_launch_and_unsupported_next_step() -> None:
         event = decisions("Open Telegram and open Alice chat", TranscriptStatus.FINAL)[
             0
         ]
+        assert isinstance(event, (CommandResolution, CommandPlanResolution))
         assert worker.submit(event) is None
         assert completed.wait(2)
     finally:
@@ -231,3 +237,39 @@ def test_queued_plan_reports_first_launch_and_unsupported_next_step() -> None:
     assert received[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
     assert isinstance(received[1], ActionNotice)
     assert received[1].reason is ActionNoticeReason.UNSUPPORTED
+
+
+def test_executor_exception_has_unknown_result_and_next_command_can_run() -> None:
+    class FlakyExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, request: ActionRequest) -> ActionResult:
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError("private desktop failure")
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    action_gate = gate()
+    executor = FlakyExecutor()
+    first = CommandResolution(
+        0,
+        CommandIntent(CommandKind.OPEN_APP, "telegram"),
+        language="en",
+    )
+    second = CommandResolution(
+        1,
+        CommandIntent(CommandKind.OPEN_APP, "telegram"),
+        language="en",
+    )
+
+    unknown = execute_final_command(first, action_gate, executor)
+    accepted = execute_final_command(second, action_gate, executor)
+
+    assert len(unknown) == 1
+    assert isinstance(unknown[0], ActionFeedback)
+    assert unknown[0].outcome is ActionOutcome.UNKNOWN
+    assert unknown[0].error_code == "executor_exception"
+    assert len(accepted) == 1
+    assert isinstance(accepted[0], ActionFeedback)
+    assert accepted[0].outcome is ActionOutcome.LAUNCH_ACCEPTED

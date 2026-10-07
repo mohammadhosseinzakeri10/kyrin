@@ -70,6 +70,20 @@ class PendingAppClarification:
     confirmation: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PendingIntentClarification:
+    """An exact app name also reads as a chat command."""
+
+    app_candidate: SpokenAppCandidate
+    chat_target: str
+    chat_app: str | None = None
+
+
+PendingCommandClarification = (
+    PendingClarification | PendingAppClarification | PendingIntentClarification
+)
+
+
 class ResponseChannel(StrEnum):
     TEXT_ONLY = "text_only"
     TEXT_AND_VOICE = "text_and_voice"
@@ -79,6 +93,7 @@ class ResponseKind(StrEnum):
     CHOOSE_CHAT_APP = "choose_chat_app"
     CHOOSE_APP = "choose_app"
     CONFIRM_APP = "confirm_app"
+    CHOOSE_APP_OR_CHAT = "choose_app_or_chat"
     REPEAT_COMMAND = "repeat_command"
 
 
@@ -135,6 +150,10 @@ class ResponseRequest:
             self.target is None or not self.target.strip()
         ):
             raise ValueError("app confirmation requires a name")
+        if self.kind is ResponseKind.CHOOSE_APP_OR_CHAT and (
+            self.target is None or not self.target.strip()
+        ):
+            raise ValueError("app-or-chat clarification requires an app name")
         if self.kind is ResponseKind.CHOOSE_APP and len(self.app_candidates) < 2:
             raise ValueError("app choice requires at least two candidates")
 

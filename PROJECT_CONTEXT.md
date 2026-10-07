@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-06.
+> Updated: 2026-10-07.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -30,15 +30,70 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** continue English V1 development with the locally
-  installed Whisper `small` CPU adapter while keeping Vosk replaceable. This is
-  a development choice, not a packaged default or a general accuracy claim.
-  The command diagnostic now prints localized responses and can speak them
-  through an offline Ubuntu adapter. Desktop actions remain dry-run by default
-  in that diagnostic; an explicit allowlisted Ubuntu open-app launch path is
-  now available and has passed a local microphone-to-desktop smoke test.
-  Model packaging, multilingual setup, product UI, broader live
-  validation, and Windows/macOS/mobile adapters remain future work.
+- **Current next direction:** design an ordinary Ubuntu application entry point
+  around the reusable live command runtime, with explicit model, audio, and
+  desktop-action settings. English development currently uses the locally
+  installed Whisper `small` CPU adapter while Vosk remains replaceable; this
+  is not a packaged default or a general accuracy claim. The terminal
+  diagnostic stays dry-run by default. Explicitly allowlisted app launch and
+  registered app-name matching have passed focused tests, and the owner
+  validated a real microphone-to-Telegram launch. Model packaging,
+  multilingual setup, product UI, broader stability validation, and
+  Windows/macOS/mobile adapters remain future work.
+- **Visual feedback in progress:** a backend-independent status controller and
+  optional GNOME Shell 50 character adapter now exist in the repository. The
+  character distinguishes processing, clarification, actual action execution,
+  confirmed completion, accepted-but-unverified launch, and failure. Focused
+  Python tests and extension packaging passed. After correcting a GNOME 50
+  drag API incompatibility, the owner observed a visible, draggable character
+  and GNOME reported the extension as `ACTIVE`. Dragging felt laggy, so the
+  extension now coalesces pointer motion and updates position once before each
+  redraw. A separate fresh GNOME Shell 50.1 session verified status delivery
+  and newest-position application. The owner reported that this was much
+  better but still lagged. A visual-translation experiment passed a separate
+  coordinate check but felt much worse on the user's actual desktop, so it was
+  rolled back to frame-coalesced position updates. The remaining live delay
+  needs measurement before another change. The owner rejected the dark static
+  preview and authorized a smaller electric blue/violet animated mascot with
+  contextual captions and a hide control. The optional GNOME
+  adapter now uses a compact vector character and short state-driven motion;
+  the UI has a × button and a top-bar restore control. The owner confirmed
+  dragging, × hide, and restore after restarting the desktop session. The visual
+  caption contract is independent of STT and TTS adapters. Headless GNOME
+  tests verified movement, captions, hide/reopen, and queued position changes.
+  The owner reported that real dragging failed; GNOME logs identified a null
+  pointer-event source passed to `Clutter.Actor.contains()`. The owner later
+  confirmed dragging after a session restart, but × did not hide the mascot.
+  Drag starts on the image-and-caption content now, leaving × as a separate
+  click target. A follow-up made × always clickable, handled primary press
+  directly, and added a hover hint; the owner validated hide/restore after
+  restarting the session. The owner approved more distinct state reactions.
+  The mascot now uses head, eye, body, arm, and leg SVG layers, with
+  compositor-only poses for ready, listening, processing, clarification,
+  actual execution, confirmed/unverified results, and failure. The revised
+  package is installed for the current user. A separate headless GNOME Shell
+  50.1 session loaded all eight states without an extension error. After a
+  restart, the owner observed distinct listening, processing, and execution
+  motion; correct symbols and captions; smooth movement; and working ×
+  hide/restore in a no-action display run. The user-session log showed no
+  extension error. A later local `Open Telegram` microphone run produced a
+  confirmed Telegram foreground action; the owner independently saw Telegram
+  activate and observed the character change states during the real command.
+  A later non-command transcript was the owner's spoken reaction and caused no
+  action. Broader timing and other desktop environments remain unverified.
+  This is not packaged product UI.
+
+The 2026-10-07 repository audit read the project files by component and found
+two small gaps in the current vertical slice. A final non-command could leave
+the mascot showing Processing; a worker failure could go without immediate
+user feedback. The status controller now returns to Ready on a final
+non-command, with a later clarification event taking precedence. Executor
+exceptions are represented as UNKNOWN because an action might have occurred
+before the exception. A fatal worker processing error also emits immediate
+UNKNOWN feedback before the worker stops. Deterministic tests cover these
+paths. The full static type check now passes after synchronizing test doubles
+with the current contracts. No new live microphone/GNOME validation has been
+run for these corrections.
 
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
 is to understand voice, vision, and text and interact naturally with the
@@ -88,11 +143,11 @@ Both branches → live events → command decision layer (implemented, dry-run)
 
 `SampleRateConverter` and `AudioFramer` are separate downstream components.
 The capture-to-activity pipeline, replaceable STT contract, optional Vosk
-adapter, and backend-independent live VAD/STT composition exist. The desktop
-application has not yet been wired to run them. A separate command coordinator
-now accepts transcript updates. The Linux app launcher is available to the
-live microphone diagnostic only through explicit execution and app-binding
-flags; it is not wired to an application runtime.
+adapter, and backend-independent live VAD/STT composition exist. A reusable
+`LiveCommandRuntime` connects transcript decisions to the bounded action
+worker. The Linux launcher is available only with explicit execution and app
+bindings in the terminal diagnostic; a packaged application entry point does
+not yet exist.
 A downstream engine that accepts variable-size chunks may bypass `AudioFramer`.
 
 ### Architectural boundary
@@ -992,6 +1047,10 @@ rather than partial fragments.
 ---
 
 ## 22. Current Project State
+
+This section preserves an earlier milestone snapshot. Later sections 43–57
+record decisions and implementation that supersede its old next-step and test
+counts; use the overview above and the repository for current status.
 
 ### Completed
 
@@ -1960,3 +2019,80 @@ diagnostic's process session and exiting when that session ended. Starting
 command exited. The Linux executor now requests a new session for the launcher;
 focused automated tests assert that invocation. This does not change action
 result semantics or claim portability beyond the observed Ubuntu/GNOME setup.
+
+## 55. Opt-In Continuous Listening Trial
+
+The owner approved a controlled longer listening trial before a packaged
+always-on application. The command microphone diagnostic now accepts
+`--until-stopped`, mutually exclusive with the existing `--seconds` option.
+Its default remains a 10-second dry run, and bounded runs still cap at 120
+seconds. The opt-in mode keeps the same `SpeechSessionController`, command
+coordinator, action queue, and engine alive until Ctrl+C or a terminal error.
+Silence does not reset command context. Manual interruption requests controller
+stop before the existing cleanup closes the action worker, optional speaker,
+and STT engine. The mode does not save audio or enable actions on its own.
+Focused tests cover argument boundaries and resource cleanup without opening a
+microphone. A roughly three-minute dry-run microphone trial on this Ubuntu
+machine kept listening across about 90 seconds of silence and later recognized
+`Open browser.`; earlier it misheard `Open Boser.` and issued no action. The
+owner thinks they repeated the final browser phrase, so the two final browser
+segments are not evidence of an unintended duplicate. Several Telegram finals
+were also produced. Backlog wait/ready notices occurred, but no overflow or
+recovery failure was observed. Manual Ctrl+C exited with code zero, and both
+the diagnostic Python process and the local Whisper server were gone afterward.
+Two process snapshots showed roughly 94 MiB RSS for the diagnostic and
+637–641 MiB RSS for the Whisper server; this short run cannot establish
+long-term memory stability. No desktop action or audio recording occurred.
+See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`.
+
+## 56. Reusable Live Command Runtime
+
+The owner approved moving continuous command orchestration out of the terminal
+diagnostic. `LiveCommandRuntime` in `src/kyrin/runtime/command_runtime.py` now
+consumes `SpeechSessionController` events, asks `CommandCoordinator` for
+decisions, reads fresh app focus only for final transcripts, and routes final
+commands through the existing bounded action worker. In dry-run mode it uses
+the same action policy without launching applications. Session boundaries
+invalidate provisional speech segments but do not clear dialogue context;
+silence alone has no reset behavior. The runtime exposes `run()` and `stop()`
+and sends events to injected presentation callbacks. The terminal diagnostic
+still selects microphone, VAD/STT adapters, Linux bindings, response output,
+and optional timer, and owns the STT engine and speaker cleanup. No new
+dependency, default action permission, platform integration, or model choice
+was introduced. Deterministic tests cover multiple finals across a stream
+boundary, partial-positive/final-negated speech, worker execution, and the
+existing manual stop path. A packaged background app and longer stability
+validation remain future work.
+
+## 57. Registered App Names from Explicit Launch Bindings
+
+The owner prioritized correct execution and asked KYRIN to use system app
+names and desktop context without slowing the live audio path. The Ubuntu
+command diagnostic now identifies an exact `--launch-app` desktop-entry path
+in the XDG registered-app catalog at startup. For such entries it automatically
+binds the installed display name and the configured internal app ID to the
+existing `CatalogSpokenAppResolver`. The interpreter can recognize that name
+without a duplicate `--spoken-app-binding`; near matches still require user
+confirmation and `ActionGate` still restricts actual execution to explicitly
+allowed apps. Unregistered paths gain no inferred name, and conflicting
+explicit bindings fail at startup. The resolver uses a startup snapshot, so
+no catalog scan is added to each partial transcript. Fresh foreground state
+continues to be read only for final transcripts when explicitly configured.
+Deterministic tests use temporary desktop entries and a fake executor. Names
+that overlap command syntax, such as a name beginning with "Chat", remain an
+open interpreter ambiguity. No system settings are changed or UI internals
+inspected by this step.
+
+## 58. Exact App-Name Versus Chat-Command Ambiguity
+
+The owner prioritized command correctness before other incomplete work. A
+registered app such as "Chat One" previously matched the chat-command grammar
+before the spoken app name was considered. The demo interpreter now detects a
+unique plausible registered app name that also matches a chat form and emits an
+app-or-chat clarification on a final transcript. The app opens only after an
+explicit "app" reply; "chat" follows the existing fresh-context rules. A
+generic "yes" repeats the question, while a negated final never acts. Such an
+ambiguity inside a compound command rejects the whole plan to avoid executing
+an uncertain fragment. This is a safety rule for the limited demo interpreter,
+not general natural-language disambiguation. Focused tests use a fake catalog
+and do not launch desktop apps. No STT/TTS backend or new dependency changed.

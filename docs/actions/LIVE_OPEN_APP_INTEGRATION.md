@@ -7,6 +7,14 @@ explicit `--launch-app KYRIN_APP_ID=/absolute/path.desktop` binding. The
 binding is both the action allowlist and the path the executor may launch.
 Nothing is inferred from the spoken text as a shell command.
 
+For a controlled long listening trial, `--mode commands --until-stopped` keeps
+the same pipeline and dialogue coordinator alive until Ctrl+C. The normal
+`--seconds` mode still defaults to 10 seconds and is capped at 120 seconds.
+`--until-stopped` and `--seconds` cannot be combined. Silence between commands
+does not reset the dialogue or terminate capture. This is still a terminal
+diagnostic; application launch still needs the separate explicit flags above.
+No microphone audio is saved by this mode.
+
 For example, after locating a locally installed STT model and Telegram's
 desktop entry:
 
@@ -22,9 +30,11 @@ desktop entry:
 
 The paths are examples, not project defaults. Additional bound application IDs
 must also be understood by the command interpreter. A registered desktop app
-can be supplied with `--spoken-app-binding DESKTOP_ID=KYRIN_APP_ID` and, when
-needed, `--spoken-app-alias KYRIN_APP_ID=PHRASE`. A launch binding by itself does
-not teach the interpreter a spoken name.
+whose exact desktop-entry path is supplied with `--launch-app` now contributes
+its installed display name automatically. Custom paths and extra apps can use
+`--spoken-app-binding DESKTOP_ID=KYRIN_APP_ID` and, when needed,
+`--spoken-app-alias KYRIN_APP_ID=PHRASE`. A launch binding alone still does not
+authorize any other app or teach arbitrary command phrasing.
 
 On GNOME, an optional exact `--active-app-binding DESKTOP_ID=KYRIN_APP_ID`
 also lets KYRIN check the foreground app after a launch. After `gio launch`
@@ -43,12 +53,21 @@ to return an app ID.
 ## Decision boundary
 
 ```text
-microphone -> STT final transcript -> CommandCoordinator
+microphone -> STT final transcript -> LiveCommandRuntime -> CommandCoordinator
     -> CommandResolution / CommandPlanResolution -> bounded action queue
     -> one ordered worker -> ActionGate (explicit allowlist, duplicate suppression)
     -> LinuxDesktopEntryExecutor (OPEN_APP only)
     -> ActionFeedback / ActionNotice -> localized text or voice
 ```
+
+`LiveCommandRuntime` owns this event routing and the bounded action worker.
+The terminal tool chooses the concrete microphone, STT engine, desktop adapter,
+and text or voice presentation; those remain outside the reusable runtime.
+The same runtime can therefore serve a later application entry point without
+copying the command loop. `stop()` interrupts listening, while `run()` closes
+the event iterator and worker. The caller still closes its STT engine and
+speaker. Silence leaves the command coordinator and dialogue context alive;
+an actual speech-session boundary only clears provisional segment state.
 
 Partial transcripts only display revisable candidates. Unknown and negated
 commands do not enter the action queue. A full queue returns a localized busy
@@ -63,11 +82,21 @@ reports that chat navigation is unsupported. Earlier accepted steps are not
 rolled back. The response for `LAUNCH_ACCEPTED` states that completion has not
 been confirmed; a successful `gio launch` is not proof that a window appeared.
 
+An unexpected exception at the executor boundary becomes an `UNKNOWN` action
+result, not a claim that the action failed: the desktop operation might already
+have taken effect. The gate records this uncertainty, the ordered plan stops,
+and the existing text-and-voice response asks the user to check the result.
+The exception is logged for diagnosis. If the action worker itself fails before
+producing a result, it immediately sends an `UNKNOWN` response, stops accepting
+actions, and still raises its internal error at shutdown. Focused tests cover
+both paths without launching a desktop app.
+
 ## Present limits
 
-- This is a bounded diagnostic, not a packaged always-on application. A new
-  run lasts at most 120 seconds; the microphone pipeline continues through
-  commands during the run.
+- This is a terminal diagnostic, not a packaged always-on application. Runs
+  are bounded to at most 120 seconds by default; the optional long-listening
+  mode continues until Ctrl+C or a terminal error. It does not start with the
+  operating system or survive a process exit.
 - Only Linux application launch is connected. Chats, file changes, clicks,
   browser navigation, and other desktop operations are not connected.
 - The demo interpreter recognizes a limited set of phrases. STT can still
@@ -110,6 +139,18 @@ diagnostic's process session; when `gio launch` was instead started in a new
 session, Chrome survived the end of the launching command. The executor now
 uses that behavior. This local finding has not yet been tested on other desktop
 environments.
+
+The opt-in long-listening mode was then tried for about three minutes with the
+owner's microphone, Whisper small on CPU, no voice output, and no OS actions.
+It kept the same session through about 90 seconds of silence. Several Telegram
+finals were recognized. One browser attempt became `Open Boser.` and was not
+authorized; later `Open browser.` was recognized. Two browser finals appeared,
+and the owner thinks they repeated the phrase, so this run does not establish a
+duplicate-segmentation defect. Backlog wait/ready notices appeared without
+overflow. Ctrl+C ended cleanly with exit code zero, and both the diagnostic and
+Whisper server processes exited. Two RSS snapshots were about 94 MiB for the
+diagnostic and 637–641 MiB for the server. This is a short local stability
+sample, not a latency or memory guarantee for persistent product use.
 
 The focused non-hardware checks are in
 `tests/commands/test_live_action_dispatch.py`,

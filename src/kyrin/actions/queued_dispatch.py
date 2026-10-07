@@ -9,8 +9,13 @@ from kyrin.actions.models import (
     ActionKey,
     ActionNotice,
     ActionNoticeReason,
+    ActionOutcome,
 )
-from kyrin.commands.models import CommandPlanResolution, CommandResolution
+from kyrin.commands.models import (
+    CommandPlanResolution,
+    CommandResolution,
+    ResponseChannel,
+)
 
 FinalActionCommand = CommandResolution | CommandPlanResolution
 ActionOutput = ActionNotice | ActionFeedback
@@ -29,6 +34,24 @@ def _notice_for(
         ActionKey(command.stream_id, command.segment_id),
         intent,
         reason,
+        language=command.language,
+    )
+
+
+def _unknown_for(command: FinalActionCommand) -> ActionFeedback:
+    """Report a fatal processing error without claiming the action failed."""
+    intent = (
+        command.plan.steps[0]
+        if isinstance(command, CommandPlanResolution)
+        else command.intent
+    )
+    assert intent is not None
+    return ActionFeedback(
+        ActionKey(command.stream_id, command.segment_id),
+        intent,
+        ActionOutcome.UNKNOWN,
+        ResponseChannel.TEXT_AND_VOICE,
+        error_code="action_worker_failed",
         language=command.language,
     )
 
@@ -115,9 +138,21 @@ class QueuedActionDispatcher:
                 self._on_output(_notice_for(command, ActionNoticeReason.CANCELLED))
                 return
             try:
-                for output in self._process(command):
-                    self._on_output(output)
+                outputs = self._process(command)
             except Exception as exc:
                 with self._lock:
                     self._error = exc
+                try:
+                    self._on_output(_unknown_for(command))
+                except Exception:
+                    # A broken presentation callback cannot report its own
+                    # failure. close() still raises the original worker error.
+                    pass
                 return
+            for output in outputs:
+                try:
+                    self._on_output(output)
+                except Exception as exc:
+                    with self._lock:
+                        self._error = exc
+                    return

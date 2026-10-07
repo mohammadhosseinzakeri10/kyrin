@@ -38,12 +38,12 @@ class XdgDesktopAppCatalog:
     def __init__(self, data_roots: Sequence[Path] | None = None) -> None:
         self._data_roots = tuple(data_roots) if data_roots is not None else None
 
-    def list_apps(self) -> tuple[InstalledApp, ...]:
+    def _entries(self) -> tuple[tuple[Path, InstalledApp], ...]:
         roots = (
             self._data_roots if self._data_roots is not None else _default_data_roots()
         )
         seen: set[str] = set()
-        apps: list[InstalledApp] = []
+        entries: list[tuple[Path, InstalledApp]] = []
         for root in roots:
             if not root.is_absolute():
                 continue
@@ -57,8 +57,20 @@ class XdgDesktopAppCatalog:
                 seen.add(platform_id)
                 app = _read_app(path, platform_id)
                 if app is not None:
-                    apps.append(app)
-        return tuple(sorted(apps, key=lambda app: app.platform_id))
+                    entries.append((path, app))
+        return tuple(sorted(entries, key=lambda item: item[1].platform_id))
+
+    def list_apps(self) -> tuple[InstalledApp, ...]:
+        return tuple(app for _, app in self._entries())
+
+    def find_entry(self, entry_path: Path) -> InstalledApp | None:
+        """Identify an exact registered entry, respecting XDG precedence."""
+        if not entry_path.is_absolute():
+            return None
+        return next(
+            (app for path, app in self._entries() if path == entry_path),
+            None,
+        )
 
     def find_app(self, platform_id: str) -> InstalledApp | None:
         return next(

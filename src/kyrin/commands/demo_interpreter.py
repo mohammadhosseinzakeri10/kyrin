@@ -25,6 +25,8 @@ from kyrin.commands.models import (
     CommandPlan,
     PendingAppClarification,
     PendingClarification,
+    PendingCommandClarification,
+    PendingIntentClarification,
 )
 
 _APPS = {
@@ -72,7 +74,7 @@ class DemoCommandInterpreter:
         *,
         language: str | None,
         context: CommandContext,
-        pending: PendingClarification | PendingAppClarification | None,
+        pending: PendingCommandClarification | None,
     ) -> Interpretation:
         phrase = _normalize(text)
         addressed = False
@@ -83,6 +85,19 @@ class DemoCommandInterpreter:
                 break
         if not phrase or phrase in ("کایرین", "کایری", "kyrin"):
             return NotACommand()
+
+        if isinstance(pending, PendingIntentClarification):
+            if phrase in ("no", "cancel", "نه", "خیر", "لغو"):
+                return DeclinedClarification()
+            if phrase in ("app", "the app", "application", "برنامه", "خود برنامه"):
+                return ReadyCommand(
+                    CommandIntent(CommandKind.OPEN_APP, pending.app_candidate.app_id)
+                )
+            if phrase in ("chat", "the chat", "conversation", "چت", "گفتگو"):
+                return self._chat_command(
+                    pending.chat_target, context, pending.chat_app
+                )
+            return NeedsClarification(pending)
 
         if isinstance(pending, PendingAppClarification):
             if phrase in ("no", "نه", "خیر"):
@@ -121,11 +136,36 @@ class DemoCommandInterpreter:
         if " and " in phrase and phrase.startswith(("open ", "go to ")):
             return self._interpret_english_plan(phrase)
 
+        if self._app_name_resolver is not None:
+            app_match = _OPEN_NAMED_APP_FA.fullmatch(
+                phrase
+            ) or _OPEN_NAMED_APP_EN.fullmatch(phrase)
+            explicit_chat_match = _OPEN_CHAT_WITH_APP_FA.fullmatch(phrase)
+            chat_match = (
+                explicit_chat_match
+                or _OPEN_CHAT_FA.fullmatch(phrase)
+                or _GO_CHAT_FA.fullmatch(phrase)
+                or _OPEN_CHAT_EN.fullmatch(phrase)
+            )
+            if app_match is not None and chat_match is not None:
+                app_result = self._app_name_resolver.resolve(app_match[1])
+                if len(app_result.candidates) > 1:
+                    return UnrecognizedCommand()
+                if len(app_result.candidates) == 1:
+                    chat_app = (
+                        _APPS[explicit_chat_match[2]]
+                        if explicit_chat_match is not None
+                        else None
+                    )
+                    return NeedsClarification(
+                        PendingIntentClarification(
+                            app_result.candidates[0], chat_match[1].strip(), chat_app
+                        )
+                    )
+
         match = _OPEN_CHAT_WITH_APP_FA.fullmatch(phrase)
         if match is not None:
-            return ReadyCommand(
-                CommandIntent(CommandKind.OPEN_CHAT, match[1], _APPS[match[2]])
-            )
+            return self._chat_command(match[1], context, _APPS[match[2]])
 
         match = (
             _OPEN_CHAT_FA.fullmatch(phrase)
@@ -133,15 +173,7 @@ class DemoCommandInterpreter:
             or _OPEN_CHAT_EN.fullmatch(phrase)
         )
         if match is not None:
-            person = match[1].strip()
-            resolution = self._context_resolver.resolve_chat_app(context)
-            if not isinstance(resolution, AppClarification):
-                return ReadyCommand(
-                    CommandIntent(CommandKind.OPEN_CHAT, person, resolution.app)
-                )
-            return NeedsClarification(
-                PendingClarification(person, resolution.candidates)
-            )
+            return self._chat_command(match[1].strip(), context)
 
         if self._app_name_resolver is not None:
             match = _OPEN_NAMED_APP_FA.fullmatch(
@@ -191,10 +223,19 @@ class DemoCommandInterpreter:
         first_app = self._exact_app(first_match[1])
         if first_app is None:
             return UnrecognizedCommand()
+        if _OPEN_CHAT_CLAUSE_EN.fullmatch(clauses[0]) is not None:
+            return UnrecognizedCommand()
         first = CommandIntent(CommandKind.OPEN_APP, first_app)
 
         chat_match = _OPEN_CHAT_CLAUSE_EN.fullmatch(clauses[1])
         if chat_match is not None:
+            second_app_match = _OPEN_APP_CLAUSE_EN.fullmatch(clauses[1])
+            if (
+                second_app_match is not None
+                and self._app_name_resolver is not None
+                and self._app_name_resolver.resolve(second_app_match[1]).candidates
+            ):
+                return UnrecognizedCommand()
             person = (chat_match[1] or chat_match[2]).strip()
             if person:
                 return ReadyPlan(
@@ -212,6 +253,18 @@ class DemoCommandInterpreter:
                     )
                 )
         return UnrecognizedCommand()
+
+    def _chat_command(
+        self, person: str, context: CommandContext, app: str | None = None
+    ) -> Interpretation:
+        if app is not None:
+            return ReadyCommand(CommandIntent(CommandKind.OPEN_CHAT, person, app))
+        resolution = self._context_resolver.resolve_chat_app(context)
+        if not isinstance(resolution, AppClarification):
+            return ReadyCommand(
+                CommandIntent(CommandKind.OPEN_CHAT, person, resolution.app)
+            )
+        return NeedsClarification(PendingClarification(person, resolution.candidates))
 
     def _exact_app(self, spoken_name: str) -> str | None:
         if self._app_name_resolver is not None:

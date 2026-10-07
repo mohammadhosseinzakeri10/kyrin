@@ -17,6 +17,9 @@ _TEXT: dict[str, dict[str, str]] = {
         "choose_chat_app": "چت را در کدام برنامه باز کنم؟",
         "choose_chat_app_pair": "چت {target} را در {first} باز کنم یا {second}؟",
         "confirm_app": "منظورتان برنامهٔ {target} است؟",
+        "choose_app_or_chat": (
+            "منظورتان برنامهٔ {target} است یا یک چت؟ لطفاً بگویید «برنامه» یا «چت»."
+        ),
         "choose_app": "منظورتان کدام برنامه است: {options}؟",
         "choose_app_duplicate": (
             "چند برنامه با نام {target} پیدا شد. لطفاً نام متفاوتی بگویید."
@@ -65,6 +68,9 @@ _TEXT: dict[str, dict[str, str]] = {
             "Should I open {target}'s chat in {first} or {second}?"
         ),
         "confirm_app": "Did you mean the {target} app?",
+        "choose_app_or_chat": (
+            "Do you mean the {target} app or a chat? Please say app or chat."
+        ),
         "choose_app": "Which app did you mean: {options}?",
         "choose_app_duplicate": (
             "Multiple apps are named {target}. Please use a different name."
@@ -174,7 +180,7 @@ class ResponsePresenter:
     ) -> str:
         if event.kind is ResponseKind.REPEAT_COMMAND:
             return messages[event.kind.value]
-        if event.kind is ResponseKind.CONFIRM_APP:
+        if event.kind in (ResponseKind.CONFIRM_APP, ResponseKind.CHOOSE_APP_OR_CHAT):
             return messages[event.kind.value].format(target=event.target)
         if event.kind is ResponseKind.CHOOSE_APP:
             if len(set(event.app_candidates)) == 1:

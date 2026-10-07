@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from kyrin.actions.executor import ActionExecutor
+from kyrin.actions.executor import ActionExecutor, execute_with_unknown_fallback
 from kyrin.actions.gate import ActionGate
 from kyrin.actions.models import (
     ActionFeedback,
@@ -72,7 +72,7 @@ class ActionPlanRunner:
                 events.append(decision)
                 break
             assert isinstance(decision, ActionRequest)
-            result = self._executor.execute(decision)
+            result = execute_with_unknown_fallback(self._executor, decision)
             feedback = self._gate.record_result(result)
             events.append(feedback)
             if result.outcome in (ActionOutcome.FAILED, ActionOutcome.UNKNOWN):

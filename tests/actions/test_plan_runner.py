@@ -69,6 +69,27 @@ def policy(*, chats_supported: bool) -> ActionPolicy:
     )
 
 
+def test_executor_exception_stops_plan_with_unknown_outcome() -> None:
+    class RaisingExecutor:
+        def execute(self, request: ActionRequest) -> ActionResult:
+            raise OSError("desktop state is uncertain")
+
+    gate = ActionGate(policy(chats_supported=False))
+    runner = ActionPlanRunner(gate, RaisingExecutor())
+    result = runner.run(
+        CommandPlanResolution(
+            0,
+            CommandPlan((OPEN_TELEGRAM, OPEN_TELEGRAM)),
+            language="en",
+        )
+    )
+
+    assert len(result) == 1
+    assert isinstance(result[0], ActionFeedback)
+    assert result[0].outcome is ActionOutcome.UNKNOWN
+    assert result[0].error_code == "executor_exception"
+
+
 def test_first_step_is_executed_then_unsupported_chat_is_explained() -> None:
     gate = ActionGate(policy(chats_supported=False))
     executor = FakeExecutor((ActionOutcome.LAUNCH_ACCEPTED,))

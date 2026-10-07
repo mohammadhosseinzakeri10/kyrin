@@ -1,4 +1,4 @@
-"""Short local microphone diagnostic for KYRIN's live audio pipelines.
+"""Local microphone diagnostic for KYRIN's live audio pipelines.
 
 Run ``python scripts/audio/check_live_speech.py --help`` for options. This tool
 prints events and never records audio. Commands are a dry run unless explicit
@@ -7,7 +7,6 @@ Linux application bindings and ``--execute-actions`` are supplied.
 
 import argparse
 import sys
-from contextlib import closing
 from pathlib import Path
 from threading import Lock, Timer
 from time import monotonic
@@ -21,15 +20,10 @@ from kyrin.actions.models import (
     ActionFeedback,
     ActionNotice,
     ActionRequest,
+    ActionResult,
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
-from kyrin.actions.plan_runner import ActionPlanRunner
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
-from kyrin.actions.queued_dispatch import (
-    ActionOutput,
-    FinalActionCommand,
-    QueuedActionDispatcher,
-)
 from kyrin.audio.activity.silero_vad import SileroVad
 from kyrin.audio.activity.speech_activity_monitor import SpeechActivityFrame
 from kyrin.audio.audio_backlog import BacklogNotice
@@ -51,10 +45,10 @@ from kyrin.commands.models import (
     ResponseRequest,
 )
 from kyrin.desktop.active_app import ActiveAppObserver
-from kyrin.desktop.command_bridge import observe_command_update
 from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
+from kyrin.responses.gnome_status import GnomeVisualStatusSink
 from kyrin.responses.models import SystemNotice, SystemNoticeKind
 from kyrin.responses.presenter import PresentedResponse, ResponsePresenter
 from kyrin.responses.speech import (
@@ -66,6 +60,8 @@ from kyrin.responses.system_notices import (
     notice_for_backlog,
     notice_for_error,
 )
+from kyrin.responses.visual_status import VisualStatusController
+from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import (
     SpeechRecoveryPolicy,
     SpeechSessionController,
@@ -75,7 +71,7 @@ from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import SpeechToTextEngine
 from kyrin.stt.errors import SpeechToTextError
-from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.stt.transcript import TranscriptUpdate
 
 
 def _parse_app_bindings(
@@ -102,7 +98,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sample-rate", type=int, help="source rate; device default if absent"
     )
     parser.add_argument("--chunk-ms", type=int, default=20)
-    parser.add_argument("--seconds", type=float, default=10.0)
+    duration = parser.add_mutually_exclusive_group()
+    duration.add_argument("--seconds", type=float)
+    duration.add_argument(
+        "--until-stopped",
+        action="store_true",
+        help="keep listening in commands mode until Ctrl+C (default: 10 seconds)",
+    )
     parser.add_argument(
         "--retries", type=int, default=2, help="STT/commands retry limit"
     )
@@ -124,6 +126,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-voice-responses",
         action="store_true",
         help="print responses without speaking them in commands mode",
+    )
+    parser.add_argument(
+        "--visual-feedback",
+        action="store_true",
+        help="send command status to the optional GNOME Shell character",
     )
     parser.add_argument(
         "--active-app-binding",
@@ -159,7 +166,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="explicit app allowlist and desktop entry for --execute-actions",
     )
     args = parser.parse_args(argv)
-    if not 0 < args.seconds <= 120:
+    if args.until_stopped and args.mode != "commands":
+        parser.error("--until-stopped requires --mode commands")
+    if args.seconds is None and not args.until_stopped:
+        args.seconds = 10.0
+    if args.seconds is not None and not 0 < args.seconds <= 120:
         parser.error("--seconds must be greater than 0 and at most 120")
     if args.chunk_ms <= 0:
         parser.error("--chunk-ms must be positive")
@@ -182,6 +193,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("app bindings and aliases require --mode commands")
     if args.execute_actions and args.mode != "commands":
         parser.error("--execute-actions requires --mode commands")
+    if args.visual_feedback and args.mode != "commands":
+        parser.error("--visual-feedback requires --mode commands")
+    if args.visual_feedback and not sys.platform.startswith("linux"):
+        parser.error("--visual-feedback currently requires GNOME on Linux")
     if args.execute_actions and not sys.platform.startswith("linux"):
         parser.error("--execute-actions currently requires Linux")
     if args.execute_actions and not args.launch_app:
@@ -361,58 +376,23 @@ def print_action_decision(
         _speak_if_requested(response, speaker)
 
 
-def dispatch_command_action(
-    event: CommandEvent,
-    gate: ActionGate,
-    executor: ActionExecutor | None,
-) -> tuple[ActionDecision | ActionFeedback, ...]:
-    """Keep dry-run decisions and real execution behind the same final gate."""
-    if executor is not None:
-        if isinstance(event, (CommandResolution, CommandPlanResolution)):
-            return execute_final_command(event, gate, executor)
-        return ()
-    if isinstance(event, CommandPlanResolution):
-        actions: list[ActionDecision] = []
-        for index, step in enumerate(event.plan.steps):
-            decision = gate.observe(
-                CommandResolution(
-                    event.segment_id,
-                    step,
-                    stream_id=event.stream_id,
-                    language=event.language,
-                    step_index=index,
-                )
-            )
-            if decision is not None:
-                actions.append(decision)
-                if isinstance(decision, ActionNotice):
-                    break
-        return tuple(actions)
-
-    decision = gate.observe(event)
-    if decision is None:
-        return ()
-    return (decision,)
-
-
-def execute_final_command(
-    event: FinalActionCommand,
-    gate: ActionGate,
-    executor: ActionExecutor,
-) -> tuple[ActionOutput, ...]:
-    """Run one final decision on the worker that owns the action gate."""
-    if isinstance(event, CommandPlanResolution):
-        return ActionPlanRunner(gate, executor).run(event)
-    decision = gate.observe(event)
-    if decision is None:
-        return ()
-    if isinstance(decision, ActionNotice):
-        return (decision,)
-    return (gate.record_result(executor.execute(decision)),)
-
-
 def run(args: argparse.Namespace) -> None:
     presenter = ResponsePresenter(args.response_language or args.language or "en")
+    visual_available = args.visual_feedback and GnomeVisualStatusSink.available()
+    if args.visual_feedback and not visual_available:
+        print(
+            "KYRIN visual extension is unavailable; text feedback stays active.",
+            file=sys.stderr,
+            flush=True,
+        )
+    visual = (
+        VisualStatusController(
+            GnomeVisualStatusSink().publish,
+            language=args.response_language or args.language or "en",
+        )
+        if visual_available
+        else None
+    )
     detector = SileroVad()
     if args.execute_actions:
         print(
@@ -423,6 +403,7 @@ def run(args: argparse.Namespace) -> None:
         print("No audio is saved and no recognized command is executed.", flush=True)
 
     if args.mode == "vad":
+        assert args.seconds is not None
         device, audio_format, frames_per_chunk = microphone_settings(args)
         from kyrin.audio.microphone.input import MicrophoneInput
 
@@ -430,8 +411,8 @@ def run(args: argparse.Namespace) -> None:
         vad_pipeline = ContinuousAudioPipeline(source, audio_format, detector)
         with vad_pipeline.open() as vad_stream:
             start = monotonic()
-            timer = Timer(args.seconds, source.stop_capture)
-            timer.start()
+            vad_timer = Timer(args.seconds, source.stop_capture)
+            vad_timer.start()
             windows = 0
             peak = 0
             try:
@@ -443,19 +424,32 @@ def run(args: argparse.Namespace) -> None:
                     if frame.transition is not None:
                         print_live_event(frame, monotonic() - start, presenter)
             finally:
-                timer.cancel()
+                vad_timer.cancel()
         print(f"VAD windows: {windows}; peak PCM amplitude: {peak}")
         return
 
     assert args.model_path is not None
     assert args.language is not None
+    catalog = XdgDesktopAppCatalog()
+    spoken_bindings = dict(args.spoken_app_bindings)
+    if args.execute_actions:
+        for app_id, entry_path in args.launch_apps.items():
+            installed = catalog.find_entry(entry_path)
+            if installed is None:
+                continue
+            existing = spoken_bindings.get(installed.platform_id)
+            if existing is not None and existing != app_id:
+                raise ValueError(
+                    f"launch and spoken bindings disagree for {installed.platform_id}"
+                )
+            spoken_bindings[installed.platform_id] = app_id
     spoken_names = (
         CatalogSpokenAppResolver(
-            XdgDesktopAppCatalog(),
-            args.spoken_app_bindings,
+            catalog,
+            spoken_bindings,
             args.spoken_app_aliases,
         )
-        if args.mode == "commands" and args.spoken_app_bindings
+        if args.mode == "commands" and spoken_bindings
         else None
     )
     coordinator = (
@@ -467,7 +461,7 @@ def run(args: argparse.Namespace) -> None:
     if coordinator is not None and args.active_app_bindings:
         observer = GnomeShellActiveAppObserver(
             args.active_app_bindings,
-            catalog=XdgDesktopAppCatalog(),
+            catalog=catalog,
             timeout_s=0.5,
         )
     executor: ActionExecutor | None = None
@@ -478,6 +472,20 @@ def run(args: argparse.Namespace) -> None:
             if observer is not None
             else launcher
         )
+        if visual is not None:
+            actual_executor = executor
+            visual_controller = visual
+
+            class VisualActionExecutor:
+                def execute(self, request: ActionRequest) -> ActionResult:
+                    visual_controller.on_action_start(request)
+                    try:
+                        return actual_executor.execute(request)
+                    except Exception:
+                        visual_controller.on_action_error()
+                        raise
+
+            executor = VisualActionExecutor()
     gate = (
         ActionGate(
             ActionPolicy(
@@ -485,7 +493,7 @@ def run(args: argparse.Namespace) -> None:
                     frozenset(args.launch_apps)
                     if executor is not None
                     else frozenset({"telegram", "browser"})
-                    | frozenset(args.spoken_app_bindings.values())
+                    | frozenset(spoken_bindings.values())
                 ),
                 allowed_chat_apps=frozenset({"telegram"}),
                 supported_kinds=frozenset({CommandKind.OPEN_APP}),
@@ -562,101 +570,90 @@ def run(args: argparse.Namespace) -> None:
 
     controller = SpeechSessionController(create_pipeline, args.recovery_policy)
     start = monotonic()
-    timer = Timer(args.seconds, controller.stop)
     output_lock = Lock()
 
     def show_action(output: ActionDecision | ActionFeedback) -> None:
+        if visual is not None:
+            visual.on_action_output(output)
         with output_lock:
             print_action_decision(output, monotonic() - start, presenter, speaker)
 
-    action_worker: QueuedActionDispatcher | None = None
-    if executor is not None:
-        assert gate is not None
+    def show_live(event: LiveSpeechEvent) -> None:
+        if visual is not None:
+            visual.on_live_event(event)
+        with output_lock:
+            print_live_event(event, monotonic() - start, presenter, speaker)
 
-        def process_action(command: FinalActionCommand) -> tuple[ActionOutput, ...]:
-            return execute_final_command(command, gate, executor)
+    def show_command(event: CommandEvent) -> None:
+        if visual is not None:
+            visual.on_command_event(event)
+        with output_lock:
+            print_command_event(event, monotonic() - start, presenter, speaker)
 
-        action_worker = QueuedActionDispatcher(process_action, show_action)
+    def show_session_end(event: SpeechSessionEnded) -> None:
+        if event.retry_delay_s is not None and event.error is not None:
+            response = presenter.present(notice_for_error(event.error))
+            with output_lock:
+                print(response.text, flush=True)
+                _speak_if_requested(response, speaker)
+                notice = SystemNotice(
+                    SystemNoticeKind.LISTENING_RETRY, ResponseChannel.TEXT_ONLY
+                )
+                print(presenter.present(notice).text, flush=True)
+
+    def show_active_app(active_app: str | None) -> None:
+        with output_lock:
+            print(
+                f"[{monotonic() - start:7.2f}s] active app: {active_app or 'unknown'}",
+                flush=True,
+            )
+
+    runtime = LiveCommandRuntime(
+        controller,
+        coordinator=coordinator,
+        gate=gate,
+        observer=observer,
+        executor=executor,
+        on_live_event=show_live,
+        on_command_event=show_command,
+        on_action_output=show_action,
+        on_session_end=show_session_end,
+        on_active_app=show_active_app,
+    )
+    timer = Timer(args.seconds, runtime.stop) if args.seconds is not None else None
 
     safe_to_close_engine = True
     try:
-        if action_worker is not None:
-            action_worker.start()
-        timer.start()
-        with closing(controller.events()) as recovery_stream:
-            for event in recovery_stream:
-                if isinstance(event, SpeechSessionEnded):
-                    if coordinator is not None:
-                        for decision in coordinator.start_new_stream():
-                            with output_lock:
-                                print_command_event(
-                                    decision, monotonic() - start, presenter, speaker
-                                )
-                    if event.retry_delay_s is not None and event.error is not None:
-                        response = presenter.present(notice_for_error(event.error))
-                        with output_lock:
-                            print(response.text, flush=True)
-                            _speak_if_requested(response, speaker)
-                            notice = SystemNotice(
-                                SystemNoticeKind.LISTENING_RETRY,
-                                ResponseChannel.TEXT_ONLY,
-                            )
-                            print(presenter.present(notice).text, flush=True)
-                    continue
-                with output_lock:
-                    print_live_event(event, monotonic() - start, presenter, speaker)
-                if coordinator is not None and isinstance(event, TranscriptUpdate):
-                    assert gate is not None
-                    active_app, decisions = observe_command_update(
-                        coordinator, event, observer
-                    )
-                    if observer is not None and event.status is TranscriptStatus.FINAL:
-                        with output_lock:
-                            print(
-                                f"[{monotonic() - start:7.2f}s] active app: "
-                                f"{active_app or 'unknown'}",
-                                flush=True,
-                            )
-                    for decision in decisions:
-                        with output_lock:
-                            print_command_event(
-                                decision, monotonic() - start, presenter, speaker
-                            )
-                        if action_worker is not None and isinstance(
-                            decision, (CommandResolution, CommandPlanResolution)
-                        ):
-                            action_notice = action_worker.submit(decision)
-                            if action_notice is not None:
-                                show_action(action_notice)
-                        elif action_worker is None:
-                            for action in dispatch_command_action(decision, gate, None):
-                                show_action(action)
+        if timer is not None:
+            timer.start()
+        else:
+            print(
+                "Listening until Ctrl+C. Silence does not end the session.", flush=True
+            )
+        try:
+            runtime.run()
+        except KeyboardInterrupt:
+            runtime.stop()
+            print("Listening stopped by user.", flush=True)
     except AudioCaptureStopError:
         # A native worker may still own the model; do not close/reuse it here.
         safe_to_close_engine = False
         raise
     finally:
-        timer.cancel()
-        if coordinator is not None:
-            for decision in coordinator.start_new_stream():
-                with output_lock:
-                    print_command_event(decision, monotonic() - start, presenter)
+        if timer is not None:
+            timer.cancel()
         try:
-            if action_worker is not None:
-                action_worker.close()
+            if speaker is not None:
+                if not speaker.wait_until_idle(12):
+                    print(
+                        "Voice playback did not finish before shutdown; "
+                        "text was displayed.",
+                        file=sys.stderr,
+                    )
+                speaker.close()
         finally:
-            try:
-                if speaker is not None:
-                    if not speaker.wait_until_idle(12):
-                        print(
-                            "Voice playback did not finish before shutdown; "
-                            "text was displayed.",
-                            file=sys.stderr,
-                        )
-                    speaker.close()
-            finally:
-                if safe_to_close_engine:
-                    engine.close()
+            if safe_to_close_engine:
+                engine.close()
 
 
 def main(argv: list[str] | None = None) -> int:

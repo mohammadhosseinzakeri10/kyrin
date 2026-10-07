@@ -20,7 +20,8 @@ from kyrin.commands.models import (
     CommandPlanResolution,
     CommandResolution,
     PendingAppClarification,
-    PendingClarification,
+    PendingCommandClarification,
+    PendingIntentClarification,
     ResponseChannel,
     ResponseKind,
     ResponseRequest,
@@ -41,13 +42,13 @@ class CommandCoordinator:
         self._segment_id: int | None = None
         self._finalized_through = -1
         self._emitted_candidate: CommandIntent | None = None
-        self._pending: PendingClarification | PendingAppClarification | None = None
+        self._pending: PendingCommandClarification | None = None
         self._last_referenced_app: str | None = None
 
     @property
     def pending_clarification(
         self,
-    ) -> PendingClarification | PendingAppClarification | None:
+    ) -> PendingCommandClarification | None:
         return self._pending
 
     @property
@@ -154,7 +155,18 @@ class CommandCoordinator:
                     self._last_referenced_app = item.app
         elif isinstance(interpretation, NeedsClarification):
             self._pending = interpretation.pending
-            if isinstance(interpretation.pending, PendingAppClarification):
+            if isinstance(interpretation.pending, PendingIntentClarification):
+                events.append(
+                    ResponseRequest(
+                        update.segment_id,
+                        ResponseKind.CHOOSE_APP_OR_CHAT,
+                        ResponseChannel.TEXT_AND_VOICE,
+                        stream_id=self._stream_id,
+                        target=interpretation.pending.app_candidate.display_name,
+                        language=update.language,
+                    )
+                )
+            elif isinstance(interpretation.pending, PendingAppClarification):
                 candidates = interpretation.pending.candidates
                 confirm = interpretation.pending.confirmation
                 events.append(

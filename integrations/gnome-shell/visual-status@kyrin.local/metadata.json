@@ -1,0 +1,6 @@
+{
+  "uuid": "visual-status@kyrin.local",
+  "name": "KYRIN Visual Status",
+  "description": "Show a small movable character for KYRIN command status.",
+  "shell-version": ["50"]
+}

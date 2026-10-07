@@ -52,6 +52,7 @@ class CatalogSpokenAppResolver:
                 app_id, (SpokenAppCandidate(app_id, installed.display_name), set())
             )
             spellings.add(_normalize(installed.display_name))
+            spellings.add(_normalize(app_id))
             spellings.update(
                 _normalize(alias) for alias in self._aliases.get(app_id, ())
             )

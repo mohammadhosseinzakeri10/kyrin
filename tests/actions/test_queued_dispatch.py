@@ -4,8 +4,18 @@ from threading import Event, Thread
 
 import pytest
 
-from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
-from kyrin.actions.queued_dispatch import QueuedActionDispatcher
+from kyrin.actions.models import (
+    ActionFeedback,
+    ActionKey,
+    ActionNotice,
+    ActionNoticeReason,
+    ActionOutcome,
+)
+from kyrin.actions.queued_dispatch import (
+    ActionOutput,
+    FinalActionCommand,
+    QueuedActionDispatcher,
+)
 from kyrin.commands.models import CommandIntent, CommandKind, CommandResolution
 
 
@@ -15,7 +25,8 @@ def command(segment: int) -> CommandResolution:
     )
 
 
-def output_for(item: CommandResolution) -> ActionNotice:
+def output_for(item: FinalActionCommand) -> ActionNotice:
+    assert isinstance(item, CommandResolution)
     assert item.intent is not None
     return ActionNotice(
         ActionKey(item.stream_id, item.segment_id),
@@ -31,13 +42,14 @@ def test_blocked_action_does_not_block_submit_and_results_keep_order() -> None:
     completed = Event()
     outputs: list[ActionNotice] = []
 
-    def process(item: CommandResolution) -> tuple[ActionNotice, ...]:
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
         if item.segment_id == 0:
             started.set()
             assert release.wait(2)
         return (output_for(item),)
 
-    def receive(output: ActionNotice) -> None:
+    def receive(output: ActionOutput) -> None:
+        assert isinstance(output, ActionNotice)
         outputs.append(output)
         if len(outputs) == 2:
             completed.set()
@@ -66,12 +78,13 @@ def test_close_cancels_queued_command_but_finishes_active_action() -> None:
     cancelled = Event()
     outputs: list[ActionNotice] = []
 
-    def process(item: CommandResolution) -> tuple[ActionNotice, ...]:
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
         started.set()
         assert release.wait(2)
         return (output_for(item),)
 
-    def receive(output: ActionNotice) -> None:
+    def receive(output: ActionOutput) -> None:
+        assert isinstance(output, ActionNotice)
         outputs.append(output)
         if output.reason is ActionNoticeReason.CANCELLED:
             cancelled.set()
@@ -113,3 +126,26 @@ def test_invalid_capacity_is_rejected() -> None:
         QueuedActionDispatcher(
             lambda item: (output_for(item),), lambda _: None, max_queued=0
         )
+
+
+def test_worker_processing_error_reports_unknown_before_close() -> None:
+    reported = Event()
+    outputs: list[ActionOutput] = []
+
+    def fail(_command: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        raise RuntimeError("internal worker failure")
+
+    def receive(output: ActionOutput) -> None:
+        outputs.append(output)
+        reported.set()
+
+    worker = QueuedActionDispatcher(fail, receive)
+    worker.start()
+    assert worker.submit(command(0)) is None
+    assert reported.wait(1)
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], ActionFeedback)
+    assert outputs[0].outcome is ActionOutcome.UNKNOWN
+    assert outputs[0].error_code == "action_worker_failed"
+    with pytest.raises(RuntimeError, match="action worker failed"):
+        worker.close()

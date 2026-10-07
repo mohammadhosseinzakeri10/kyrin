@@ -41,6 +41,12 @@ def test_user_entry_precedes_system_entry(tmp_path: Path) -> None:
         InstalledApp("chat.desktop", "User Chat"),
     )
 
+    catalog = XdgDesktopAppCatalog((user, system))
+    assert catalog.find_entry(user / "applications/chat.desktop") == InstalledApp(
+        "chat.desktop", "User Chat"
+    )
+    assert catalog.find_entry(system / "applications/chat.desktop") is None
+
 
 def test_hidden_user_entry_masks_system_entry(tmp_path: Path) -> None:
     user = tmp_path / "user"
@@ -49,6 +55,12 @@ def test_hidden_user_entry_masks_system_entry(tmp_path: Path) -> None:
     _entry(system, "chat.desktop", name="System Chat")
 
     assert XdgDesktopAppCatalog((user, system)).find_app("chat.desktop") is None
+    assert (
+        XdgDesktopAppCatalog((user, system)).find_entry(
+            system / "applications/chat.desktop"
+        )
+        is None
+    )
 
 
 def test_no_display_app_is_registered_but_non_app_is_skipped(tmp_path: Path) -> None:

@@ -16,6 +16,9 @@ prefix is accepted. Approximate or ambiguous app names are **not** accepted
 inside a plan yet, because the current clarification state cannot retain the
 remaining steps. Unknown, incomplete, negated, or otherwise unsupported
 compound forms do not authorize any fragment of the utterance.
+An exact registered app name that also reads as a chat clause is ambiguous;
+the current plan parser rejects the whole plan. The single-command app/chat
+clarification does not retain other plan steps.
 
 ## Execution boundary
 

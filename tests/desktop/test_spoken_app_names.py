@@ -45,6 +45,7 @@ def test_catalog_alias_and_approximate_name_require_different_decisions(
         {"whatsapp": ("what's up",)},
     )
     assert resolver.resolve("what's up").candidates[0].app_id == "whatsapp"
+    assert resolver.resolve("whatsapp").exact
     assert resolver.resolve("WhatsAp").exact is False
     assert resolver.resolve("Unbound").candidates == ()
     assert resolver.resolve("filler drum").candidates == ()
