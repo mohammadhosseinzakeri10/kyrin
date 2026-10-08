@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-07.
+> Updated: 2026-10-08.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -30,16 +30,25 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** design an ordinary Ubuntu application entry point
-  around the reusable live command runtime, with explicit model, audio, and
-  desktop-action settings. English development currently uses the locally
+- **Current next direction:** finish in-app action permission setup and connect
+  the existing Ubuntu visual and active-app adapters to the control application;
+  then validate the full login-to-command path and plan durable packaging.
+  Settings, lifecycle control, Ubuntu session composition, a Qt control
+  window, a single-instance guard, and user-scoped XDG registration exist.
+  English development uses the locally
   installed Whisper `small` CPU adapter while Vosk remains replaceable; this
   is not a packaged default or a general accuracy claim. The terminal
   diagnostic stays dry-run by default. Explicitly allowlisted app launch and
   registered app-name matching have passed focused tests, and the owner
   validated a real microphone-to-Telegram launch. Model packaging,
-  multilingual setup, product UI, broader stability validation, and
+  multilingual setup, a complete product UI, broader stability validation, and
   Windows/macOS/mobile adapters remain future work.
+- **Application foundation:** immutable, versioned settings, an injectable
+  JSON store, and a UI-independent lifecycle controller now exist under
+  `src/kyrin/app/`. Ubuntu composition and an optional Qt control UI connect
+  them to the live runtime. User-scoped login startup registration exists. A missing settings
+  file yields no selected STT model and no action permission. See
+  `docs/app/UBUNTU_APPLICATION_LIFECYCLE_DESIGN.md`.
 - **Visual feedback in progress:** a backend-independent status controller and
   optional GNOME Shell 50 character adapter now exist in the repository. The
   character distinguishes processing, clarification, actual action execution,
@@ -2096,3 +2105,169 @@ ambiguity inside a compound command rejects the whole plan to avoid executing
 an uncertain fragment. This is a safety rule for the limited demo interpreter,
 not general natural-language disambiguation. Focused tests use a fake catalog
 and do not launch desktop apps. No STT/TTS backend or new dependency changed.
+
+## 59. First Ubuntu Application Settings Slice
+
+The owner approved building the Ubuntu application in ordered slices and
+specified automatic start after user login, an in-app listening switch, and
+visible CPU/GPU/AUTO choices for both STT and TTS. An unavailable GPU choice
+must explain the reason and keep the last valid active setting rather than
+disappearing or silently falling back. The current Vosk/Whisper adapters still
+support CPU only, and TTS has no compute-device or speed contract yet.
+
+`AppSettings`, `SttSelection`, and `AllowedApp` now describe immutable saved
+preferences. The default requests login start and listening, but selects no
+STT model, enables no desktop action, and grants no app binding. The future
+application must enter setup without microphone capture in that state.
+`JsonSettingsStore` uses an injected absolute path and version-1 JSON; the
+Linux path helper points to the user's XDG config location. Missing files
+return defaults. Invalid, duplicate-key, or unknown-version files raise a
+settings error and are not overwritten. Saving writes a private temporary
+file in the same directory and atomically replaces the old file. Tests use
+temporary directories and cover round trips, preservation on bad input or a
+failed replacement, permission defaults, and path selection. This slice does
+not create real user settings, autostart entries, a running application, or a
+model manager. No dependency was added.
+
+## 60. UI-Independent Application Lifecycle
+
+The next approved slice added `ApplicationController` in
+`src/kyrin/app/controller.py`. It receives saved settings and a factory for a
+managed runtime session, rather than choosing STT, microphone, desktop, or UI
+implementations itself. Listening disabled yields PAUSED; a missing STT model
+yields SETUP_REQUIRED without constructing audio. A configured session runs on
+one worker thread. Stop requests do not wait on microphone shutdown in the
+calling thread, and a second live session is rejected. Factory, runtime, and
+cleanup errors remain visible through a status snapshot. RUNNING means the
+runtime has begun, not that microphone capture has already been observed.
+The factory's context manager remains responsible for closing the model,
+speaker, and action resources. Tests cover pause/setup, stop during startup,
+restart, duplicate prevention, slow stop, errors, and a real
+`LiveCommandRuntime` with a fake event source. This slice changes neither the
+terminal diagnostic nor the user's audio devices, settings, startup entries,
+or model files. A concrete factory and product UI remain future work.
+
+## 61. Ubuntu Live Session Composition
+
+The owner approved the next implementation slice. `UbuntuSessionFactory` in
+`src/kyrin/app/platforms/ubuntu.py` now connects saved app settings to the
+existing live runtime. A microphone resolver records a stable host-API/name
+selection and resolves the current PortAudio index before startup and on each
+retry. Missing or ambiguous selections fail visibly. Vosk and Whisper remain
+replaceable through injected STT openers; their standard adapters are CPU-only
+and reject explicit GPU rather than falling back silently. The factory
+preserves the existing VAD, speech-session recovery, command coordinator,
+action gate, optional desktop observer, response presenter, optional visual
+adapter, and optional injected speech synthesizer. Installed app names and
+launch paths are limited to explicit allowed-app desktop-entry bindings;
+actual action execution remains disabled by default. Focused fake-adapter
+tests cover dry run, allowlisting, setup failures, and resource cleanup. No
+physical microphone, real desktop launch, user settings file, login startup,
+new dependency, or model download was used in this slice. The Ubuntu control
+window and model/TTS settings remain future work.
+
+## 62. First Qt Control Window
+
+The owner explicitly selected PySide6. The project now offers its smaller
+`PySide6_Essentials` distribution as an optional `desktop` extra and a
+`kyrin-desktop` entry point. A small
+right-to-left Qt window controls the existing `ApplicationController` and
+persists microphone/STT choices through `JsonSettingsStore`; it does not move
+audio work onto the GUI thread. Final transcript and presented response
+events cross a Qt signal to the UI; their shared event type is independent of
+Ubuntu and Qt. Explicit GPU remains visible and fails
+without changing the last saved choice because the current STT adapters are
+CPU-only. Applying a model change requests the old session to stop before
+restarting. The window minimizes on close and has an explicit Quit control.
+Offscreen tests with fake sessions cover GPU rejection, listening persistence,
+stop-before-restart, and malformed settings preservation. `PySide6_Essentials`
+6.11.2 was installed into `.venv` after the sandboxed download failed, and the
+tests were rerun there. No live
+microphone, real user settings file, login startup, or desktop launcher was
+changed. Model management, TTS controls, packaging and single-instance login
+startup remain open work.
+
+## 63. English control center and static cosmic dashboard
+
+The owner selected the dark fifth cosmic concept for the application and
+requested English control text plus a path for adding UI languages later. A
+multi-page Qt Widgets control center now separates Dashboard, Audio Input,
+Speech Recognition, and Preferences. The built-in UI strings are English;
+interface locale selection and complete JSON language-pack import are separate
+from the STT language. The selected concept art is packaged as a static,
+aspect-preserved dashboard image. The owner explicitly dropped real-time 3D
+after reviewing its graphics and installation costs. The temporary Qt Quick 3D
+scene and `PySide6_Addons` dependency were removed. The microphone/STT/runtime
+controller interfaces were not changed. The app still lacks a portable
+installer, TTS configuration, login startup, and a single-instance launcher.
+
+The control-center follow-up made UI language loading recoverable: invalid
+preferences or a missing selected pack now open English, show an error, and
+leave the original file untouched. Catalog strings are cached rather than read
+on every status update. Runtime language changes refresh the action status and
+microphone label, while unsaved speech settings remain in the form. UI content
+uses plain-text labels so transcripts and imported strings are not treated as
+rich text. Qt tests inject a temporary UI config directory. A full test run
+passed with 308 tests, and an isolated offscreen startup reached the event loop.
+No physical desktop presentation or microphone validation was performed in
+this follow-up.
+
+## 64. One Qt control instance per user session
+
+The next desktop-lifecycle slice adds a `QLockFile` held for the control
+process lifetime and a local Qt socket in the user-session runtime directory.
+Opening `kyrin-desktop` again sends an activation request to the existing
+window, instead of constructing a second microphone runtime. A lock owner may
+remove a socket abandoned by a crashed process; a second process may not take
+over a live socket. The activation raises a minimized window. Tests cover
+second-instance activation and abandoned-socket recovery without audio.
+This slice does not install a desktop menu entry or register login startup;
+the saved `start_at_login` preference still has no operating-system effect.
+
+## 65. User-scoped Ubuntu launcher and login startup
+
+The owner approved the next lifecycle step. `XdgDesktopRegistration` now
+generates managed XDG desktop entries for the application menu and per-user
+autostart directory. The Qt Preferences page exposes an explicit login-startup
+control. Disabling it removes only KYRIN's autostart file. Unknown same-named
+files are not overwritten, and a failed settings save attempts to restore the
+previous registration. Unit tests use temporary XDG directories; both desktop
+entries pass Ubuntu's `desktop-file-validate`. On this host, the owner-approved
+registration was installed for the current user and points to
+`/mnt/ai_projects/KYRIN/.venv/bin/kyrin-desktop`. The current settings have no
+selected STT model, so a future login opens setup without microphone capture.
+Real next-login behavior is not yet observed; the development-environment
+launcher is not portable if the project directory moves. A stable packaged
+installation and model-management UI remain future work.
+
+## 66. Dashboard copy over the cosmic artwork
+
+The owner clarified that the first dashboard should use the selected cosmic
+image across the entire content panel, with the welcome title and two supporting
+lines placed on the image. The previous separate right-hand copy panel was
+removed. The black hole remains visible on the left; a translucent right-side
+shade and a title shadow keep text readable. The existing UI language keys
+still supply the text. The dashboard is a static image and does not add a
+continuous rendering loop. Offscreen previews were inspected at the normal
+window size and the current minimum size; live display feedback remains with
+the owner.
+
+## 67. Owner-selected original black-hole K logo
+
+The owner chose the second of four black-hole logo concepts and explicitly
+preferred its original generated image over a later simplified revision. The
+original transparent PNG is copied unchanged into the Qt assets as
+`kyrin-logo.png`. The control window displays it beside the KYRIN name; the Qt
+application uses it as its window icon, and managed XDG desktop entries include
+its packaged absolute path. The user's existing menu and autostart entries
+were refreshed without changing their enabled state. A built wheel contains
+the PNG and the desktop entries passed `desktop-file-validate`. An offscreen
+window preview was inspected. A future packaged release may need
+multi-resolution icon files.
+
+The owner then reported that the applications menu showed a generic gear and
+the running application's tooltip said `Python 3`. Inspection found that the
+desktop entry already resolves to the selected PNG, but the Qt process did not
+declare its matching desktop-file ID. Qt now sets that ID and its display name
+to `KYRIN` before creating the window. The owner restarted the application and
+confirmed that its menu/dock identity and icon now appear correctly.

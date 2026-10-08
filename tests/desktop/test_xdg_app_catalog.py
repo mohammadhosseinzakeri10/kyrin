@@ -29,6 +29,10 @@ def test_discovers_nested_ids_and_distinguishes_equal_names(tmp_path: Path) -> N
         "foo-bar.desktop", "Browser"
     )
     assert catalog.find_app("Browser") is None
+    assert catalog.entry_paths() == {
+        "another.desktop": root / "applications/another.desktop",
+        "foo-bar.desktop": root / "applications/foo/bar.desktop",
+    }
 
 
 def test_user_entry_precedes_system_entry(tmp_path: Path) -> None:

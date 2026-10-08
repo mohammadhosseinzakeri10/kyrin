@@ -63,6 +63,10 @@ class XdgDesktopAppCatalog:
     def list_apps(self) -> tuple[InstalledApp, ...]:
         return tuple(app for _, app in self._entries())
 
+    def entry_paths(self) -> dict[str, Path]:
+        """Resolve registered desktop IDs to launch paths in one startup scan."""
+        return {app.platform_id: path for path, app in self._entries()}
+
     def find_entry(self, entry_path: Path) -> InstalledApp | None:
         """Identify an exact registered entry, respecting XDG precedence."""
         if not entry_path.is_absolute():

@@ -1,0 +1,95 @@
+"""Typed, platform-neutral preferences for the future KYRIN application."""
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from kyrin.stt.device import DevicePreference
+
+_IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]*\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class SttSelection:
+    """An installed model request; availability is checked when it is opened."""
+
+    backend: str
+    model_path: Path
+    language: str
+    device: DevicePreference = DevicePreference.AUTO
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.backend, str) or not _IDENTIFIER.fullmatch(self.backend):
+            raise ValueError("STT backend must be a lowercase identifier")
+        if not isinstance(self.model_path, Path) or not self.model_path.is_absolute():
+            raise ValueError("STT model path must be absolute")
+        if (
+            not isinstance(self.language, str)
+            or not self.language
+            or any(character.isspace() for character in self.language)
+        ):
+            raise ValueError("STT language must be a nonempty language code")
+        if not isinstance(self.device, DevicePreference):
+            raise ValueError("STT device must be auto, cpu, or gpu")
+
+
+@dataclass(frozen=True, slots=True)
+class AllowedApp:
+    """An explicit Ubuntu desktop-entry binding, not arbitrary shell text."""
+
+    app_id: str
+    desktop_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.app_id, str) or not _IDENTIFIER.fullmatch(self.app_id):
+            raise ValueError("allowed app ID must be a lowercase identifier")
+        if (
+            not isinstance(self.desktop_id, str)
+            or len(self.desktop_id) <= len(".desktop")
+            or not self.desktop_id.endswith(".desktop")
+            or "/" in self.desktop_id
+            or "\\" in self.desktop_id
+        ):
+            raise ValueError("allowed app desktop ID must name a .desktop entry")
+
+
+@dataclass(frozen=True, slots=True)
+class AppSettings:
+    """Saved intent, distinct from the actual running/listening state.
+
+    A fresh installation has no selected STT model and allows no desktop
+    action. The future application must show setup instead of opening a mic
+    until a usable model is selected.
+    """
+
+    listening_enabled: bool = True
+    start_at_login: bool = True
+    microphone_device_key: str | None = None
+    stt: SttSelection | None = None
+    action_execution_enabled: bool = False
+    allowed_apps: tuple[AllowedApp, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.listening_enabled) is not bool:
+            raise ValueError("listening_enabled must be a boolean")
+        if type(self.start_at_login) is not bool:
+            raise ValueError("start_at_login must be a boolean")
+        if self.microphone_device_key is not None and (
+            not isinstance(self.microphone_device_key, str)
+            or not self.microphone_device_key.strip()
+        ):
+            raise ValueError("microphone_device_key must be nonempty or null")
+        if self.stt is not None and not isinstance(self.stt, SttSelection):
+            raise ValueError("stt must be a model selection or null")
+        if type(self.action_execution_enabled) is not bool:
+            raise ValueError("action_execution_enabled must be a boolean")
+        if not isinstance(self.allowed_apps, tuple) or not all(
+            isinstance(binding, AllowedApp) for binding in self.allowed_apps
+        ):
+            raise ValueError("allowed_apps must contain desktop bindings")
+        app_ids = [binding.app_id for binding in self.allowed_apps]
+        desktop_ids = [binding.desktop_id for binding in self.allowed_apps]
+        if len(app_ids) != len(set(app_ids)) or len(desktop_ids) != len(
+            set(desktop_ids)
+        ):
+            raise ValueError("allowed_apps contains duplicate bindings")

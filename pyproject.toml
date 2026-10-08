@@ -24,6 +24,9 @@ dependencies = [
 
 
 [project.optional-dependencies]
+desktop = [
+    "PySide6_Essentials>=6.10,<7",
+]
 stt-vosk = [
     "vosk>=0.3.45,<0.4",
 ]
@@ -33,6 +36,10 @@ dev = [
     "pytest>=9.0",
     "ruff>=0.16",
 ]
+
+
+[project.scripts]
+kyrin-desktop = "kyrin.app.qt.main:main"
 
 
 [project.urls]
@@ -48,6 +55,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "kyrin.audio.activity.models" = ["*.onnx", "LICENSE.silero", "README.md"]
+"kyrin.app.qt" = ["assets/*.png"]
 
 
 # ---------------------------------------------------------------------------
