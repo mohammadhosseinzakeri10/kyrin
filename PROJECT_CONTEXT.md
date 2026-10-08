@@ -30,9 +30,8 @@
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** finish in-app action permission setup and connect
-  the existing Ubuntu visual and active-app adapters to the control application;
-  then validate the full login-to-command path and plan durable packaging.
+- **Current next direction:** validate the in-app action permissions and
+  GNOME integration with a real command, then plan durable packaging.
   Settings, lifecycle control, Ubuntu session composition, a Qt control
   window, a single-instance guard, and user-scoped XDG registration exist.
   English development uses the locally
@@ -2271,3 +2270,21 @@ desktop entry already resolves to the selected PNG, but the Qt process did not
 declare its matching desktop-file ID. Qt now sets that ID and its display name
 to `KYRIN` before creating the window. The owner restarted the application and
 confirmed that its menu/dock identity and icon now appear correctly.
+
+## 68. Desktop action permissions in the Qt control center
+
+The owner authorized completing five follow-up steps after a repository audit.
+The existing Ubuntu control-center work was saved in local Git commit `6eb64f1`
+without pushing to GitHub. The Qt window now has a Desktop Actions page with
+searchable visible XDG launchers. The user can select explicit app bindings and
+enable action execution; a session is stopped before changed settings are saved
+and restarted. Saved hidden or removed entries stay visible for review.
+Permission checks remain in the existing action gate, not in the page.
+
+The Qt entry point now reuses the XDG catalog for both the picker and runtime.
+It connects the existing GNOME active-app observer and visual-status sink only
+when their optional Shell endpoints are available. The owner has previously
+verified the character and a Telegram launch separately. The new end-to-end
+control-center path has passed automated tests; its live voice test remains to
+be confirmed. UI language packs imported before these new labels remain usable
+with English fallbacks for the added strings; new imports require all labels.

@@ -82,3 +82,15 @@ def test_invalid_configuration_is_rejected() -> None:
         GnomeShellActiveAppObserver({}, timeout_s=0)
     with pytest.raises(ValueError, match="identifiers"):
         GnomeShellActiveAppObserver({"org.telegram.desktop": ""})
+
+
+def test_optional_active_app_endpoint_is_detected_without_reading_focus() -> None:
+    result = subprocess.CompletedProcess(args=[], returncode=0)
+    with patch(
+        "kyrin.desktop.platforms.gnome.subprocess.run", return_value=result
+    ) as run:
+        assert GnomeShellActiveAppObserver.available()
+    assert run.call_args.args[0][-2:] == [
+        "/org/kyrin/ActiveApp",
+        "org.kyrin.ActiveApp",
+    ]

@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import sysconfig
+from collections.abc import Mapping
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, QTimer
@@ -28,6 +29,10 @@ from kyrin.app.settings_store import (
     linux_settings_path,
 )
 from kyrin.audio.microphone.devices import PortAudioMicrophoneResolver
+from kyrin.desktop.active_app import ActiveAppObserver
+from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
+from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from kyrin.responses.gnome_status import GnomeVisualStatusSink
 
 
 def _whisper_server_path() -> Path | None:
@@ -50,6 +55,12 @@ def _activate_window(window: ControlWindow) -> None:
     window.showNormal()
     window.raise_()
     window.activateWindow()
+
+
+def _gnome_observer(
+    app_ids: Mapping[str, str], catalog: XdgDesktopAppCatalog
+) -> ActiveAppObserver:
+    return GnomeShellActiveAppObserver(app_ids, catalog=catalog)
 
 
 def main() -> int:
@@ -93,10 +104,18 @@ def main() -> int:
     server = _whisper_server_path()
     microphones = PortAudioMicrophoneResolver()
     events = EventBridge()
+    catalog = XdgDesktopAppCatalog()
+    visual_sink = GnomeVisualStatusSink() if GnomeVisualStatusSink.available() else None
+    observer_factory = (
+        _gnome_observer if GnomeShellActiveAppObserver.available() else None
+    )
     factory = UbuntuSessionFactory(
         stt_openers=standard_stt_openers(whisper_server_path=server),
         on_event=events.publish,
         microphones=microphones,
+        catalog=catalog,
+        observer_factory=observer_factory,
+        visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
     controller = ApplicationController(factory)
     window = ControlWindow(
@@ -108,6 +127,7 @@ def main() -> int:
         whisper_server_available=server is not None,
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),
+        app_catalog=catalog,
         startup_registration=registration,
         startup_error=startup_error,
     )

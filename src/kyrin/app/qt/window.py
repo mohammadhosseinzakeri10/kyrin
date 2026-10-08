@@ -24,9 +24,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
 from kyrin.app.events import ApplicationEvent
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
+from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.dashboard import CosmicDashboard
 from kyrin.app.qt.translations import (
@@ -76,6 +78,16 @@ QComboBox, QLineEdit { background: #151d35; color: #f2f4ff;
                        border: 1px solid #3b496f; border-radius: 7px;
                        min-height: 34px; padding: 3px 8px; }
 QComboBox QAbstractItemView { background: #18213d; color: #f2f4ff; }
+QCheckBox { color: #e2e9ff; spacing: 10px; padding: 7px 2px; }
+QListWidget { background: #111a31; color: #e7edff;
+              border: 1px solid #3b496f; border-radius: 8px;
+              font-size: 13px; padding: 5px; }
+QListWidget::item { padding: 5px 8px; border-radius: 5px; }
+QListWidget::item:hover { background: #24345a; }
+QListWidget::item:selected { background: #344b84; color: #ffffff; }
+QListWidget::indicator { width: 15px; height: 15px; border-radius: 3px; }
+QListWidget::indicator:unchecked { background: #1b2a49; border: 1px solid #7890bf; }
+QListWidget::indicator:checked { background: #8d73ff; border: 1px solid #d6caff; }
 """
 
 
@@ -136,6 +148,7 @@ class ControlWindow(QWidget):
         *,
         whisper_server_available: bool,
         ui_translations: UiTranslations,
+        app_catalog: AppPickerCatalog | None = None,
         startup_registration: StartupRegistration | None = None,
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
@@ -193,7 +206,7 @@ class ControlWindow(QWidget):
         self.pages = QStackedWidget()
         self._nav_buttons: dict[str, QPushButton] = {}
         for index, key in enumerate(
-            ("dashboard", "audio", "recognition", "preferences")
+            ("dashboard", "audio", "recognition", "actions", "preferences")
         ):
             button = QPushButton()
             button.setObjectName("NavButton")
@@ -314,6 +327,9 @@ class ControlWindow(QWidget):
         speech_layout.addStretch()
         self.pages.addWidget(speech_page)
 
+        self.actions_page = DesktopActionsPage(app_catalog, settings, ui_translations)
+        self.pages.addWidget(self.actions_page)
+
         preferences_page, preferences_layout = self._page(
             "preferences_heading", "preferences_caption"
         )
@@ -427,6 +443,7 @@ class ControlWindow(QWidget):
         self.import_language_button.setText(t("import_language"))
         self.save_ui_button.setText(t("save"))
         self.startup_checkbox.setText(t("start_at_login"))
+        self.actions_page.translate()
         self.save_startup_button.setText(t("apply_startup"))
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device_combo.setItemText(index, t(key))
@@ -583,7 +600,17 @@ class ControlWindow(QWidget):
             available = {item.key for item in self._microphones.list_inputs()}
             if key not in available:
                 raise MicrophoneError("selected microphone is not available")
-        return replace(self._settings, microphone_device_key=key, stt=stt)
+        selected_apps = self.actions_page.selected_apps()
+        actions_enabled = self.actions_page.enabled_checkbox.isChecked()
+        if actions_enabled and not selected_apps:
+            raise ValueError(self._translations.text("action_select_one"))
+        return replace(
+            self._settings,
+            microphone_device_key=key,
+            stt=stt,
+            action_execution_enabled=actions_enabled,
+            allowed_apps=selected_apps,
+        )
 
     def _has_unsaved_changes(self) -> bool:
         assert self._settings is not None
@@ -598,6 +625,7 @@ class ControlWindow(QWidget):
             != (stt.language if stt is not None else "en")
             or self.device_combo.currentData()
             != (stt.device.value if stt is not None else DevicePreference.AUTO.value)
+            or self.actions_page.has_unsaved_changes(self._settings)
         )
 
     def _apply(self) -> None:
@@ -624,6 +652,7 @@ class ControlWindow(QWidget):
             self._show_error(error)
             return
         self._settings = candidate
+        self._update_action_label()
         self.feedback_label.setText(self._translations.text("saved"))
         self._start_current()
 

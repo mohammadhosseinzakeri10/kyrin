@@ -247,11 +247,11 @@ installation). It reads the existing XDG settings location but does not create
 it until the user saves. A malformed settings file is shown as an error and
 cannot be overwritten from the window. The Whisper server must be installed
 on `PATH` or supplied as an absolute executable in `KYRIN_WHISPER_SERVER`.
-Action permissions already in settings remain unchanged, but the window does
-not yet edit them. TTS selection, voice speed and device controls, model
-import/download, a portable installed-app package, login startup, and a
-single-instance launcher are later slices. The existing `start_at_login`
-preference does not register an autostart entry yet. Qt tests use offscreen
+At this fourth slice, action permissions already in settings remained unchanged
+and were not yet editable in the window. Later sections describe their editor,
+login startup, and the single-instance launcher. TTS selection, voice speed
+and device controls, model import/download, and a portable installed-app
+package remain later work. Qt tests use offscreen
 rendering and fake sessions; they do not turn on the owner's microphone or
 alter the owner's settings file. On this host, `PySide6_Essentials` was installed
 in the development virtual environment and Qt tests passed there. The initial
@@ -261,7 +261,7 @@ environment install succeeded.
 ## Current control-center presentation
 
 The control window now has separate Dashboard, Audio Input, Speech Recognition,
-and Preferences pages. The owner selected the fifth dark cosmic concept as the
+Desktop Actions, and Preferences pages. The owner selected the fifth dark cosmic concept as the
 Dashboard artwork. After a real-time 3D prototype was reviewed, the owner
 chose a static dashboard to avoid its graphics and package cost. The selected
 PNG is included in the Python package; it is aspect-filled without stretching
@@ -318,5 +318,22 @@ window, and referenced by the managed menu and autostart desktop entries.
 The Qt process also declares the same desktop-file ID as the menu entry and
 sets the display name to `KYRIN`, so the desktop can associate its live window
 with that launcher instead of showing the Python runtime as the application.
-The owner still needs to confirm the live menu and dock appearance after
-starting a fresh process.
+The owner restarted the application and confirmed that the menu/dock identity
+and icon appear correctly.
+
+## Desktop action permissions and GNOME integration
+
+The Desktop Actions page lists launchable, visible applications from the XDG
+desktop catalog. Search matches the displayed app name and desktop-entry ID.
+The user can save an explicit allowlist and enable action execution only when
+at least one app is selected. Hidden or removed entries in existing settings
+remain visible in the picker so they can be reviewed or removed. Saving stops
+the current listening session before applying settings; a restarted session
+uses the new allowlist. The command gate still checks the saved permission
+before launching an app.
+
+When the optional GNOME Shell extension endpoint is available, the Qt entry
+point also connects the existing active-app observer and visual-status sink to
+the live session. Missing GNOME integration leaves the control window usable;
+it does not loosen action permissions. Neither adapter is a requirement for
+other desktop environments or future operating-system implementations.

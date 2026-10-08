@@ -25,5 +25,9 @@ configuration file remains untouched until the user explicitly saves a new
 selection. Languages that read right to left use a right-to-left window
 layout; paths and language codes remain left to right.
 
+Packs imported before the Desktop Actions page was added remain usable. Any
+new Desktop Actions labels missing from such a pack appear in English until the
+pack is updated. New imports must include every current catalog key.
+
 Only English is bundled at present. The current interface imports packs from
 local files; an in-app catalog or downloader is a separate future feature.

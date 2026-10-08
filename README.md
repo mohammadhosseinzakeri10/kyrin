@@ -18,8 +18,9 @@ An optional Qt control window can edit the first set of local microphone and
 STT settings, show status, and start or stop listening. Opening it again in the
 same user session activates the existing window. On Ubuntu, Preferences can
 install a per-user desktop launcher and enable or disable login startup.
-TTS/model management and desktop-action permission editing are not yet
-available in that window.
+The Desktop Actions page can select installed applications for an explicit
+allowlist and enable execution. TTS and model management are not yet available
+in that window.
 The selected black-hole K logo appears in the window and Ubuntu launcher.
 
 The current interpreter recognizes a small set of English and Persian example

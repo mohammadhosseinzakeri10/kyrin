@@ -76,3 +76,16 @@ def test_no_display_app_is_registered_but_non_app_is_skipped(tmp_path: Path) -> 
     assert XdgDesktopAppCatalog((root,)).list_apps() == (
         InstalledApp("background.desktop", "Background"),
     )
+    assert XdgDesktopAppCatalog((root,)).list_menu_apps() == ()
+
+
+def test_menu_picker_shows_only_visible_launchable_entries(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    _entry(root, "telegram.desktop", name="Telegram", extra="Exec=telegram\n")
+    _entry(root, "hidden.desktop", name="Hidden", extra="NoDisplay=true\nExec=hidden\n")
+    _entry(root, "no-exec.desktop", name="No Exec")
+
+    catalog = XdgDesktopAppCatalog((root,))
+
+    assert catalog.list_menu_apps() == (InstalledApp("telegram.desktop", "Telegram"),)
+    assert len(catalog.list_apps()) == 3

@@ -18,6 +18,7 @@ from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from kyrin.responses.visual_status import VisualPresentation, VisualStatus
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError
@@ -163,6 +164,50 @@ def test_enabled_actions_use_only_exact_registered_allowlist(
     assert paths_seen == [{"telegram": tmp_path / "data/applications/telegram.desktop"}]
     assert [request.intent.target for request in executor.requests] == ["telegram"]
     assert any(isinstance(event, ActionFeedback) for event in events)
+
+
+def test_optional_foreground_observer_and_mascot_report_confirmed_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action_completed = Event()
+
+    class WaitingSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
+            assert action_completed.wait(1)
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", WaitingSpeechController)
+    visuals: list[VisualPresentation] = []
+    events: list[ubuntu.ApplicationEvent] = []
+
+    def on_event(event: ubuntu.ApplicationEvent) -> None:
+        events.append(event)
+        if isinstance(event, ActionFeedback):
+            action_completed.set()
+
+    class TelegramObserver:
+        def observe_active_app(self) -> str:
+            return "telegram"
+
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=on_event,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+        observer_factory=lambda app_ids, catalog: TelegramObserver(),
+        visual_publish=visuals.append,
+    )
+    with factory(_settings(tmp_path, action_execution_enabled=True)) as runtime:
+        runtime.run()
+
+    assert any(
+        isinstance(event, ActionFeedback) and event.outcome is ActionOutcome.CONFIRMED
+        for event in events
+    )
+    assert VisualStatus.EXECUTING in {item.status for item in visuals}
+    assert VisualStatus.CONFIRMED in {item.status for item in visuals}
 
 
 def test_missing_microphone_and_explicit_gpu_fail_without_capture(

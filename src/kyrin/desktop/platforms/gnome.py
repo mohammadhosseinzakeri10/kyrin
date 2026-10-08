@@ -16,6 +16,28 @@ _INTERFACE = "org.kyrin.ActiveApp"
 class GnomeShellActiveAppObserver:
     """Map a fresh GNOME desktop ID to a trusted internal KYRIN app ID."""
 
+    @staticmethod
+    def available() -> bool:
+        """Check the optional Shell endpoint once, before starting live audio."""
+        try:
+            result = subprocess.run(
+                [
+                    "busctl",
+                    "--user",
+                    "introspect",
+                    _BUS_NAME,
+                    _OBJECT_PATH,
+                    _INTERFACE,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=0.5,
+            )
+        except OSError, subprocess.TimeoutExpired:
+            return False
+        return result.returncode == 0
+
     def __init__(
         self,
         app_ids: Mapping[str, str],

@@ -76,3 +76,37 @@ def test_missing_selected_pack_falls_back_to_english_without_rewriting_choice(
     assert store.preferences.locale == "en"
     assert store.text("dashboard") == "Dashboard"
     assert selection.read_text(encoding="utf-8") == '{"locale": "fr"}'
+
+
+def test_existing_complete_pack_uses_english_for_new_action_labels(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "ui"
+    languages = directory / "languages"
+    languages.mkdir(parents=True)
+    old_strings = {
+        key: value
+        for key, value in ENGLISH.items()
+        if key
+        not in {
+            "actions",
+            "actions_heading",
+            "actions_caption",
+            "enable_actions",
+            "actions_search",
+            "action_select_one",
+            "app_unavailable",
+        }
+    }
+    old_strings["dashboard"] = "Tableau de bord"
+    (languages / "fr.json").write_text(
+        json.dumps({"locale": "fr", "name": "Français", "strings": old_strings}),
+        encoding="utf-8",
+    )
+    (directory / "ui.json").write_text('{"locale":"fr"}', encoding="utf-8")
+
+    store = UiTranslations(directory)
+
+    assert store.load_error is None
+    assert store.text("dashboard") == "Tableau de bord"
+    assert store.text("actions") == "Desktop Actions"

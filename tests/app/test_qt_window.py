@@ -23,6 +23,7 @@ from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
 from kyrin.commands.models import ResponseChannel
+from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.stt.device import DevicePreference
 
@@ -95,6 +96,7 @@ def _window(
     store: JsonSettingsStore,
     controller: ApplicationController,
     registration: FakeRegistration | None = None,
+    catalog: XdgDesktopAppCatalog | None = None,
 ) -> ControlWindow:
     return ControlWindow(
         settings,
@@ -104,6 +106,7 @@ def _window(
         EventBridge(),
         whisper_server_available=False,
         ui_translations=UiTranslations(store.path.parent),
+        app_catalog=catalog,
         startup_registration=registration,
     )
 
@@ -365,6 +368,91 @@ def test_failed_startup_save_restores_previous_registration(
         assert not registration.enabled()
         assert not store.path.exists()
     finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_actions_page_saves_only_explicitly_selected_app(
+    application: QApplication, tmp_path: Path
+) -> None:
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    for name in ("Telegram", "Browser"):
+        (directory / f"{name.lower()}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName={name}\nExec=true\n",
+            encoding="utf-8",
+        )
+    catalog = XdgDesktopAppCatalog((tmp_path / "data",))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    settings = AppSettings(listening_enabled=False)
+    window = _window(settings, store, _controller([]), catalog=catalog)
+    try:
+        assert window.actions_page.apps.count() == 2
+        window.actions_page.enabled_checkbox.setChecked(True)
+        window.apply_button.click()
+        assert "Select at least one" in window.feedback_label.text()
+        assert not store.path.exists()
+
+        telegram = next(
+            window.actions_page.apps.item(index)
+            for index in range(window.actions_page.apps.count())
+            if "telegram.desktop" in window.actions_page.apps.item(index).text()
+        )
+        telegram.setCheckState(Qt.CheckState.Checked)
+        window.actions_page.search.setText("telegram")
+        window.apply_button.click()
+        saved = store.load()
+        assert saved.action_execution_enabled
+        assert len(saved.allowed_apps) == 1
+        assert saved.allowed_apps[0].desktop_id == "telegram.desktop"
+        assert saved.allowed_apps[0].app_id == "telegram"
+        assert "1 allowed apps" in window.action_label.text()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_action_permission_change_restarts_running_session(
+    application: QApplication, tmp_path: Path
+) -> None:
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    (directory / "telegram.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Telegram\nExec=true\n",
+        encoding="utf-8",
+    )
+    model = tmp_path / "model"
+    model.mkdir()
+    settings = AppSettings(stt=SttSelection("vosk", model, "en"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    sessions: list[FakeSession] = []
+    controller = _controller(sessions)
+    window = _window(
+        settings,
+        store,
+        controller,
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+    )
+    try:
+        window.start_initial_session()
+        _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        window.actions_page.apps.item(0).setCheckState(Qt.CheckState.Checked)
+        window.actions_page.enabled_checkbox.setChecked(True)
+        assert not store.path.exists()
+
+        window.apply_button.click()
+        _pump_until(
+            application, lambda: len(sessions) == 2 and sessions[1].running.is_set()
+        )
+        assert sessions[0].stopped.is_set()
+        saved = store.load()
+        assert saved.action_execution_enabled
+        assert saved.allowed_apps[0].desktop_id == "telegram.desktop"
+    finally:
+        controller.request_stop()
+        controller.wait_until_stopped(2)
         window._timer.stop()
         window.deleteLater()
         application.processEvents()

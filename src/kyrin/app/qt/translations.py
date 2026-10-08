@@ -12,6 +12,7 @@ ENGLISH: dict[str, str] = {
     "dashboard": "Dashboard",
     "audio": "Audio Input",
     "recognition": "Speech Recognition",
+    "actions": "Desktop Actions",
     "preferences": "Preferences",
     "welcome": "Welcome to KYRIN",
     "welcome_caption": "Your workspace, one voice away.",
@@ -40,6 +41,12 @@ ENGLISH: dict[str, str] = {
     "actions_on": "Desktop actions enabled",
     "actions_off": "Desktop actions disabled",
     "allowed_apps": "allowed apps",
+    "actions_heading": "Desktop actions",
+    "actions_caption": "Choose exactly which installed apps KYRIN may open.",
+    "enable_actions": "Allow KYRIN to open the selected apps",
+    "actions_search": "Search installed apps…",
+    "action_select_one": "Select at least one app before enabling desktop actions.",
+    "app_unavailable": "Unavailable",
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",
@@ -78,6 +85,18 @@ ENGLISH: dict[str, str] = {
     "whisper_file": "Select a Whisper model file",
     "language_file": "Select a KYRIN language pack",
 }
+
+_NEW_ACTION_KEYS = frozenset(
+    {
+        "actions",
+        "actions_heading",
+        "actions_caption",
+        "enable_actions",
+        "actions_search",
+        "action_select_one",
+        "app_unavailable",
+    }
+)
 
 _LOCALE = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
 
@@ -144,14 +163,15 @@ class UiTranslations:
             or not isinstance(data["name"], str)
             or not data["name"].strip()
             or not isinstance(data["strings"], dict)
-            or set(data["strings"]) != set(ENGLISH)
+            or set(data["strings"])
+            not in (set(ENGLISH), set(ENGLISH) - _NEW_ACTION_KEYS)
             or not all(
                 isinstance(value, str) and value.strip()
                 for value in data["strings"].values()
             )
         ):
             raise TranslationError("Language pack must contain every UI string")
-        return data["name"], data["strings"]
+        return data["name"], {**ENGLISH, **data["strings"]}
 
     def text(self, key: str) -> str:
         return self._strings[key]
