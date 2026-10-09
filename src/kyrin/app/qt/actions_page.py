@@ -3,10 +3,12 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
 from kyrin.app.app_permissions import AppChoice, AppPickerCatalog, app_choices
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import AllowedApp, AppSettings
+from kyrin.system_power.flow import PowerAction
 
 
 class DesktopActionsPage(QWidget):
@@ -40,9 +43,49 @@ class DesktopActionsPage(QWidget):
         self.search = QLineEdit()
         self.search.textChanged.connect(self._filter)
         layout.addWidget(self.search)
+        selection_row = QHBoxLayout()
+        self.select_visible_button = QPushButton()
+        self.select_visible_button.clicked.connect(
+            lambda: self._set_visible_check_state(Qt.CheckState.Checked)
+        )
+        selection_row.addWidget(self.select_visible_button)
+        self.clear_visible_button = QPushButton()
+        self.clear_visible_button.clicked.connect(
+            lambda: self._set_visible_check_state(Qt.CheckState.Unchecked)
+        )
+        selection_row.addWidget(self.clear_visible_button)
+        self.selection_count = QLabel()
+        selection_row.addWidget(self.selection_count)
+        selection_row.addStretch()
+        layout.addLayout(selection_row)
         self.apps = QListWidget()
         self.apps.setAccessibleName("Allowed desktop applications")
+        self._pressed_item: QListWidgetItem | None = None
+        self._pressed_check_state: Qt.CheckState | None = None
+        self.apps.itemPressed.connect(self._remember_pressed_state)
+        self.apps.itemClicked.connect(self._toggle_row_if_needed)
+        self.apps.itemChanged.connect(self._update_selection_count)
         layout.addWidget(self.apps, 1)
+        self.telegram_chat_checkbox = QCheckBox()
+        layout.addWidget(self.telegram_chat_checkbox)
+        self.window_control_checkbox = QCheckBox()
+        layout.addWidget(self.window_control_checkbox)
+        self.close_window_checkbox = QCheckBox()
+        layout.addWidget(self.close_window_checkbox)
+        self.system_power_checkbox = QCheckBox()
+        layout.addWidget(self.system_power_checkbox)
+        self.power_buttons: dict[PowerAction, QPushButton] = {}
+        power_row = QHBoxLayout()
+        for action, title in (
+            (PowerAction.POWER_OFF, "Power off…"),
+            (PowerAction.RESTART, "Restart…"),
+            (PowerAction.LOG_OUT, "Log out…"),
+            (PowerAction.SUSPEND, "Suspend…"),
+        ):
+            button = QPushButton(title)
+            self.power_buttons[action] = button
+            power_row.addWidget(button)
+        layout.addLayout(power_row)
 
         if settings is not None:
             self.enabled_checkbox.setChecked(settings.action_execution_enabled)
@@ -64,17 +107,87 @@ class DesktopActionsPage(QWidget):
                     else Qt.CheckState.Unchecked
                 )
                 self.apps.addItem(item)
+            self.telegram_chat_checkbox.setChecked(
+                "telegram" in settings.allowed_chat_apps
+            )
+            selected_app_ids = {binding.app_id for binding in settings.allowed_apps}
+            self.window_control_checkbox.setChecked(
+                bool(selected_app_ids)
+                and selected_app_ids == set(settings.allowed_window_apps)
+            )
+            self.close_window_checkbox.setChecked(
+                bool(selected_app_ids)
+                and selected_app_ids == set(settings.allowed_close_apps)
+            )
+            self.system_power_checkbox.setChecked(settings.system_power_enabled)
         else:
             self.enabled_checkbox.setEnabled(False)
             self.apps.setEnabled(False)
+            self.select_visible_button.setEnabled(False)
+            self.clear_visible_button.setEnabled(False)
+            self.telegram_chat_checkbox.setEnabled(False)
+            self.window_control_checkbox.setEnabled(False)
+            self.close_window_checkbox.setEnabled(False)
+            self.system_power_checkbox.setEnabled(False)
         self.translate()
+        self._update_chat_permission_availability()
+
+    def _remember_pressed_state(self, item: QListWidgetItem) -> None:
+        self._pressed_item = item
+        self._pressed_check_state = item.checkState()
+
+    def _toggle_row_if_needed(self, item: QListWidgetItem) -> None:
+        # Qt already toggles a click on the indicator. A click elsewhere in
+        # the row leaves the state unchanged, so toggle only in that case.
+        if (
+            item is self._pressed_item
+            and item.checkState() == self._pressed_check_state
+        ):
+            item.setCheckState(
+                Qt.CheckState.Unchecked
+                if item.checkState() is Qt.CheckState.Checked
+                else Qt.CheckState.Checked
+            )
+        self._pressed_item = None
+        self._pressed_check_state = None
+
+    def _set_visible_check_state(self, state: Qt.CheckState) -> None:
+        for index in range(self.apps.count()):
+            item = self.apps.item(index)
+            if item is None or item.isHidden():
+                continue
+            choice = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(choice, AppChoice) and (
+                choice.installed or state is Qt.CheckState.Unchecked
+            ):
+                item.setCheckState(state)
+
+    def _update_selection_count(self, item: QListWidgetItem | None = None) -> None:
+        self.selection_count.setText(
+            f"{len(self.selected_apps())} {self._translations.text('actions_selected')}"
+        )
+        self._update_chat_permission_availability()
+
+    def _update_chat_permission_availability(self) -> None:
+        telegram_selected = any(
+            app.app_id == "telegram" for app in self.selected_apps()
+        )
+        self.telegram_chat_checkbox.setEnabled(telegram_selected)
+        if not telegram_selected:
+            self.telegram_chat_checkbox.setChecked(False)
 
     def translate(self) -> None:
         text = self._translations.text
         self.heading.setText(text("actions_heading"))
         self.caption.setText(text("actions_caption"))
         self.enabled_checkbox.setText(text("enable_actions"))
+        self.telegram_chat_checkbox.setText(text("allow_telegram_chats"))
+        self.window_control_checkbox.setText(text("allow_window_controls"))
+        self.close_window_checkbox.setText(text("allow_window_close"))
+        self.system_power_checkbox.setText(text("allow_system_power"))
         self.search.setPlaceholderText(text("actions_search"))
+        self.select_visible_button.setText(text("actions_select_visible"))
+        self.clear_visible_button.setText(text("actions_clear_visible"))
         for index in range(self.apps.count()):
             item = self.apps.item(index)
             if item is None:
@@ -85,6 +198,7 @@ class DesktopActionsPage(QWidget):
             suffix = "" if choice.installed else f" · {text('app_unavailable')}"
             item.setText(f"{choice.display_name} · {choice.binding.desktop_id}{suffix}")
         self._filter(self.search.text())
+        self._update_selection_count()
 
     def _filter(self, query: str) -> None:
         needle = query.casefold().strip()
@@ -103,8 +217,29 @@ class DesktopActionsPage(QWidget):
                     bindings.append(choice.binding)
         return tuple(bindings)
 
+    def selected_chat_apps(self) -> tuple[str, ...]:
+        return ("telegram",) if self.telegram_chat_checkbox.isChecked() else ()
+
+    def selected_window_apps(self) -> tuple[str, ...]:
+        return (
+            tuple(app.app_id for app in self.selected_apps())
+            if self.window_control_checkbox.isChecked()
+            else ()
+        )
+
+    def selected_close_apps(self) -> tuple[str, ...]:
+        return (
+            tuple(app.app_id for app in self.selected_apps())
+            if self.close_window_checkbox.isChecked()
+            else ()
+        )
+
     def has_unsaved_changes(self, settings: AppSettings) -> bool:
         return (
             self.enabled_checkbox.isChecked() != settings.action_execution_enabled
             or set(self.selected_apps()) != set(settings.allowed_apps)
+            or self.selected_chat_apps() != settings.allowed_chat_apps
+            or set(self.selected_window_apps()) != set(settings.allowed_window_apps)
+            or set(self.selected_close_apps()) != set(settings.allowed_close_apps)
+            or self.system_power_checkbox.isChecked() != settings.system_power_enabled
         )

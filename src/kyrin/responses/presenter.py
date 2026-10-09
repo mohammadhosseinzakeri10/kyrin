@@ -13,6 +13,7 @@ from kyrin.responses.models import SystemNotice
 
 _TEXT: dict[str, dict[str, str]] = {
     "fa": {
+        "ready_for_command": "گوش می‌دهم؛ فرمانتان را بگویید.",
         "repeat_command": "متوجه نشدم. لطفاً فرمان را دوباره بگویید.",
         "choose_chat_app": "چت را در کدام برنامه باز کنم؟",
         "choose_chat_app_pair": "چت {target} را در {first} باز کنم یا {second}؟",
@@ -30,6 +31,22 @@ _TEXT: dict[str, dict[str, str]] = {
         "cancelled": "انجام این کار لغو شد.",
         "unsupported": "این بخش از فرمان هنوز پشتیبانی نمی‌شود.",
         "unsupported_chat": "هنوز نمی‌توانم چت را باز کنم.",
+        "unsupported_chat_target": "فعلاً فقط چت Saved Messages پشتیبانی می‌شود.",
+        "screen_access_required": "برای بررسی چت، دسترسی صفحه را در برنامه فعال کنید.",
+        "telegram_not_active": (
+            "تلگرام فعال نیست؛ لطفاً آن را جلو بیاورید و دوباره بگویید."
+        ),
+        "telegram_focus_changed": "پنجرهٔ فعال تغییر کرد؛ فرمان چت متوقف شد.",
+        "chat_unverified": "بازشدن چت را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید.",
+        "no_window": "پنجره‌ای از این برنامه پیدا نکردم.",
+        "multiple_windows": (
+            "این برنامه چند پنجره دارد. پنجرهٔ موردنظر را فعال کنید "
+            "و فرمان را دوباره بگویید."
+        ),
+        "unavailable": "این پنجره از تغییر درخواستی پشتیبانی نمی‌کند.",
+        "window_unverified": (
+            "نتیجهٔ تغییر پنجره را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید."
+        ),
         "dependency_unverified": (
             "فعال‌بودن برنامهٔ موردنظر تأیید نشد؛ برای جلوگیری از رفتن به چت "
             "نادرست، ادامه ندادم."
@@ -62,6 +79,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "listening_retry": "برای راه‌اندازی دوبارهٔ دریافت گفتار تلاش می‌کنم.",
     },
     "en": {
+        "ready_for_command": "I'm listening. Tell me what to do.",
         "repeat_command": "I didn't understand. Please repeat the command.",
         "choose_chat_app": "Which app should I open the chat in?",
         "choose_chat_app_pair": (
@@ -81,6 +99,25 @@ _TEXT: dict[str, dict[str, str]] = {
         "cancelled": "That action was cancelled.",
         "unsupported": "I can't perform this step yet.",
         "unsupported_chat": "I can't open chats yet.",
+        "unsupported_chat_target": "Only Saved Messages is supported for now.",
+        "screen_access_required": "Enable Screen Access in KYRIN to verify the chat.",
+        "telegram_not_active": (
+            "Telegram is not active. Bring it forward and try again."
+        ),
+        "telegram_focus_changed": (
+            "The active window changed, so I stopped the chat command."
+        ),
+        "chat_unverified": (
+            "I couldn't verify that the chat opened. Please check the screen."
+        ),
+        "no_window": "I couldn't find an open window for that app.",
+        "unavailable": "This window does not support the requested change.",
+        "multiple_windows": (
+            "That app has multiple windows. Focus the one you want, then try again."
+        ),
+        "window_unverified": (
+            "I couldn't verify the window change. Please check the screen."
+        ),
         "dependency_unverified": (
             "I couldn't verify that the intended app is active, so I stopped "
             "before opening the chat."
@@ -166,10 +203,25 @@ class ResponsePresenter:
             ):
                 text = messages["confirmed_active_app"]
             elif (
-                event.error_code == "unsupported_action"
+                event.error_code in {"unsupported_action", "unsupported_chat"}
                 and event.intent.kind is CommandKind.OPEN_CHAT
             ):
-                text = messages["unsupported_chat"]
+                text = messages[
+                    "unsupported_chat"
+                    if event.error_code == "unsupported_action"
+                    else "unsupported_chat_target"
+                ]
+            elif event.error_code in {
+                "screen_access_required",
+                "telegram_not_active",
+                "telegram_focus_changed",
+                "chat_unverified",
+                "no_window",
+                "multiple_windows",
+                "unavailable",
+                "window_unverified",
+            }:
+                text = messages[event.error_code]
             else:
                 text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id

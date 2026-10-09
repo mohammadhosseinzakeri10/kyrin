@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.gate import ActionGate, ActionPolicy
 from kyrin.actions.models import (
@@ -15,8 +16,14 @@ from kyrin.actions.models import (
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
+from kyrin.actions.platforms.telegram import (
+    ChatVerifier,
+    TelegramSavedMessagesExecutor,
+    WindowIdentityReader,
+)
+from kyrin.actions.window_control import WindowControlExecutor
 from kyrin.app.controller import RuntimeSession
-from kyrin.app.events import ApplicationEvent
+from kyrin.app.events import ApplicationEvent, SttDeviceReady
 from kyrin.app.settings import AppSettings, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
@@ -39,8 +46,10 @@ from kyrin.commands.models import (
     ResponseRequest,
 )
 from kyrin.desktop.active_app import ActiveAppObserver
+from kyrin.desktop.app_activation import ExistingAppActivator
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
+from kyrin.desktop.window_control import AppWindowController
 from kyrin.responses.models import SystemNotice, SystemNoticeKind
 from kyrin.responses.presenter import PresentedResponse, ResponsePresenter
 from kyrin.responses.speech import (
@@ -56,34 +65,63 @@ from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import SpeechToTextEngine
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
-from kyrin.stt.errors import DeviceUnavailableError
+from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
+from kyrin.system_power.flow import PowerBackend, PowerPrompt, SystemPowerFlow
+from kyrin.system_power.gnome import GnomePowerBackend
 
 EngineOpener = Callable[[SttSelection], SpeechToTextEngine]
 SourceFactory = Callable[[MicrophoneConfiguration], AudioInput]
 EventSink = Callable[[ApplicationEvent], None]
 ObserverFactory = Callable[[Mapping[str, str], XdgDesktopAppCatalog], ActiveAppObserver]
+ActivatorFactory = Callable[[Mapping[str, str]], ExistingAppActivator]
+WindowControllerFactory = Callable[[Mapping[str, str]], AppWindowController]
 
 
 def standard_stt_openers(
-    *, whisper_server_path: Path | None = None
+    *,
+    whisper_server_path: Path | None = None,
+    whisper_gpu_server_path: Path | None = None,
 ) -> dict[str, EngineOpener]:
     """Use the existing offline adapters; no model or server is downloaded."""
 
     def open_vosk(selection: SttSelection) -> SpeechToTextEngine:
         if selection.device is DevicePreference.GPU:
             raise DeviceUnavailableError("the installed Vosk adapter supports CPU only")
+        if selection.language == "auto":
+            raise ValueError("Vosk needs a selected language model")
         return VoskEngine(selection.model_path, language=selection.language)
 
     def open_whisper(selection: SttSelection) -> SpeechToTextEngine:
-        if selection.device is DevicePreference.GPU:
-            raise DeviceUnavailableError(
-                "the installed Whisper adapter supports CPU only"
+        def open_on(path: Path, device: ComputeDevice) -> WhisperEngine:
+            return WhisperEngine(
+                path,
+                selection.model_path,
+                language=selection.language,
+                compute_device=device,
             )
+
+        if selection.device is DevicePreference.GPU:
+            if whisper_gpu_server_path is None:
+                raise DeviceUnavailableError("Whisper GPU runtime is not installed")
+            try:
+                return open_on(whisper_gpu_server_path, ComputeDevice.GPU)
+            except SpeechToTextError as exc:
+                raise DeviceUnavailableError(
+                    f"Whisper GPU runtime could not start: {exc}"
+                ) from exc
+        if selection.device is DevicePreference.CPU:
+            if whisper_server_path is None:
+                raise FileNotFoundError("Whisper CPU runtime is not installed")
+            return open_on(whisper_server_path, ComputeDevice.CPU)
+        if whisper_gpu_server_path is not None:
+            try:
+                return open_on(whisper_gpu_server_path, ComputeDevice.GPU)
+            except SpeechToTextError:
+                if whisper_server_path is None:
+                    raise
         if whisper_server_path is None:
-            raise FileNotFoundError("whisper-server is not configured")
-        return WhisperEngine(
-            whisper_server_path, selection.model_path, language=selection.language
-        )
+            raise FileNotFoundError("Whisper CPU or GPU runtime is not installed")
+        return open_on(whisper_server_path, ComputeDevice.CPU)
 
     return {"vosk": open_vosk, "whisper": open_whisper}
 
@@ -136,8 +174,14 @@ class UbuntuSessionFactory:
             LinuxDesktopEntryExecutor
         ),
         observer_factory: ObserverFactory | None = None,
+        activator_factory: ActivatorFactory | None = None,
+        window_controller_factory: WindowControllerFactory | None = None,
+        chat_verifier: ChatVerifier | None = None,
+        focused_window: WindowIdentityReader | None = None,
         visual_publish: Callable[[VisualPresentation], None] | None = None,
         synthesizer: SpeechSynthesizer | None = None,
+        power_backend_factory: Callable[[], PowerBackend] = GnomePowerBackend,
+        system_power: SystemPowerFlow | None = None,
     ) -> None:
         self._stt_openers = dict(stt_openers)
         self._on_event = on_event
@@ -147,8 +191,14 @@ class UbuntuSessionFactory:
         self._catalog = catalog or XdgDesktopAppCatalog()
         self._executor_factory = executor_factory
         self._observer_factory = observer_factory
+        self._activator_factory = activator_factory
+        self._window_controller_factory = window_controller_factory
+        self._chat_verifier = chat_verifier
+        self._focused_window = focused_window
         self._visual_publish = visual_publish
         self._synthesizer = synthesizer
+        self._power_backend_factory = power_backend_factory
+        self._system_power = system_power
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
@@ -173,17 +223,54 @@ class UbuntuSessionFactory:
             if binding.app_id in installed
         }
         spoken_names = (
-            CatalogSpokenAppResolver(self._catalog, platform_ids)
+            CatalogSpokenAppResolver(
+                self._catalog,
+                platform_ids,
+                aliases={"telegram": ("تلگرام", "تلیگرام")}
+                if "telegram" in platform_ids.values()
+                else None,
+            )
             if platform_ids
             else None
         )
-        coordinator = CommandCoordinator(DemoCommandInterpreter(spoken_names))
+        coordinator = CommandCoordinator(
+            DemoCommandInterpreter(spoken_names, wake_aliases=settings.wake_aliases)
+        )
+        chat_enabled = (
+            settings.action_execution_enabled
+            and "telegram" in settings.allowed_chat_apps
+            and "telegram" in installed
+            and self._observer_factory is not None
+            and self._chat_verifier is not None
+            and self._focused_window is not None
+        )
+        window_controls_available = self._window_controller_factory is not None
+        supported_kinds = {CommandKind.OPEN_APP}
+        if chat_enabled:
+            supported_kinds.add(CommandKind.OPEN_CHAT)
+        if window_controls_available:
+            supported_kinds.update(
+                {
+                    CommandKind.RESTORE_APP,
+                    CommandKind.MINIMIZE_APP,
+                    CommandKind.CLOSE_APP_WINDOW,
+                    CommandKind.MAXIMIZE_APP,
+                    CommandKind.UNMAXIMIZE_APP,
+                    CommandKind.FULLSCREEN_APP,
+                    CommandKind.UNFULLSCREEN_APP,
+                }
+            )
         gate = ActionGate(
             ActionPolicy(
                 allowed_apps=frozenset(
                     binding.app_id for binding in settings.allowed_apps
                 ),
-                supported_kinds=frozenset({CommandKind.OPEN_APP}),
+                allowed_chat_apps=frozenset({"telegram"})
+                if chat_enabled
+                else frozenset(),
+                allowed_window_apps=frozenset(settings.allowed_window_apps),
+                allowed_close_apps=frozenset(settings.allowed_close_apps),
+                supported_kinds=frozenset(supported_kinds),
             )
         )
         observer = (
@@ -198,6 +285,7 @@ class UbuntuSessionFactory:
         engine = opener(selection)
         safe_to_close_engine = True
         speaker: ResponseSpeaker | None = None
+        power_flow: SystemPowerFlow | None = None
         try:
             if (
                 selection.device is DevicePreference.GPU
@@ -241,6 +329,9 @@ class UbuntuSessionFactory:
                     options=SpeechToTextOptions(
                         device=selection.device, language_hint=selection.language
                     ),
+                    on_compute_device=lambda device: self._on_event(
+                        SttDeviceReady(device)
+                    ),
                 )
 
             def show_live(event: LiveSpeechEvent) -> None:
@@ -278,11 +369,76 @@ class UbuntuSessionFactory:
                             )
                         )
 
+            def show_power(prompt: PowerPrompt) -> None:
+                self._on_event(prompt)
+                show_response(
+                    PresentedResponse(
+                        None,
+                        None,
+                        prompt.text,
+                        ResponseChannel.TEXT_AND_VOICE
+                        if prompt.spoken
+                        else ResponseChannel.TEXT_ONLY,
+                        "en",
+                    )
+                )
+
+            power_flow = self._system_power or SystemPowerFlow(
+                self._power_backend_factory(),
+                show_power,
+                enabled=settings.action_execution_enabled
+                and settings.system_power_enabled,
+            )
+            power_flow.configure(
+                enabled=settings.action_execution_enabled
+                and settings.system_power_enabled
+            )
+            power_flow.set_voice_ready(lambda: speaker is None or not speaker.is_active)
+            if self._system_power is not None:
+                power_flow.set_announcement(
+                    lambda prompt: show_response(
+                        PresentedResponse(
+                            None,
+                            None,
+                            prompt.text,
+                            ResponseChannel.TEXT_AND_VOICE,
+                            "en",
+                        )
+                    )
+                )
+
             executor: ActionExecutor | None = None
             if settings.action_execution_enabled:
                 executor = self._executor_factory(installed)
                 if observer is not None:
                     executor = ObservedAppExecutor(executor, observer)
+                    if self._activator_factory is not None:
+                        activator = self._activator_factory(
+                            {
+                                app_id: desktop_id
+                                for desktop_id, app_id in platform_ids.items()
+                            }
+                        )
+                        executor = ActivateOrLaunchExecutor(
+                            executor, activator, observer
+                        )
+                if chat_enabled:
+                    assert self._focused_window is not None
+                    assert self._chat_verifier is not None
+                    executor = TelegramSavedMessagesExecutor(
+                        executor,
+                        telegram_desktop_id=installed["telegram"].name,
+                        identity_reader=self._focused_window,
+                        verifier=self._chat_verifier,
+                    )
+                if self._window_controller_factory is not None:
+                    controller = self._window_controller_factory(
+                        {
+                            app_id: desktop_id
+                            for desktop_id, app_id in platform_ids.items()
+                        }
+                    )
+                    executor = WindowControlExecutor(executor, controller)
                 if visual is not None:
                     executor = _VisualActionExecutor(executor, visual)
 
@@ -296,6 +452,7 @@ class UbuntuSessionFactory:
                 on_command_event=show_command,
                 on_action_output=show_action,
                 on_session_end=show_session_end,
+                system_power=power_flow,
             )
             yield runtime
         except AudioCaptureStopError:
@@ -304,6 +461,9 @@ class UbuntuSessionFactory:
             safe_to_close_engine = False
             raise
         finally:
+            if self._system_power is not None and power_flow is not None:
+                power_flow.cancel()
+                power_flow.set_announcement(None)
             try:
                 if speaker is not None:
                     speaker.close()

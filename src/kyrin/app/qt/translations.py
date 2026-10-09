@@ -12,7 +12,9 @@ ENGLISH: dict[str, str] = {
     "dashboard": "Dashboard",
     "audio": "Audio Input",
     "recognition": "Speech Recognition",
+    "models": "Model Library",
     "actions": "Desktop Actions",
+    "screen": "Screen Access",
     "preferences": "Preferences",
     "welcome": "Welcome to KYRIN",
     "welcome_caption": "Your workspace, one voice away.",
@@ -30,10 +32,47 @@ ENGLISH: dict[str, str] = {
     "model": "Installed model",
     "browse": "Browse…",
     "speech_language": "Speech language code",
+    "speech_language_help": (
+        "Use a language code such as en or fa. Whisper multilingual models also "
+        "accept auto; Vosk requires a specific language model."
+    ),
+    "vosk_language_required": "Vosk needs a specific language code, such as en.",
+    "wake_aliases": "Other spellings of KYRIN (comma-separated)",
     "device": "Run model on",
     "auto": "Automatic",
     "cpu": "CPU",
     "gpu": "GPU",
+    "device_actual": "Active STT device",
+    "device_actual_pending": "Active STT device: waiting for session",
+    "diagnostics_heading": "Recent speech decisions (this session only)",
+    "diagnostics_clear": "Clear speech diagnostics",
+    "diagnostics_decision": "Interpreted command",
+    "diagnostics_no_command": "No action requested",
+    "diagnostics_reason": "Reason or clarification",
+    "diagnostics_result": "Action result",
+    "models_heading": "Speech model library",
+    "models_caption": (
+        "Browse all installed models, or filter by CPU and GPU compatibility. "
+        "Whisper weights can appear in both views without a second copy."
+    ),
+    "models_all": "All models",
+    "models_cpu": "CPU models",
+    "models_gpu": "GPU models",
+    "models_language": "Language code (for example, en)",
+    "models_import_cpu": "Add model for CPU…",
+    "models_import_gpu": "Add model for GPU…",
+    "models_use": "Use selected model",
+    "models_empty": "No models in this view yet.",
+    "models_external": "Current external model",
+    "models_unavailable": "The model library is unavailable.",
+    "models_vosk_cpu": "Vosk currently supports CPU only.",
+    "models_language_required": "Enter a language code before adding a model.",
+    "models_importing": "Adding model to your library…",
+    "models_imported": "Model added. Select it and choose Use selected model.",
+    "models_select_first": "Select a model from this list first.",
+    "models_gpu_unavailable": "GPU runtime is not installed for this engine.",
+    "models_cpu_unavailable": "CPU runtime is not installed for this engine.",
+    "models_selected": "Model selected. Save changes to apply it.",
     "save": "Save changes",
     "start": "Start listening",
     "stop": "Stop listening",
@@ -42,11 +81,49 @@ ENGLISH: dict[str, str] = {
     "actions_off": "Desktop actions disabled",
     "allowed_apps": "allowed apps",
     "actions_heading": "Desktop actions",
-    "actions_caption": "Choose exactly which installed apps KYRIN may open.",
-    "enable_actions": "Allow KYRIN to open the selected apps",
+    "actions_caption": "Choose which installed apps KYRIN may control.",
+    "enable_actions": "Enable the selected desktop actions",
+    "allow_telegram_chats": (
+        "Allow KYRIN to open chats in Telegram (no message sending)"
+    ),
+    "allow_window_controls": (
+        "Allow KYRIN to restore, minimize, maximize, or fullscreen selected apps"
+    ),
+    "allow_window_close": "Allow KYRIN to close a window of selected apps",
+    "allow_system_power": "Allow two-step system power requests (off by default)",
     "actions_search": "Search installed apps…",
-    "action_select_one": "Select at least one app before enabling desktop actions.",
+    "actions_select_visible": "Select all shown",
+    "actions_clear_visible": "Clear shown",
+    "actions_selected": "selected",
+    "action_select_one": "Select at least one app or enable system power requests.",
     "app_unavailable": "Unavailable",
+    "screen_heading": "Screen access",
+    "screen_caption": (
+        "Allow KYRIN to read the active window only while this app session is open. "
+        "GNOME will ask for permission once; no image is saved."
+    ),
+    "screen_enable": "Allow screen access for this session",
+    "screen_active": "Screen access is active. Turn this off to revoke it now.",
+    "screen_off": "Screen access is off.",
+    "screen_waiting": "Waiting for GNOME permission…",
+    "screen_unavailable": (
+        "Screen access is unavailable. Check the GNOME extension or restart KYRIN "
+        "if another process owns its session name."
+    ),
+    "screen_read": "Read text in the active window",
+    "screen_read_hint": (
+        "Read a snapshot when you need it. Visible text stays in memory."
+    ),
+    "screen_reading": "Reading the active window…",
+    "screen_ocr_unavailable": "An offline English OCR runtime is not installed.",
+    "screen_capture_unavailable": "The active window could not be captured.",
+    "screen_window_changed": "The active window changed. Read it again.",
+    "screen_ocr_failed": "The screen text could not be read.",
+    "screen_no_text": "No readable text was found in that window.",
+    "screen_read_result": "Snapshot from {app_id} (process {pid}).",
+    "screen_read_truncated": (
+        "Snapshot from {app_id} (process {pid}); showing the first 2,000 characters."
+    ),
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",
@@ -86,16 +163,58 @@ ENGLISH: dict[str, str] = {
     "language_file": "Select a KYRIN language pack",
 }
 
-_NEW_ACTION_KEYS = frozenset(
-    {
-        "actions",
-        "actions_heading",
-        "actions_caption",
-        "enable_actions",
-        "actions_search",
-        "action_select_one",
-        "app_unavailable",
-    }
+_OPTIONAL_LEGACY_KEYS = (
+    frozenset(
+        {
+            "actions",
+            "actions_heading",
+            "actions_caption",
+            "enable_actions",
+            "allow_telegram_chats",
+            "allow_window_controls",
+            "allow_window_close",
+            "actions_search",
+            "actions_select_visible",
+            "actions_clear_visible",
+            "actions_selected",
+            "action_select_one",
+            "app_unavailable",
+            "device_actual",
+            "device_actual_pending",
+            "diagnostics_heading",
+            "diagnostics_clear",
+            "diagnostics_decision",
+            "diagnostics_no_command",
+            "diagnostics_reason",
+            "diagnostics_result",
+            "wake_aliases",
+            "speech_language_help",
+            "vosk_language_required",
+            "models",
+            "models_heading",
+            "models_caption",
+            "models_all",
+            "models_cpu",
+            "models_gpu",
+            "models_language",
+            "models_import_cpu",
+            "models_import_gpu",
+            "models_use",
+            "models_empty",
+            "models_external",
+            "models_unavailable",
+            "models_vosk_cpu",
+            "models_language_required",
+            "models_importing",
+            "models_imported",
+            "models_select_first",
+            "models_gpu_unavailable",
+            "models_cpu_unavailable",
+            "models_selected",
+        }
+    )
+    | frozenset(key for key in ENGLISH if key == "screen" or key.startswith("screen_"))
+    | frozenset({"allow_system_power"})
 )
 
 _LOCALE = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
@@ -163,8 +282,10 @@ class UiTranslations:
             or not isinstance(data["name"], str)
             or not data["name"].strip()
             or not isinstance(data["strings"], dict)
-            or set(data["strings"])
-            not in (set(ENGLISH), set(ENGLISH) - _NEW_ACTION_KEYS)
+            or not set(data["strings"]).issubset(ENGLISH)
+            or not set(ENGLISH)
+            .difference(data["strings"])
+            .issubset(_OPTIONAL_LEGACY_KEYS)
             or not all(
                 isinstance(value, str) and value.strip()
                 for value in data["strings"].values()
@@ -206,7 +327,10 @@ class UiTranslations:
             or not isinstance(data["name"], str)
             or not data["name"].strip()
             or not isinstance(data["strings"], dict)
-            or set(data["strings"]) != set(ENGLISH)
+            or not set(data["strings"]).issubset(ENGLISH)
+            or not set(ENGLISH)
+            .difference(data["strings"])
+            .issubset(_OPTIONAL_LEGACY_KEYS)
             or not all(
                 isinstance(value, str) and value.strip()
                 for value in data["strings"].values()
@@ -215,7 +339,7 @@ class UiTranslations:
             raise TranslationError("Language pack must contain every UI string")
         self._atomic_json(self.directory / "languages" / f"{locale}.json", data)
         if locale == self.preferences.locale:
-            self._strings = data["strings"]
+            self._strings = {**ENGLISH, **data["strings"]}
         return locale
 
     def save(self, preferences: UiPreferences) -> None:

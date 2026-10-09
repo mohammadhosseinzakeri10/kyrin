@@ -6,7 +6,7 @@ from threading import Lock
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
-from kyrin.stt.backends.whisper_server import WhisperCppServer
+from kyrin.stt.backends.whisper_server import WhisperCppServer, WhisperResult
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
@@ -24,15 +24,15 @@ class WhisperSession:
     """Keep listening across turns; only a confirmed pause seals a transcript."""
 
     input_format = _FORMAT
-    compute_device = ComputeDevice.CPU
     supports_partial_updates = True
 
     def __init__(
         self,
-        infer: Callable[[bytes, str], str],
+        infer: Callable[[bytes, str], str | WhisperResult],
         language: str,
         on_close: Callable[[], None],
         *,
+        compute_device: ComputeDevice = ComputeDevice.CPU,
         partial_after_seconds: float = 1.5,
         partial_every_seconds: float = 2.5,
         preview_window_seconds: float = 8.0,
@@ -45,6 +45,7 @@ class WhisperSession:
         self._infer = infer
         self._language = language
         self._on_close = on_close
+        self.compute_device = compute_device
         self._partial_after = _byte_count(partial_after_seconds)
         self._partial_every = _byte_count(partial_every_seconds)
         self._preview_window = _byte_count(preview_window_seconds)
@@ -65,9 +66,12 @@ class WhisperSession:
         if self._finished:
             raise SpeechToTextError("Whisper session has finished")
 
-    def _transcribe(self, pcm: bytes) -> str:
+    def _transcribe(self, pcm: bytes) -> WhisperResult:
         try:
-            return self._infer(pcm, self._language).strip()
+            result = self._infer(pcm, self._language)
+            if isinstance(result, WhisperResult):
+                return WhisperResult(result.text.strip(), result.language)
+            return WhisperResult(result.strip(), self._language)
         except (OSError, ValueError, RuntimeError) as exc:
             raise SpeechToTextError("Whisper could not transcribe audio") from exc
 
@@ -88,13 +92,14 @@ class WhisperSession:
         if self._too_long or len(self._turn) < self._next_partial:
             return ()
         self._next_partial = len(self._turn) + self._partial_every
-        text = self._transcribe(bytes(self._turn[-self._preview_window :]))
+        result = self._transcribe(bytes(self._turn[-self._preview_window :]))
+        text = result.text
         if not text or text == self._last_partial:
             return ()
         self._last_partial = text
         return (
             TranscriptUpdate(
-                self._segment_id, text, TranscriptStatus.PARTIAL, self._language
+                self._segment_id, text, TranscriptStatus.PARTIAL, result.language
             ),
         )
 
@@ -116,12 +121,20 @@ class WhisperSession:
         self._active = False
         # A turn beyond the bounded Whisper context is never executed from
         # its incomplete preview. Empty final text retracts that preview.
-        text = "" if self._too_long else self._transcribe(bytes(self._turn))
+        transcription = (
+            WhisperResult("", None)
+            if self._too_long
+            else self._transcribe(bytes(self._turn))
+        )
+        text = transcription.text
         result: tuple[TranscriptUpdate, ...] = ()
         if text or self._last_partial is not None:
             result = (
                 TranscriptUpdate(
-                    self._segment_id, text, TranscriptStatus.FINAL, self._language
+                    self._segment_id,
+                    text,
+                    TranscriptStatus.FINAL,
+                    transcription.language,
                 ),
             )
         self._segment_id += 1
@@ -155,26 +168,36 @@ class WhisperEngine:
         *,
         language: str = "en",
         threads: int = 4,
+        compute_device: ComputeDevice = ComputeDevice.CPU,
     ) -> None:
         language = language.strip().lower()
         if not language:
             raise ValueError("language must not be empty")
         self._language = language
+        self._compute_device = compute_device
         self._server: WhisperCppServer | None = WhisperCppServer(
-            server_path, model_path, threads=threads
+            server_path, model_path, threads=threads, compute_device=compute_device
         )
         self._lock = Lock()
         self._active_sessions = 0
         self.capabilities = SpeechToTextCapabilities(
-            supported_devices=frozenset({ComputeDevice.CPU}),
-            supported_languages=frozenset({language}),
+            supported_devices=frozenset({compute_device}),
+            supported_languages=None if language == "auto" else frozenset({language}),
             supports_partial_updates=True,
-            supports_language_detection=False,
+            supports_language_detection=language == "auto",
         )
 
     def open_session(self, options: SpeechToTextOptions) -> WhisperSession:
-        if options.device is DevicePreference.GPU:
-            raise DeviceUnavailableError("this Whisper adapter supports CPU only")
+        if (
+            options.device is DevicePreference.GPU
+            and self._compute_device is not ComputeDevice.GPU
+        ):
+            raise DeviceUnavailableError("this Whisper session is running on CPU")
+        if (
+            options.device is DevicePreference.CPU
+            and self._compute_device is not ComputeDevice.CPU
+        ):
+            raise DeviceUnavailableError("this Whisper session is running on GPU")
         if options.language_hint is not None:
             if options.language_hint.strip().lower() != self._language:
                 raise SpeechToTextError(
@@ -185,8 +208,18 @@ class WhisperEngine:
             if self._server is None:
                 raise SpeechToTextError("Whisper engine is closed")
             self._active_sessions += 1
-            infer = self._server.transcribe
-        return WhisperSession(infer, self._language, self._session_closed)
+            server = self._server
+            infer: Callable[[bytes, str], str | WhisperResult] = (
+                (lambda pcm, _language: server.transcribe_auto(pcm))
+                if self._language == "auto"
+                else server.transcribe
+            )
+        return WhisperSession(
+            infer,
+            self._language,
+            self._session_closed,
+            compute_device=self._compute_device,
+        )
 
     def _session_closed(self) -> None:
         with self._lock:

@@ -140,6 +140,20 @@ def test_live_pipeline_uses_one_capture_and_keeps_vad_and_stt_independent() -> N
     assert session.finished and session.closed
 
 
+def test_opened_session_reports_its_actual_device() -> None:
+    devices: list[ComputeDevice] = []
+    pipeline = LiveSpeechPipeline(
+        Source([]),
+        FORMAT,
+        Detector([]),
+        Engine(Session()),
+        on_compute_device=devices.append,
+    )
+    with pipeline.open() as stream:
+        list(stream)
+    assert devices == [ComputeDevice.CPU]
+
+
 def test_slow_stt_emits_wait_then_ready_without_losing_audio() -> None:
     gate = Event()
     chunks = [AudioData(bytes([i, 0]) * 160, FORMAT) for i in range(4)]

@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-08.
+> Updated: 2026-10-09.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -25,23 +25,56 @@
 - **Package name:** `kyrin`.
 - **Project version:** `0.1.0`.
 - **Product status:** early development.
-- **Current major engineering area:** V1 voice/audio pipeline.
+- **Current major engineering area:** GNOME screen-access boundary for V1
+  desktop vision, alongside the existing voice/audio pipeline.
 - **Current completed foundation:** audio capture, core PCM data model,
   streaming mono INT16 sample-rate conversion, configurable audio framing,
   an offline VAD adapter, continuous speech-activity monitoring, replaceable
   STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** validate the in-app action permissions and
-  GNOME integration with a real command, then plan durable packaging.
+- **Current next direction:** measure and improve the speech-to-command path
+  before more chat automation. The owner reported that non-English speech,
+  varying spellings of KYRIN, and `Open chat Save Message` were not reliably
+  understood. The application now displays an in-memory decision trace,
+  accepts configurable wake-name spellings, and supports `auto` language
+  detection with the installed multilingual Whisper adapter. These are
+  diagnostics and bounded improvements, not general multilingual command
+  understanding or an installed translation engine. The permission-gated
+  `Saved Messages` action still needs a live product-path test. Runtime
+  packaging and broader model management remain future work.
   Settings, lifecycle control, Ubuntu session composition, a Qt control
   window, a single-instance guard, and user-scoped XDG registration exist.
   English development uses the locally
-  installed Whisper `small` CPU adapter while Vosk remains replaceable; this
+  installed Whisper `small` CPU/GPU adapter while Vosk remains replaceable; this
   is not a packaged default or a general accuracy claim. The terminal
   diagnostic stays dry-run by default. Explicitly allowlisted app launch and
   registered app-name matching have passed focused tests, and the owner
   validated a real microphone-to-Telegram launch. Model packaging,
   multilingual setup, a complete product UI, broader stability validation, and
   Windows/macOS/mobile adapters remain future work.
+- **Current speech and window-focus correction (2026-10-09):** The owner supplied
+  diagnostic traces showing standalone wake-name spellings `Kairin`, `Kyreen`,
+  `Kyrie`, and `Kairi`. The standalone name is now acknowledged with text-only
+  readiness and cannot create an action; the observed variants are exact wake
+  aliases. An unsupported phrase after the name still asks for repetition.
+  The owner also requested that `Open Telegram` raise its existing window.
+  The Ubuntu composition now optionally uses a GNOME Shell adapter to request
+  activation of an existing registered app window, confirms foreground focus
+  with a fresh observation, and launches only when the extension explicitly
+  reports no window. Uncertain activation never triggers a second launch.
+  Focused Python and GJS tests cover these paths. The updated extension file
+  is installed for the current user, but the running GNOME session still
+  exposes the old D-Bus methods after a disable/enable cycle; a fresh GNOME
+  session and live user validation remain required.
+  After that restart, the owner reported repeated `Open Telegram` finals with
+  `activation_unverified` while the Telegram window was minimized; GNOME showed
+  "Telegram is ready" instead of focusing it. One attempt did confirm. The
+  interpreter and allowlist were working; the focus request was intermittent.
+  GNOME's `Shell.App.activate_window` compares the passed timestamp with the
+  last user interaction and may request attention instead of activating an
+  existing window. The extension now uses the same `Main.activateWindow` path
+  used by Ubuntu Dock, with a fresh display timestamp, for this allowlisted
+  voice action. Deterministic extension and Python tests pass; the revised
+  installed extension still needs a fresh GNOME session and live verification.
 - **Application foundation:** immutable, versioned settings, an injectable
   JSON store, and a UI-independent lifecycle controller now exist under
   `src/kyrin/app/`. Ubuntu composition and an optional Qt control UI connect
@@ -106,6 +139,130 @@ run for these corrections.
 KYRIN is an open-source modular AI Desktop Agent. The high-level product vision
 is to understand voice, vision, and text and interact naturally with the
 operating system.
+
+On 2026-10-09 a separate, read-only visual text foundation was added under
+`kyrin.vision`: a permission-aware one-shot Ubuntu ScreenCast window capture,
+a backend-independent OCR contract, a Tesseract CPU adapter, and a composition
+that never executes desktop actions. The owner authorized and selected a window
+in a live portal test; one 1920×1080 PNG was returned in memory. A local
+Tesseract 5.5 runtime and English data were then extracted under the ignored
+`models/local/ocr/tesseract/` directory without a system install. A synthetic
+`Open Telegram` image returned both words and their boxes; live screenshot OCR
+then found both expected words in a portal capture of a temporary test window
+that the owner confirmed selecting. OCR processing after capture took 0.146 s
+in that one run; broader live accuracy and latency remain unverified.
+The selected portal window is not yet bound to active-app identity. This work
+does not provide verified browser/chat navigation or a model-management UI.
+An optional GNOME 50 active-window capture prototype was added as a separate
+extension. Its first version asked for user consent for every image. It
+returned focused-window identity and image in one request and rejected a focus
+change. The subsequent live validation is described below. See
+`docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md`.
+After the owner restarted, GNOME Shell 50.1 listed the extension as ACTIVE.
+In an explicitly approved live one-shot test, the owner accepted the GNOME
+prompt; the temporary `KYRIN OCR Test` window was captured in memory and OCR
+found `Open` and `Telegram`. GNOME reported `window:8`, which is a temporary
+window-backed ID rather than an installed-app ID. The extension and adapter
+were then tightened to reject those IDs. A second, user-approved live test of
+a window bearing KYRIN's registered desktop ID returned
+`local.kyrin.KYRIN.desktop`, its test process ID, and OCR words including
+`Open` and `Telegram`. This confirms the read-only capture+identity+OCR path
+for that one registered window. It does not authenticate the D-Bus requester,
+generalize to other apps, or authorize actions. The prototype extension was
+disabled after the tests and GNOME reports it INACTIVE.
+The owner then approved a session-scoped access design. The Qt app now claims
+`org.kyrin.Desktop` and provides a `Screen Access` page with a non-persistent
+on/off control. The revised GNOME extension checks the D-Bus sender against
+the current owner of that name, prompts once per app session, and revokes on
+explicit request, owner loss, or extension disable. The old separate-process
+image helper and terminal diagnostic were removed because their D-Bus sender
+cannot be the Qt app's connection. Python and GJS tests cover grant, foreign
+sender denial, revocation, owner loss, and a late owner response after revoke.
+The corrected extension was installed and enabled. An unauthorized direct
+D-Bus capture request returned no image. The first live Qt grant request was
+denied before the GNOME prompt appeared. D-Bus monitoring confirmed that the
+request sender and `org.kyrin.Desktop` owner matched. A real GJS check found
+that `GLib.Variant.unpack()` returned a wrapped child variant rather than the
+owner string. The extension now uses `deepUnpack()` for the owner check and
+the name-owner-change signal; the GJS harness models this distinction.
+Focused tests passed, but an immediate retry in the same GNOME session still
+returned the old denial. After the owner restarted the desktop session, the
+corrected Qt request displayed the GNOME dialog and received a grant. A
+separate approved live test captured one 20,072-byte PNG in memory from a
+registered KYRIN test window, with `local.kyrin.KYRIN.desktop` and its PID.
+After explicit revoke, a further capture request returned no image. This
+validates the Qt/GNOME one-image path and revocation on this desktop; it is
+not connected to OCR-triggered actions. A session-bus name is not strong
+authentication of a binary against a malicious process running as the same
+user; GNOME consent remains required.
+
+The owner approved a staged connection from screen observation toward command
+understanding. The first slice is read-only: `ScreenTextReader` receives an
+on-demand image from the Qt-owned `ScreenAccess`, runs the replaceable `OcrEngine`
+on a worker thread, and discards the result if the active desktop ID/PID has
+changed or access was revoked. The `Screen Access` page displays bounded plain
+text and clears it on revoke. The Ubuntu Qt composition discovers an optional
+English Tesseract runtime from the user's XDG data directory. The previously
+downloaded local runtime was copied there on this development machine without
+installing system packages. Focused automated tests pass. In a live Qt run
+on 2026-10-09, session access was granted and the combined reader returned
+`local.kyrin.KYRIN.desktop`, the test process PID, and OCR words including
+`Open` and `Telegram` from the registered test window. Access was revoked on
+exit. A portal app-ID registration warning appeared but did not prevent this
+test. This validates one local read-only path, not recognition quality across
+apps or permission behavior on other desktops. OCR text is still not fed to
+the command interpreter and cannot authorize an action.
+Two further read-only Qt tests captured the owner's real Telegram Desktop
+window with a stable desktop ID and PID; the GNOME session grant was revoked
+after each run. The first mixed Persian/English view yielded 162 OCR words but
+none of the small English label set checked by the probe. The owner clarified
+that this view contained both languages, while the installed Tesseract data is
+English only. A controlled Telegram Settings view yielded 394 OCR words,
+including `Settings`, `Notifications`, `Privacy`, `Security`, `Language`,
+`Folders`, and `Advanced`; 102 of 394 spans had confidence at least 0.8.
+The probe printed counts and fixed generic labels, not chat names or images.
+This establishes that English UI labels can be read in this window; it does
+not establish reliable contact matching, Persian OCR, or click coordinates.
+A third read-only Telegram run used the owner's chat list with the public
+`Saved Messages` title visible. OCR found the exact adjacent English words;
+252 spans were returned, 56 at confidence 0.8 or higher. The probe reported
+only whether that title was present, not other chat names. This is one
+controlled title match, not evidence of reliable arbitrary contact matching.
+An exact, same-line OCR phrase matcher with duplicate preservation was added
+as read-only groundwork and passes focused tests. A proposed first input
+action is documented in `docs/actions/TELEGRAM_CHAT_NAVIGATION_DESIGN.md`.
+The local Wayland session exposes RemoteDesktop Portal v2, but its keyboard
+permission is desktop-wide rather than Telegram-window-scoped. The owner
+approved a one-shot, keyboard-only diagnostic. The installed Telegram shortcut
+file maps `self_chat` to `Ctrl+0` with no custom override. A system-Python
+portal helper requested a non-persistent keyboard session, rechecked the
+Telegram desktop ID and PID, sent only that fixed shortcut, and closed its
+session. The subsequent read-only Qt OCR run found one `Saved Messages` phrase
+in the same Telegram window; the owner independently confirmed that this chat
+opened. A subsequent owner-approved read-only test located a single exact
+`Saved Messages` phrase in the upper chat pane of a 1853×1048 Telegram image
+at x=679, y=45 with confidence above 0.87. The Ubuntu application now has a
+separate saved Telegram chat permission (settings schema 2, with schema 1
+migrating to permission off), and the action gate enables `OPEN_CHAT` only
+when this permission and the required observer, window-identity reader, and
+Qt screen verifier are present. Its one implemented target is `Saved Messages`.
+The portal helper rechecks focus before the keyboard shortcut and the Qt-owned
+OCR reader checks a fresh matching window and upper-pane title afterward.
+Focused automated tests pass. The full product microphone-to-chat path has
+not yet been live tested, and arbitrary contact navigation remains open.
+
+The owner then prioritized speech understanding before further chat actions.
+The Speech Recognition page now keeps a bounded, session-only trace of final
+STT text, command decisions, clarification or block reasons, and action
+results. Current settings schema 3 adds optional user-editable wake-name
+spellings, with schema 1/2 migration to no custom spellings. The Whisper
+adapter can use `language=auto` with a multilingual model and forward the
+detected language code from local verbose JSON; Vosk rejects `auto`. On this
+development machine, the installed Whisper `small` model returned `en` and
+`fa` for one previously recorded clip in each language. This confirms the
+adapter path for those two clips, not accuracy or broad language coverage.
+The demo command interpreter still recognizes a limited English/Persian
+grammar. See `docs/stt/MULTILINGUAL_COMMAND_INPUT.md`.
 
 ---
 
@@ -2288,3 +2445,122 @@ verified the character and a Telegram launch separately. The new end-to-end
 control-center path has passed automated tests; its live voice test remains to
 be confirmed. UI language packs imported before these new labels remain usable
 with English fallbacks for the added strings; new imports require all labels.
+
+## 69. Local Whisper GPU execution and actual-device reporting
+
+The owner prioritized completing GPU STT on capable hardware while preserving
+CPU and AUTO choices. The current `whisper.cpp` adapter can now start separate
+CPU and CUDA-enabled server executables for the same model weights. CPU starts
+with `--no-gpu`. Explicit GPU fails if the CUDA runtime is missing or does not
+confirm a CUDA backend; it cannot silently fall back to CPU. AUTO first tries a
+configured GPU runtime and falls back to CPU if GPU startup fails. Vosk remains
+CPU-only. The session's actual compute device is emitted to the Qt control
+center, separately from its selected preference. Paths are configured through
+`KYRIN_WHISPER_SERVER` and `KYRIN_WHISPER_GPU_SERVER` or executable names on
+`PATH`.
+
+On this Ubuntu development machine, an isolated CUDA 13.1 toolkit and pinned
+`whisper.cpp` v1.9.4 GPU build were placed under Git-ignored `build/tools/`.
+The toolkit was not installed into the operating system. The existing
+multilingual Whisper `small` weights worked on the local RTX 5060 Ti. Three
+short recorded English clips had a warm mean request time of about 1.95 s on
+CPU and 0.032 s on GPU; this small sample is not a general performance or
+quality promise. A real GPU engine session returned the expected text and a
+CPU-only binary placed in the GPU slot was rejected. A live microphone dry run
+reported an actual GPU session and recognized `Open Telegram` without storing
+audio or executing a desktop action. The two final segments matched the owner's
+later clarification that they said the sentence twice. The desktop entry point
+now discovers CPU and GPU server executables beside its installed script as
+well as from explicit environment variables or `PATH`. Git-ignored links in
+the local `.venv/bin/` point to the two builds; the app's discovery path opened
+the GPU engine with the existing model successfully. This is local development
+setup, not a portable runtime package. The detailed scope and remaining
+release work are in `docs/stt/WHISPER_GPU_EXECUTION.md`.
+
+## 70. Engine-aware speech model library in the control center
+
+The owner requested separate CPU and GPU model views and import controls,
+alongside a default view of all models. They clarified that a model usable on
+both devices should be stored once and listed in both views. The control center
+now includes those three views. It imports local Vosk directories and
+`whisper.cpp` GGML files into a per-user XDG data library in a background
+thread, using a private staging directory before publishing the model. The
+library derives device compatibility from the backend: Vosk is CPU-only and
+Whisper supports CPU or GPU with the appropriate runtime. Import location does
+not itself assert compatibility. Reimporting identical content and language
+uses the existing stored copy. The current external model path remains visible
+and usable. Selecting from All requests AUTO; selecting from a device-specific
+view requests that device and fills the existing Speech Recognition form for
+explicit saving. The library does not download models or install GPU software.
+Format checks are intentionally lightweight; actual model loading and hardware
+availability are verified when the selected runtime starts. See
+`docs/app/MODEL_LIBRARY.md`.
+
+The owner found that both existing Whisper files were rejected by the new
+importer. Investigation reproduced the problem: the on-disk GGML magic is a
+little-endian integer, while the first implementation compared its bytes to
+the display-order text `ggml`. The importer now reads the numeric magic in
+little-endian order. Both local Whisper files passed validation and a full
+temporary import, appearing in both CPU and GPU views. No user model files or
+settings were moved during this diagnosis.
+
+## 71. Desktop Actions picker usability
+
+The owner reported that clicking an app row did not toggle its checkbox and
+that selecting many apps required individual clicks. The Qt picker now treats
+row clicks and checkbox clicks as one toggle each. It adds Select all shown and
+Clear shown controls scoped to the current search results, plus a selected
+count. With no search filter, Select all shown selects all listed installed
+apps. Bulk selection never turns on action execution; the separate permission
+checkbox and Save changes remain required. Qt mouse-click tests cover both
+click targets and filtered bulk selection without modifying real user
+permissions.
+
+## 72. Read-only active-window observation foundation
+
+The owner approved the first step toward desktop-aware browser and chat work:
+an on-demand observation of the focused window before adding new actions.
+`ScreenObserver` is a platform-neutral, read-only contract. An Ubuntu adapter
+uses the existing GNOME extension's new desktop-ID/PID method and an isolated
+AT-SPI helper to return bounded visible labels. It never clicks or runs a
+command. A failed or ambiguous identity match returns unknown. The extension
+update is installed for the current user but may require the next desktop
+login/restart to expose its new method. Focused tests pass; product integration
+and live end-to-end validation remain open. AT-SPI coverage varies by app;
+Chrome did not expose a top-level window in the current diagnostic. See
+`docs/desktop/SCREEN_OBSERVATION.md`. Telegram also exposed no top-level
+AT-SPI window in this session. The screenshot portal is version 2 and local
+Tesseract is absent, so OCR fallback is not yet implemented.
+
+## 73. Explicit existing-window controls
+
+After a restart, the owner confirmed that `Open Telegram` now brings an
+already-running, minimized Telegram window forward. They approved separate
+commands to restore, minimize, and close an existing application window.
+`CLOSE_APP_WINDOW` means a normal window close request, not process termination;
+full application quit remains a distinct future behavior. Maximize, return to
+normal size, fullscreen, and exit fullscreen were added before a planned GNOME
+session restart, using the same window-control permission. The interpreter,
+action gate, persisted settings, control-center permissions, platform-neutral
+controller, and GNOME adapter now support these window commands. New window
+permissions default to off for existing settings. When an app has multiple
+windows, GNOME selects the focused window only if it belongs to that app;
+otherwise KYRIN asks the user to focus the desired one. Verification uses an
+opaque stable window token so a focus change cannot accidentally verify a
+different window. The updated extension source still needs to be installed
+for the user before the next GNOME login. The prior version remains loaded in
+the current session, and real desktop behavior is not yet validated. See
+`docs/desktop/ACTIVE_APP_OBSERVATION.md`.
+
+## 74. Two-step system power requests
+
+The owner approved shutdown, reboot, logout, and suspend requests with a
+warning about possible unsaved work and two confirmations. Either confirmation
+may be spoken or clicked. A separate opt-in setting defaults off. The power
+flow is independent of microphone session lifetime so the on-screen buttons
+work when listening is unavailable. Spoken input is accepted from final STT
+transcripts only. A bounded GNOME session-inhibitor query informs the warning,
+but cannot establish that every editor buffer is saved. The adapter uses
+GNOME's normal session methods and does not bypass native prompts or blockers.
+Focused deterministic tests pass; no live system-power action has been run.
+See `docs/actions/SYSTEM_POWER_ACTIONS.md`.

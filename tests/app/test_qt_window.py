@@ -4,7 +4,7 @@
 
 import json
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
@@ -12,20 +12,31 @@ from time import monotonic, sleep
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
+from kyrin.app.events import SttDeviceReady
+from kyrin.app.model_library import ModelLibrary
 from kyrin.app.qt.translations import ENGLISH, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
 from kyrin.app.settings import AppSettings, SttSelection
 from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
-from kyrin.commands.models import ResponseChannel
+from kyrin.commands.models import (
+    CommandIntent,
+    CommandKind,
+    CommandResolution,
+    ResponseChannel,
+)
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.presenter import PresentedResponse
-from kyrin.stt.device import DevicePreference
+from kyrin.stt.device import ComputeDevice, DevicePreference
+from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.system_power.flow import PowerAction, PowerStage, SystemPowerFlow
 
 
 class FakeMicrophones:
@@ -111,6 +122,67 @@ def _window(
     )
 
 
+def test_power_buttons_work_without_microphone_session(
+    application: QApplication, tmp_path: Path
+) -> None:
+    class FakePowerBackend:
+        def __init__(self) -> None:
+            self.requests: list[PowerAction] = []
+
+        def work_warning(self, action: PowerAction) -> str:
+            return "GNOME reports one session blocker."
+
+        def request(self, action: PowerAction) -> None:
+            self.requests.append(action)
+
+    settings = AppSettings(
+        listening_enabled=False,
+        action_execution_enabled=True,
+        system_power_enabled=True,
+    )
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    events = EventBridge()
+    backend = FakePowerBackend()
+    flow = SystemPowerFlow(backend, events.publish, enabled=True)
+    controller = ApplicationController(lambda _: nullcontext(FakeSession()), flow)
+    window = ControlWindow(
+        settings,
+        store,
+        controller,
+        FakeMicrophones(),
+        events,
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    try:
+        window.actions_page.power_buttons[PowerAction.POWER_OFF].click()
+        _pump_until(
+            application,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.FIRST
+            ),
+        )
+        assert backend.requests == []
+        window.power_continue_button.click()
+        _pump_until(
+            application,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.SECOND
+            ),
+        )
+        assert "Power off this computer" in window.power_continue_button.text()
+        window.power_cancel_button.click()
+        _pump_until(application, lambda: window._power_prompt is None)
+        assert backend.requests == []
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_gpu_request_remains_visible_and_keeps_previous_settings(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -131,6 +203,132 @@ def test_gpu_request_remains_visible_and_keeps_previous_settings(
         window.apply_button.click()
         assert store.load() == settings
         assert "processor" in window.feedback_label.text()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_whisper_gpu_choice_is_saved_when_gpu_runtime_is_available(
+    application: QApplication, tmp_path: Path
+) -> None:
+    model = tmp_path / "model.bin"
+    model.write_bytes(b"model")
+    settings = AppSettings(
+        listening_enabled=False,
+        stt=SttSelection("whisper", model, "en", DevicePreference.CPU),
+    )
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=True,
+        whisper_gpu_server_available=True,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    try:
+        window.device_combo.setCurrentIndex(
+            window.device_combo.findData(DevicePreference.GPU.value)
+        )
+        window.apply_button.click()
+        assert store.load().stt is not None
+        assert store.load().stt.device is DevicePreference.GPU
+        window._on_event(SttDeviceReady(ComputeDevice.GPU))
+        assert "GPU" in window.active_device_label.text()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_model_library_gpu_import_appears_in_both_views_and_can_be_selected(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "ggml-example.bin"
+    source.write_bytes(b"lmgg" + b"example weights")
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    library = ModelLibrary(tmp_path / "library")
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=True,
+        whisper_gpu_server_available=True,
+        model_library=library,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    monkeypatch.setattr(
+        "kyrin.app.qt.model_library_page.QFileDialog.getOpenFileName",
+        lambda *args: (str(source), ""),
+    )
+    try:
+        page = window.models_page
+        assert page.tabs.currentIndex() == 0
+        page.tabs.setCurrentIndex(2)
+        page.import_buttons[ComputeDevice.GPU].click()
+        _pump_until(
+            application,
+            lambda: page.status.text() == ENGLISH["models_imported"],
+        )
+        assert len(library.list_models()) == 1
+        assert page.lists[0].count() == 1
+        assert page.lists[1].count() == 1
+        assert page.lists[2].count() == 1
+        page.lists[2].setCurrentRow(0)
+        page.use_button.click()
+        assert window.pages.currentIndex() == 2
+        assert window.device_combo.currentData() == DevicePreference.GPU.value
+        window.apply_button.click()
+        saved = store.load().stt
+        assert saved is not None
+        assert saved.model_path == library.list_models()[0].model_path
+        assert saved.device is DevicePreference.GPU
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_gpu_model_stays_visible_when_gpu_runtime_is_missing(
+    application: QApplication, tmp_path: Path
+) -> None:
+    source = tmp_path / "ggml-example.bin"
+    source.write_bytes(b"lmgg" + b"example weights")
+    library = ModelLibrary(tmp_path / "library")
+    library.import_model(
+        source, backend="whisper", language="en", requested_device=ComputeDevice.CPU
+    )
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=True,
+        whisper_gpu_server_available=False,
+        model_library=library,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    try:
+        page = window.models_page
+        page.tabs.setCurrentIndex(2)
+        assert page.lists[2].count() == 1
+        assert ENGLISH["models_gpu_unavailable"] in page.lists[2].item(0).text()
+        page.lists[2].setCurrentRow(0)
+        page.use_button.click()
+        assert page.status.text() == ENGLISH["models_gpu_unavailable"]
+        assert store.load() == settings
     finally:
         window._timer.stop()
         window.deleteLater()
@@ -284,6 +482,35 @@ def test_worker_response_reaches_window_on_gui_event_loop(
         application.processEvents()
 
 
+def test_speech_diagnostics_show_heard_intent_and_action_reason(
+    application: QApplication, tmp_path: Path
+) -> None:
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+    )
+    intent = CommandIntent(CommandKind.OPEN_APP, "telegram")
+    try:
+        window._on_event(
+            TranscriptUpdate(2, "Open Telegram", TranscriptStatus.FINAL, "en")
+        )
+        window._on_event(CommandResolution(2, intent))
+        window._on_event(
+            ActionNotice(ActionKey(0, 2, 0), intent, ActionNoticeReason.NOT_ALLOWED)
+        )
+        trace = window.diagnostics_output.toPlainText()
+        assert "Heard (en): Open Telegram" in trace
+        assert "open_app: telegram" in trace
+        assert "not_allowed" in trace
+        window.clear_diagnostics_button.click()
+        assert not window.diagnostics_output.toPlainText()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_ui_language_change_preserves_unsaved_speech_fields(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -400,6 +627,13 @@ def test_actions_page_saves_only_explicitly_selected_app(
             if "telegram.desktop" in window.actions_page.apps.item(index).text()
         )
         telegram.setCheckState(Qt.CheckState.Checked)
+        assert window.actions_page.telegram_chat_checkbox.isEnabled()
+        assert not window.actions_page.window_control_checkbox.isChecked()
+        assert not window.actions_page.close_window_checkbox.isChecked()
+        window.actions_page.telegram_chat_checkbox.setChecked(True)
+        window.actions_page.window_control_checkbox.setChecked(True)
+        window.actions_page.close_window_checkbox.setChecked(True)
+        window.wake_aliases_edit.setText("kayrin, کایرین من")
         window.actions_page.search.setText("telegram")
         window.apply_button.click()
         saved = store.load()
@@ -407,7 +641,89 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert len(saved.allowed_apps) == 1
         assert saved.allowed_apps[0].desktop_id == "telegram.desktop"
         assert saved.allowed_apps[0].app_id == "telegram"
+        assert saved.allowed_chat_apps == ("telegram",)
+        assert saved.allowed_window_apps == ("telegram",)
+        assert saved.allowed_close_apps == ("telegram",)
+        assert saved.wake_aliases == ("kayrin", "کایرین من")
         assert "1 allowed apps" in window.action_label.text()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_action_row_click_and_indicator_each_toggle_once(
+    application: QApplication, tmp_path: Path
+) -> None:
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    (directory / "telegram.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Telegram\nExec=true\n",
+        encoding="utf-8",
+    )
+    window = _window(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+    )
+    try:
+        window._select_page(4)
+        window.show()
+        application.processEvents()
+        model_list = window.actions_page.apps
+        item = model_list.item(0)
+        rectangle = model_list.visualItemRect(item)
+        row_point = QPoint(rectangle.right() - 20, rectangle.center().y())
+        indicator_point = QPoint(rectangle.left() + 10, rectangle.center().y())
+
+        QTest.mouseClick(
+            model_list.viewport(), Qt.MouseButton.LeftButton, pos=row_point
+        )
+        assert item.checkState() is Qt.CheckState.Checked
+        QTest.mouseClick(
+            model_list.viewport(), Qt.MouseButton.LeftButton, pos=indicator_point
+        )
+        assert item.checkState() is Qt.CheckState.Unchecked
+        assert window.actions_page.selection_count.text() == "0 selected"
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_bulk_selection_respects_search_and_does_not_enable_actions(
+    application: QApplication, tmp_path: Path
+) -> None:
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    for name in ("Telegram", "Browser"):
+        (directory / f"{name.lower()}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName={name}\nExec=true\n",
+            encoding="utf-8",
+        )
+    window = _window(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+    )
+    try:
+        page = window.actions_page
+        page.search.setText("Telegram")
+        page.select_visible_button.click()
+        assert tuple(app.desktop_id for app in page.selected_apps()) == (
+            "telegram.desktop",
+        )
+        assert not page.enabled_checkbox.isChecked()
+        page.search.clear()
+        page.select_visible_button.click()
+        assert len(page.selected_apps()) == 2
+        page.search.setText("Telegram")
+        page.clear_visible_button.click()
+        assert tuple(app.desktop_id for app in page.selected_apps()) == (
+            "browser.desktop",
+        )
     finally:
         window._timer.stop()
         window.deleteLater()

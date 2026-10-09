@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from collections.abc import Sequence
 
 from kyrin.commands.app_names import AppNameResolver
 from kyrin.commands.context_resolver import (
@@ -17,6 +18,7 @@ from kyrin.commands.interpreter import (
     ReadyCommand,
     ReadyPlan,
     UnrecognizedCommand,
+    WakeOnly,
 )
 from kyrin.commands.models import (
     CommandContext,
@@ -31,6 +33,7 @@ from kyrin.commands.models import (
 
 _APPS = {
     "تلگرام": "telegram",
+    "تلیگرام": "telegram",
     "telegram": "telegram",
     "مرورگر": "browser",
     "browser": "browser",
@@ -38,10 +41,21 @@ _APPS = {
     "whatsapp": "whatsapp",
 }
 _CHAT_APPS = frozenset({"telegram", "whatsapp"})
-_OPEN_APP_FA = re.compile(r"^(تلگرام|مرورگر) را باز کن$")
+_OPEN_APP_FA = re.compile(r"^(تلگرام|تلیگرام|مرورگر) را باز کن$")
 _OPEN_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(telegram|browser)$")
 _OPEN_NAMED_APP_FA = re.compile(r"^(.+?) را باز کن$")
 _OPEN_NAMED_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(.+)$")
+_WINDOW_COMMAND_EN = re.compile(
+    r"^(restore|show|bring back|minimize|close) (?:the )?(.+?)(?: window)?$"
+)
+_WINDOW_COMMAND_FA = re.compile(r"^(.+?) را (دوباره نشان بده|برگردان|کوچک کن|ببند)$")
+_SIZE_COMMAND_EN = re.compile(
+    r"^(maximize|unmaximize|fullscreen|exit fullscreen on) (?:the )?(.+?)(?: window)?$"
+)
+_MAKE_FULLSCREEN_EN = re.compile(r"^make (?:the )?(.+?) fullscreen$")
+_SIZE_COMMAND_FA = re.compile(
+    r"^(.+?) را (بزرگ کن|به اندازه عادی برگردان|تمام صفحه کن|از تمام صفحه خارج کن)$"
+)
 _OPEN_APP_CLAUSE_EN = re.compile(r"^(?:open|go to) (?:the )?(.+)$")
 _OPEN_CHAT_CLAUSE_EN = re.compile(
     r"^(?:open|go to) (?:the )?(?:chat (.+)|(.+?)(?:'s)? chat)$"
@@ -50,7 +64,15 @@ _OPEN_CHAT_WITH_APP_FA = re.compile(r"^چت (.+?) را در (تلگرام|وات
 _OPEN_CHAT_FA = re.compile(r"^(?:چت|گفتگوی) (.+?) را باز کن$")
 _GO_CHAT_FA = re.compile(r"^به (?:چت|گفتگوی) (.+?) برو$")
 _OPEN_CHAT_EN = re.compile(r"^(?:open|go to) chat (.+)$")
-_WAKE_PREFIXES = ("کایرین ", "کایری ", "kyrin ")
+_WAKE_PREFIXES = (
+    "کایرین",
+    "کایری",
+    "kyrin",
+    "kairin",
+    "kyreen",
+    "kyrie",
+    "kairi",
+)
 
 
 def _normalize(text: str) -> str:
@@ -64,9 +86,25 @@ def _normalize(text: str) -> str:
 class DemoCommandInterpreter:
     """Recognize a few test phrases without claiming general language support."""
 
-    def __init__(self, app_name_resolver: AppNameResolver | None = None) -> None:
+    def __init__(
+        self,
+        app_name_resolver: AppNameResolver | None = None,
+        *,
+        wake_aliases: Sequence[str] = (),
+    ) -> None:
         self._context_resolver = ContextResolver(_CHAT_APPS)
         self._app_name_resolver = app_name_resolver
+        self._wake_prefixes = tuple(
+            sorted(
+                {
+                    normalized
+                    for alias in (*_WAKE_PREFIXES, *wake_aliases)
+                    if (normalized := _normalize(alias))
+                },
+                key=len,
+                reverse=True,
+            )
+        )
 
     def interpret(
         self,
@@ -78,13 +116,13 @@ class DemoCommandInterpreter:
     ) -> Interpretation:
         phrase = _normalize(text)
         addressed = False
-        for prefix in _WAKE_PREFIXES:
-            if phrase.startswith(prefix):
-                phrase = phrase[len(prefix) :]
+        for prefix in self._wake_prefixes:
+            if phrase == prefix or phrase.startswith(prefix + " "):
+                phrase = phrase[len(prefix) :].strip()
                 addressed = True
                 break
-        if not phrase or phrase in ("کایرین", "کایری", "kyrin"):
-            return NotACommand()
+        if not phrase:
+            return WakeOnly() if addressed else NotACommand()
 
         if isinstance(pending, PendingIntentClarification):
             if phrase in ("no", "cancel", "نه", "خیر", "لغو"):
@@ -132,6 +170,79 @@ class DemoCommandInterpreter:
         # Negation cancels the example command; it must never become "open".
         if "باز نکن" in phrase or phrase.startswith(("don't open ", "do not open ")):
             return NotACommand()
+
+        size_match = _SIZE_COMMAND_EN.fullmatch(phrase)
+        if size_match is not None:
+            operation, name = size_match.groups()
+            kind = {
+                "maximize": CommandKind.MAXIMIZE_APP,
+                "unmaximize": CommandKind.UNMAXIMIZE_APP,
+                "fullscreen": CommandKind.FULLSCREEN_APP,
+                "exit fullscreen on": CommandKind.UNFULLSCREEN_APP,
+            }[operation]
+            target = self._exact_app(name)
+            return (
+                ReadyCommand(CommandIntent(kind, target))
+                if target is not None
+                else UnrecognizedCommand()
+            )
+        full_match = _MAKE_FULLSCREEN_EN.fullmatch(phrase)
+        if full_match is not None:
+            target = self._exact_app(full_match[1])
+            return (
+                ReadyCommand(CommandIntent(CommandKind.FULLSCREEN_APP, target))
+                if target is not None
+                else UnrecognizedCommand()
+            )
+        size_match = _SIZE_COMMAND_FA.fullmatch(phrase)
+        if size_match is not None:
+            name, operation = size_match.groups()
+            kind = {
+                "بزرگ کن": CommandKind.MAXIMIZE_APP,
+                "به اندازه عادی برگردان": CommandKind.UNMAXIMIZE_APP,
+                "تمام صفحه کن": CommandKind.FULLSCREEN_APP,
+                "از تمام صفحه خارج کن": CommandKind.UNFULLSCREEN_APP,
+            }[operation]
+            target = self._exact_app(name)
+            return (
+                ReadyCommand(CommandIntent(kind, target))
+                if target is not None
+                else UnrecognizedCommand()
+            )
+
+        # Window commands require an exact installed app match. A near match
+        # must never acquire permission to close an unrelated window.
+        window_match = _WINDOW_COMMAND_EN.fullmatch(phrase)
+        if window_match is not None:
+            operation, name = window_match.groups()
+            kind = {
+                "restore": CommandKind.RESTORE_APP,
+                "show": CommandKind.RESTORE_APP,
+                "bring back": CommandKind.RESTORE_APP,
+                "minimize": CommandKind.MINIMIZE_APP,
+                "close": CommandKind.CLOSE_APP_WINDOW,
+            }[operation]
+            target = self._exact_app(name)
+            return (
+                ReadyCommand(CommandIntent(kind, target))
+                if target is not None
+                else UnrecognizedCommand()
+            )
+        window_match = _WINDOW_COMMAND_FA.fullmatch(phrase)
+        if window_match is not None:
+            name, operation = window_match.groups()
+            kind = {
+                "دوباره نشان بده": CommandKind.RESTORE_APP,
+                "برگردان": CommandKind.RESTORE_APP,
+                "کوچک کن": CommandKind.MINIMIZE_APP,
+                "ببند": CommandKind.CLOSE_APP_WINDOW,
+            }[operation]
+            target = self._exact_app(name)
+            return (
+                ReadyCommand(CommandIntent(kind, target))
+                if target is not None
+                else UnrecognizedCommand()
+            )
 
         if " and " in phrase and phrase.startswith(("open ", "go to ")):
             return self._interpret_english_plan(phrase)

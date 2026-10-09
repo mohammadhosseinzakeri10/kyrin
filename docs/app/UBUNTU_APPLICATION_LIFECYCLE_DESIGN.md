@@ -19,8 +19,8 @@ There is now a product settings data model, file store, lifecycle controller,
 Ubuntu session factory, and a first control window. The Preferences page can
 register login startup for the current user. The factory chooses a microphone, STT engine, response presenter,
 and bounded desktop action adapters from explicit settings. The STT contract
-accepts AUTO/CPU/GPU requests, but the current
-Vosk and Whisper adapters advertise CPU only. The current TTS protocol does
+accepts AUTO/CPU/GPU requests. Vosk advertises CPU only; Whisper can use a
+separate CUDA-enabled runtime when one is installed. The current TTS protocol does
 not expose model, voice, speed, or compute-device selection.
 
 ## User-visible controls
@@ -159,12 +159,16 @@ The terminal diagnostic remains available for focused debugging.
 - Define a durable microphone selector and behavior when that device is gone.
 - Decide the exact safe migration and recovery behavior for future settings
   schema versions.
-- Measure available GPU execution per concrete backend. Current local STT
-  adapters are CPU-only; current TTS has no device or speed contract.
+- Extend GPU validation beyond the current local NVIDIA Whisper test to
+  release targets. Vosk remains CPU-only; current TTS has no device or speed
+  contract.
 - Decide how the control window is reopened when the optional GNOME character
   is hidden, while guaranteeing only one live microphone session.
 
 ## First slice implemented
+
+The numbered slice descriptions below record the implementation at that
+point in time; later sections describe subsequent changes.
 
 `src/kyrin/app/settings.py` defines immutable preferences. The default has
 login startup and listening requested but no STT model selected and no desktop
@@ -332,8 +336,33 @@ the current listening session before applying settings; a restarted session
 uses the new allowlist. The command gate still checks the saved permission
 before launching an app.
 
+The picker also toggles an app when the rest of its row is clicked; clicking
+the checkbox itself still toggles only once. **Select all shown** and **Clear
+shown** act on entries visible under the current search filter. With no
+search, Select all shown selects all listed installed apps. A selected-count
+label makes the scope visible. Bulk selection does not enable action execution;
+the separate permission checkbox and Save changes remain required.
+
 When the optional GNOME Shell extension endpoint is available, the Qt entry
 point also connects the existing active-app observer and visual-status sink to
 the live session. Missing GNOME integration leaves the control window usable;
 it does not loosen action permissions. Neither adapter is a requirement for
 other desktop environments or future operating-system implementations.
+
+## Whisper CPU and GPU runtime selection
+
+The STT device setting now selects a concrete Whisper runtime before its model
+process starts. CPU passes `--no-gpu`; GPU requires a separately installed
+CUDA-enabled executable and a positive CUDA-backend startup confirmation.
+AUTO tries that GPU runtime when configured and falls back to the CPU runtime
+if GPU startup fails. An explicit GPU request fails visibly instead of silently
+using CPU. The opened STT session reports its actual compute device to the
+control window. Vosk remains CPU-only and its GPU choice stays visible with an
+unavailable message. This does not change the TTS compute-device design.
+
+Development runtime paths can be supplied through `KYRIN_WHISPER_SERVER` and
+`KYRIN_WHISPER_GPU_SERVER`; installed commands named `whisper-server` and
+`whisper-server-gpu` are also discovered beside the `kyrin-desktop` script or
+on `PATH`. The local CUDA build is an
+ignored development artifact rather than a portable application package.
+See `docs/stt/WHISPER_GPU_EXECUTION.md` for the hardware result and test scope.

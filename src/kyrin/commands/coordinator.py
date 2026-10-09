@@ -10,6 +10,7 @@ from kyrin.commands.interpreter import (
     ReadyCommand,
     ReadyPlan,
     UnrecognizedCommand,
+    WakeOnly,
 )
 from kyrin.commands.models import (
     CommandCandidateUpdate,
@@ -149,7 +150,7 @@ class CommandCoordinator:
                 else (interpretation.intent,)
             )
             for item in intents:
-                if item.kind is CommandKind.OPEN_APP:
+                if item.kind in (CommandKind.OPEN_APP, CommandKind.RESTORE_APP):
                     self._last_referenced_app = item.target
                 elif item.kind is CommandKind.OPEN_CHAT:
                     self._last_referenced_app = item.app
@@ -200,6 +201,16 @@ class CommandCoordinator:
                 )
         elif isinstance(interpretation, DeclinedClarification):
             self._pending = None
+        elif isinstance(interpretation, WakeOnly):
+            events.append(
+                ResponseRequest(
+                    update.segment_id,
+                    ResponseKind.READY_FOR_COMMAND,
+                    ResponseChannel.TEXT_ONLY,
+                    stream_id=self._stream_id,
+                    language=update.language,
+                )
+            )
         elif isinstance(interpretation, (IncompleteCommand, UnrecognizedCommand)):
             events.append(
                 ResponseRequest(

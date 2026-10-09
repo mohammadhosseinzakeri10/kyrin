@@ -110,3 +110,26 @@ def test_existing_complete_pack_uses_english_for_new_action_labels(
     assert store.load_error is None
     assert store.text("dashboard") == "Tableau de bord"
     assert store.text("actions") == "Desktop Actions"
+
+
+def test_import_older_pack_keeps_new_screen_labels_in_english(
+    tmp_path: Path,
+) -> None:
+    store = UiTranslations(tmp_path / "ui")
+    source = tmp_path / "older.json"
+    strings = {
+        key: value
+        for key, value in ENGLISH.items()
+        if not key.startswith("screen")
+    }
+    strings["dashboard"] = "Tableau de bord"
+    source.write_text(
+        json.dumps({"locale": "fr", "name": "Français", "strings": strings}),
+        encoding="utf-8",
+    )
+
+    store.import_pack(source)
+    store.save(UiPreferences("fr"))
+
+    assert store.text("dashboard") == "Tableau de bord"
+    assert store.text("screen_enable") == ENGLISH["screen_enable"]

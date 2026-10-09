@@ -4,6 +4,7 @@ import json
 import math
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from kyrin.desktop.app_catalog import AppCatalog
 from kyrin.desktop.app_identity import AppIdentityResolver
@@ -11,6 +12,12 @@ from kyrin.desktop.app_identity import AppIdentityResolver
 _BUS_NAME = "org.gnome.Shell"
 _OBJECT_PATH = "/org/kyrin/ActiveApp"
 _INTERFACE = "org.kyrin.ActiveApp"
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveWindowIdentity:
+    platform_app_id: str
+    process_id: int
 
 
 class GnomeShellActiveAppObserver:
@@ -90,3 +97,47 @@ class GnomeShellActiveAppObserver:
             return None
         app_id = data[0]
         return app_id if isinstance(app_id, str) and app_id else None
+
+    def read_active_window_identity(self) -> ActiveWindowIdentity | None:
+        """Read the focused desktop ID and PID together, when supported."""
+        try:
+            completed = subprocess.run(
+                [
+                    "busctl",
+                    "--user",
+                    "--json=short",
+                    "call",
+                    _BUS_NAME,
+                    _OBJECT_PATH,
+                    _INTERFACE,
+                    "GetActiveWindow",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+                timeout=self._timeout_s,
+            )
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
+            return None
+        if completed.returncode != 0:
+            return None
+        try:
+            reply: object = json.loads(completed.stdout)
+        except (json.JSONDecodeError, UnicodeError):
+            return None
+        if not isinstance(reply, dict) or reply.get("type") != "su":
+            return None
+        data = reply.get("data")
+        if not isinstance(data, list) or len(data) != 2:
+            return None
+        app_id, pid = data
+        if (
+            not isinstance(app_id, str)
+            or not app_id
+            or not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid <= 0
+        ):
+            return None
+        return ActiveWindowIdentity(app_id, pid)

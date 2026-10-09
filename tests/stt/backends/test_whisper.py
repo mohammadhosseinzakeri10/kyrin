@@ -5,9 +5,10 @@ import pytest
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.stt.backends.whisper import WhisperEngine, WhisperSession
-from kyrin.stt.device import DevicePreference, SpeechToTextOptions
+from kyrin.stt.backends.whisper_server import WhisperResult
+from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
-from kyrin.stt.transcript import TranscriptStatus
+from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 FORMAT = AudioFormat(16_000, 1, AudioSampleFormat.INT16)
 
@@ -107,8 +108,20 @@ def test_engine_respects_device_and_releases_preloaded_server(
     closed: list[bool] = []
 
     class FakeServer:
-        def __init__(self, server: str, model: str, *, threads: int) -> None:
-            assert (server, model, threads) == ("server", "model", 2)
+        def __init__(
+            self,
+            server: str,
+            model: str,
+            *,
+            threads: int,
+            compute_device: ComputeDevice,
+        ) -> None:
+            assert (server, model, threads, compute_device) == (
+                "server",
+                "model",
+                2,
+                ComputeDevice.CPU,
+            )
 
         def transcribe(self, pcm: bytes, language: str) -> str:
             return "Open Telegram"
@@ -129,3 +142,63 @@ def test_engine_respects_device_and_releases_preloaded_server(
     engine.close()
     engine.close()
     assert closed == [True]
+
+
+def test_gpu_engine_reports_gpu_and_rejects_cpu_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeServer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            assert kwargs["compute_device"] is ComputeDevice.GPU
+
+        def transcribe(self, pcm: bytes, language: str) -> str:
+            return "Open Telegram"
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("kyrin.stt.backends.whisper.WhisperCppServer", FakeServer)
+    engine = WhisperEngine("server", "model", compute_device=ComputeDevice.GPU)
+    assert engine.capabilities.supported_devices == frozenset({ComputeDevice.GPU})
+    with pytest.raises(DeviceUnavailableError, match="running on GPU"):
+        engine.open_session(SpeechToTextOptions(device=DevicePreference.CPU))
+    session = engine.open_session(SpeechToTextOptions(device=DevicePreference.GPU))
+    assert session.compute_device is ComputeDevice.GPU
+    session.close()
+    engine.close()
+
+
+def test_auto_language_uses_detected_code_on_final_transcript() -> None:
+    session = WhisperSession(
+        lambda pcm, language: WhisperResult("تلگرام را باز کن", "fa"),
+        "auto",
+        lambda: None,
+    )
+    session.start_turn()
+    result = session.end_turn()
+    assert result == (
+        TranscriptUpdate(0, "تلگرام را باز کن", TranscriptStatus.FINAL, "fa"),
+    )
+
+
+def test_auto_engine_uses_multilingual_server_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeServer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def transcribe_auto(self, pcm: bytes) -> WhisperResult:
+            return WhisperResult("Open Telegram", "en")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("kyrin.stt.backends.whisper.WhisperCppServer", FakeServer)
+    engine = WhisperEngine("server", "model", language="auto")
+    assert engine.capabilities.supports_language_detection
+    session = engine.open_session(SpeechToTextOptions(language_hint="auto"))
+    session.start_turn()
+    assert session.end_turn()[0].language == "en"
+    session.close()
+    engine.close()

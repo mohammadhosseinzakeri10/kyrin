@@ -65,6 +65,13 @@ built for CPU under ignored `build/tools/whisper.cpp-v1.9.4/build-cpu/`.
 Its build tool, CMake, was installed only in this project's ignored `.venv`.
 Nothing was added to the product's `pyproject.toml` dependencies.
 
+A separate local CUDA server build now exists under ignored
+`build/tools/whisper.cpp-v1.9.4/build-gpu/`. It uses the same model files as
+the CPU build; the GPU binary and its extracted CUDA toolkit are development
+assets, not a packaged default. See
+[`WHISPER_GPU_EXECUTION.md`](../docs/stt/WHISPER_GPU_EXECUTION.md) for device
+selection, local results, and release limits.
+
 The Git-ignored model paths above remain discoverable after a reboot. The
 ignored build directory can be rebuilt from the pinned upstream tag if it is
 removed. Local comparison results are under `datasets/stt/results/`; see
@@ -95,3 +102,36 @@ This is a local integrity fingerprint, not a checksum published by Vosk.
 The first two-command English result and its limitations are in
 `docs/stt/STT_EVALUATION_FA.md`. The local WAV files, manifests, and JSON reports
 remain under ignored `datasets/stt/`; they are not shipped with KYRIN.
+
+## Local OCR development runtime
+
+On 2026-10-09, Ubuntu `tesseract-ocr` 5.5.0, `libtesseract5` 5.5.0,
+`libleptonica6` 1.86.0, and the English language package were downloaded as
+`.deb` files and extracted only under the Git-ignored directory below. No
+system package was installed or upgraded. Each downloaded package's SHA-256
+matched the value in the local signed Ubuntu package index.
+
+```text
+models/local/ocr/tesseract/packages/
+models/local/ocr/tesseract/runtime/
+models/local/ocr/tesseract/tesseract-local
+```
+
+The local wrapper sets the library path only for its own Tesseract process.
+The English data path is
+`models/local/ocr/tesseract/runtime/usr/share/tesseract-ocr/5/tessdata/`.
+This test runtime works on the current Ubuntu machine; it is not a portable
+application bundle. A synthetic image containing `Open Telegram` returned both
+words and their coordinates. A live portal capture of the user-selected
+`KYRIN OCR Test` window also returned both expected words. See
+`docs/vision/OCR_ARCHITECTURE.md` for the
+on-demand screen capture and OCR boundaries.
+
+The read-only Qt observation page looks for an installed user copy at
+`$XDG_DATA_HOME/kyrin/models/ocr/tesseract/` (or
+`~/.local/share/kyrin/models/ocr/tesseract/` when XDG_DATA_HOME is unset).
+For this development machine, the existing wrapper and extracted runtime were
+copied there on 2026-10-09; package archives were not copied. The application
+does not depend on the repository's ignored development path and does not
+download an OCR engine at startup. OCR model import and selection in the app
+remain future work.

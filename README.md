@@ -22,12 +22,17 @@ The Desktop Actions page can select installed applications for an explicit
 allowlist and enable execution. TTS and model management are not yet available
 in that window.
 The selected black-hole K logo appears in the window and Ubuntu launcher.
+The **Model Library** page lists installed speech models in All, CPU, and GPU
+views and can add a downloaded local model without editing code. A Whisper
+model compatible with both devices is stored once and appears in both views.
+See [model library](docs/app/MODEL_LIBRARY.md).
 
 The current interpreter recognizes a small set of English and Persian example
 commands. It does not provide general multilingual understanding or desktop
 automation. Local Vosk and Whisper models are development assets, not bundled
-defaults. The current adapters use CPU; the STT contract allows future device
-selection without changing the audio pipeline.
+defaults. Vosk currently runs on CPU. Whisper can use CPU or an explicitly
+installed CUDA runtime on supported NVIDIA hardware; the same model weights
+are used for both. See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md).
 
 ## Development entry point
 
@@ -59,9 +64,13 @@ in a connected development environment, then run:
 The window uses `$XDG_CONFIG_HOME/kyrin/settings.json`, or
 `~/.config/kyrin/settings.json` when the XDG variable is unset. It does not
 create this file until settings are saved. A Whisper model also needs a local
-`whisper-server` executable on `PATH`, or an absolute executable path in
-`KYRIN_WHISPER_SERVER`. Current Vosk and Whisper adapters run on CPU; choosing
-GPU reports unavailable without replacing a valid saved choice. The close
+`whisper-server` executable beside the installed `kyrin-desktop` script or on
+`PATH`, or an absolute executable path in `KYRIN_WHISPER_SERVER`. For Whisper
+GPU, provide a CUDA-enabled `whisper-server-gpu` in either executable location
+or set `KYRIN_WHISPER_GPU_SERVER` to its absolute path. The app shows the
+device actually opened by STT. Explicit GPU selection
+reports an error if the GPU runtime cannot start, while AUTO can use the CPU
+runtime if GPU startup fails. Vosk still runs on CPU. The close
 button minimizes the window while listening continues; use **Quit KYRIN** to
 stop and exit. The window currently shows text responses and does not select
 or play a TTS voice.

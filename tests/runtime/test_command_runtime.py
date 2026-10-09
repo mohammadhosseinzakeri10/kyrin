@@ -18,6 +18,12 @@ from kyrin.commands.models import CommandEvent, CommandKind
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.system_power.flow import (
+    PowerAction,
+    PowerPrompt,
+    PowerStage,
+    SystemPowerFlow,
+)
 
 
 class FakeController:
@@ -30,6 +36,58 @@ class FakeController:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+def test_power_speech_bypasses_ordinary_command_interpreter() -> None:
+    ready = Event()
+    requested = Event()
+    prompts: list[PowerPrompt] = []
+    actions: list[PowerAction] = []
+    commands: list[CommandEvent] = []
+
+    class Backend:
+        def work_warning(self, action: PowerAction) -> str:
+            return "Session blockers unknown."
+
+        def request(self, action: PowerAction) -> None:
+            actions.append(action)
+            requested.set()
+
+    def publish(prompt: PowerPrompt) -> None:
+        prompts.append(prompt)
+        if prompt.stage is PowerStage.FIRST:
+            ready.set()
+
+    class Controller:
+        def events(self) -> Generator[LiveSpeechEvent | SpeechSessionEnded]:
+            yield TranscriptUpdate(0, "Power off", TranscriptStatus.PARTIAL, "en")
+            assert actions == []
+            yield TranscriptUpdate(0, "Power off", TranscriptStatus.FINAL, "en")
+            assert ready.wait(2)
+            yield TranscriptUpdate(1, "Yes", TranscriptStatus.FINAL, "en")
+            yield TranscriptUpdate(
+                2, "Power off this computer", TranscriptStatus.FINAL, "en"
+            )
+            assert requested.wait(2)
+
+        def stop(self) -> None:
+            pass
+
+    runtime = LiveCommandRuntime(
+        Controller(),
+        coordinator=CommandCoordinator(DemoCommandInterpreter()),
+        gate=ActionGate(ActionPolicy()),
+        observer=None,
+        executor=None,
+        on_live_event=lambda event: None,
+        on_command_event=commands.append,
+        on_action_output=lambda output: None,
+        on_session_end=lambda event: None,
+        system_power=SystemPowerFlow(Backend(), publish, enabled=True),
+    )
+    runtime.run()
+    assert actions == [PowerAction.POWER_OFF]
+    assert commands == []
 
 
 def test_repeated_finals_across_pause_and_new_stream_keep_listening() -> None:

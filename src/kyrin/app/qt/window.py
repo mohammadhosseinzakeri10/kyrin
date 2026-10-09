@@ -18,19 +18,26 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from kyrin.actions.models import ActionFeedback, ActionNotice
 from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
-from kyrin.app.events import ApplicationEvent
+from kyrin.app.events import ApplicationEvent, SttDeviceReady
+from kyrin.app.model_library import InstalledModel, ModelLibrary
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.dashboard import CosmicDashboard
+from kyrin.app.qt.model_library_page import ModelLibraryPage
+from kyrin.app.qt.screen_access import ScreenAccess
+from kyrin.app.qt.screen_access_page import ScreenAccessPage
+from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.translations import (
     TranslationError,
     UiPreferences,
@@ -40,10 +47,16 @@ from kyrin.app.settings import AppSettings, SttSelection
 from kyrin.app.settings_store import SettingsError
 from kyrin.audio.microphone.devices import MicrophoneResolver
 from kyrin.audio.microphone.errors import MicrophoneError
+from kyrin.commands.models import (
+    CommandPlanResolution,
+    CommandResolution,
+    ResponseRequest,
+)
 from kyrin.responses.presenter import PresentedResponse
-from kyrin.stt.device import DevicePreference
+from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.system_power.flow import PowerAction, PowerPrompt, PowerStage
 
 _STYLE = """
 QWidget#ControlWindow, QWidget#Content { background: #080b18; color: #e9eeff; }
@@ -78,6 +91,14 @@ QComboBox, QLineEdit { background: #151d35; color: #f2f4ff;
                        border: 1px solid #3b496f; border-radius: 7px;
                        min-height: 34px; padding: 3px 8px; }
 QComboBox QAbstractItemView { background: #18213d; color: #f2f4ff; }
+QTabWidget::pane { background: #111a31; border: 1px solid #3b496f;
+                   border-radius: 8px; }
+QTabBar::tab { background: #1b2746; color: #b9c8eb;
+               border: 1px solid #3b496f; border-bottom: 0;
+               padding: 9px 16px; margin-right: 4px; }
+QTabBar::tab:selected { background: #344b84; color: #ffffff;
+                        border-color: #9275ff; }
+QTabBar::tab:hover:!selected { background: #293960; }
 QCheckBox { color: #e2e9ff; spacing: 10px; padding: 7px 2px; }
 QListWidget { background: #111a31; color: #e7edff;
               border: 1px solid #3b496f; border-radius: 8px;
@@ -147,8 +168,12 @@ class ControlWindow(QWidget):
         events: EventBridge,
         *,
         whisper_server_available: bool,
+        whisper_gpu_server_available: bool = False,
+        model_library: ModelLibrary | None = None,
         ui_translations: UiTranslations,
         app_catalog: AppPickerCatalog | None = None,
+        screen_access: ScreenAccess | None = None,
+        screen_reader: ScreenTextReader | None = None,
         startup_registration: StartupRegistration | None = None,
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
@@ -159,6 +184,8 @@ class ControlWindow(QWidget):
         self._controller = controller
         self._microphones = microphones
         self._whisper_server_available = whisper_server_available
+        self._whisper_gpu_server_available = whisper_gpu_server_available
+        self._active_stt_device: ComputeDevice | None = None
         self._pending_settings: AppSettings | None = None
         self._quitting = False
         self._last_status_error: Exception | None = None
@@ -206,7 +233,15 @@ class ControlWindow(QWidget):
         self.pages = QStackedWidget()
         self._nav_buttons: dict[str, QPushButton] = {}
         for index, key in enumerate(
-            ("dashboard", "audio", "recognition", "actions", "preferences")
+            (
+                "dashboard",
+                "audio",
+                "recognition",
+                "models",
+                "actions",
+                "screen",
+                "preferences",
+            )
         ):
             button = QPushButton()
             button.setObjectName("NavButton")
@@ -238,6 +273,24 @@ class ControlWindow(QWidget):
         self.feedback_label.setObjectName("Feedback")
         self.feedback_label.setWordWrap(True)
         root.addWidget(self.feedback_label)
+        self._power_prompt: PowerPrompt | None = None
+        self.power_panel = QFrame()
+        self.power_panel.setObjectName("Feedback")
+        power_layout = QVBoxLayout(self.power_panel)
+        self.power_prompt_label = QLabel()
+        self.power_prompt_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.power_prompt_label.setWordWrap(True)
+        power_layout.addWidget(self.power_prompt_label)
+        power_buttons = QHBoxLayout()
+        self.power_continue_button = QPushButton()
+        self.power_continue_button.clicked.connect(self._confirm_power)
+        power_buttons.addWidget(self.power_continue_button)
+        self.power_cancel_button = QPushButton("Cancel")
+        self.power_cancel_button.clicked.connect(self._cancel_power)
+        power_buttons.addWidget(self.power_cancel_button)
+        power_layout.addLayout(power_buttons)
+        self.power_panel.hide()
+        root.addWidget(self.power_panel)
         shell.addWidget(content, 1)
 
         dashboard_page = QWidget()
@@ -313,6 +366,9 @@ class ControlWindow(QWidget):
         self.language_edit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.language_edit.setAccessibleName("Speech language code")
         speech_form.addRow(self._label("speech_language"), self.language_edit)
+        self.wake_aliases_edit = QLineEdit()
+        self.wake_aliases_edit.setAccessibleName("KYRIN wake word alternatives")
+        speech_form.addRow(self._label("wake_aliases"), self.wake_aliases_edit)
         self.device_combo = QComboBox()
         self.device_combo.addItem("", DevicePreference.AUTO.value)
         self.device_combo.addItem("", DevicePreference.CPU.value)
@@ -320,15 +376,50 @@ class ControlWindow(QWidget):
         self.device_combo.setAccessibleName("Speech processing device")
         speech_form.addRow(self._label("device"), self.device_combo)
         speech_layout.addLayout(speech_form)
+        speech_layout.addWidget(self._label("speech_language_help"))
+        self.active_device_label = QLabel()
+        self.active_device_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.active_device_label.setObjectName("Info")
+        speech_layout.addWidget(self.active_device_label)
         self.action_label = QLabel()
         self.action_label.setTextFormat(Qt.TextFormat.PlainText)
         self.action_label.setObjectName("Info")
         speech_layout.addWidget(self.action_label)
+        self.diagnostics_heading = QLabel()
+        self.diagnostics_heading.setObjectName("Info")
+        speech_layout.addWidget(self.diagnostics_heading)
+        self.diagnostics_output = QPlainTextEdit()
+        self.diagnostics_output.setReadOnly(True)
+        self.diagnostics_output.setMaximumBlockCount(40)
+        self.diagnostics_output.setAccessibleName("Speech command diagnostics")
+        speech_layout.addWidget(self.diagnostics_output)
+        self.clear_diagnostics_button = QPushButton()
+        self.clear_diagnostics_button.clicked.connect(self.diagnostics_output.clear)
+        speech_layout.addWidget(self.clear_diagnostics_button)
         speech_layout.addStretch()
         self.pages.addWidget(speech_page)
 
+        self.models_page = ModelLibraryPage(
+            model_library,
+            ui_translations,
+            cpu_runtime_available=whisper_server_available,
+            gpu_runtime_available=whisper_gpu_server_available,
+            current_selection=settings.stt if settings is not None else None,
+        )
+        self.models_page.selected.connect(self._select_library_model)
+        self.pages.addWidget(self.models_page)
+
         self.actions_page = DesktopActionsPage(app_catalog, settings, ui_translations)
+        for action, button in self.actions_page.power_buttons.items():
+            button.clicked.connect(
+                lambda checked=False, selected=action: self._start_power(selected)
+            )
         self.pages.addWidget(self.actions_page)
+
+        self.screen_access_page = ScreenAccessPage(
+            screen_access, ui_translations, screen_reader
+        )
+        self.pages.addWidget(self.screen_access_page)
 
         preferences_page, preferences_layout = self._page(
             "preferences_heading", "preferences_caption"
@@ -444,12 +535,26 @@ class ControlWindow(QWidget):
         self.save_ui_button.setText(t("save"))
         self.startup_checkbox.setText(t("start_at_login"))
         self.actions_page.translate()
+        self.screen_access_page.translate()
+        self.models_page.translate()
         self.save_startup_button.setText(t("apply_startup"))
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device_combo.setItemText(index, t(key))
         if self.microphone_combo.count():
             self.microphone_combo.setItemText(0, t("default_microphone"))
         self._update_action_label()
+        self._update_active_device_label()
+        self.diagnostics_heading.setText(t("diagnostics_heading"))
+        self.clear_diagnostics_button.setText(t("diagnostics_clear"))
+
+    def _update_active_device_label(self) -> None:
+        t = self._translations.text
+        device = self._active_stt_device
+        self.active_device_label.setText(
+            t("device_actual_pending")
+            if device is None
+            else f"{t('device_actual')}: {device.value.upper()}"
+        )
 
     def _update_action_label(self) -> None:
         if self._settings is None:
@@ -559,6 +664,7 @@ class ControlWindow(QWidget):
             self.device_combo.setCurrentIndex(
                 max(0, self.device_combo.findData(stt.device.value))
             )
+        self.wake_aliases_edit.setText(", ".join(settings.wake_aliases))
         self._update_action_label()
 
     def _browse_model(self) -> None:
@@ -574,6 +680,16 @@ class ControlWindow(QWidget):
         if path:
             self.model_path.setText(path)
 
+    def _select_library_model(
+        self, model: InstalledModel, device: DevicePreference
+    ) -> None:
+        self.backend_combo.setCurrentIndex(self.backend_combo.findData(model.backend))
+        self.model_path.setText(str(model.model_path))
+        self.language_edit.setText(model.language)
+        self.device_combo.setCurrentIndex(self.device_combo.findData(device.value))
+        self._select_page(2)
+        self.feedback_label.setText(self._translations.text("models_selected"))
+
     def _candidate_settings(self) -> AppSettings:
         assert self._settings is not None
         raw_path = self.model_path.text().strip()
@@ -588,12 +704,25 @@ class ControlWindow(QWidget):
                 raise ValueError(self._translations.text("vosk_missing"))
             if backend == "whisper" and not path.is_file():
                 raise ValueError(self._translations.text("whisper_missing"))
-            if backend == "whisper" and not self._whisper_server_available:
-                raise ValueError(self._translations.text("whisper_server_missing"))
-            if device is DevicePreference.GPU:
-                raise DeviceUnavailableError(
-                    "Vosk and Whisper adapters currently support CPU only"
-                )
+            if backend == "vosk" and device is DevicePreference.GPU:
+                raise DeviceUnavailableError("Vosk currently supports CPU only")
+            if backend == "vosk" and self.language_edit.text().strip() == "auto":
+                raise ValueError(self._translations.text("vosk_language_required"))
+            if backend == "whisper":
+                if (
+                    device is DevicePreference.GPU
+                    and not self._whisper_gpu_server_available
+                ):
+                    raise DeviceUnavailableError("Whisper GPU runtime is not installed")
+                if (
+                    device is DevicePreference.CPU
+                    and not self._whisper_server_available
+                ):
+                    raise ValueError(self._translations.text("whisper_server_missing"))
+                if device is DevicePreference.AUTO and not (
+                    self._whisper_server_available or self._whisper_gpu_server_available
+                ):
+                    raise ValueError(self._translations.text("whisper_server_missing"))
             stt = SttSelection(backend, path, self.language_edit.text().strip(), device)
         key = self.microphone_combo.currentData()
         if key is not None:
@@ -602,14 +731,27 @@ class ControlWindow(QWidget):
                 raise MicrophoneError("selected microphone is not available")
         selected_apps = self.actions_page.selected_apps()
         actions_enabled = self.actions_page.enabled_checkbox.isChecked()
-        if actions_enabled and not selected_apps:
+        if (
+            actions_enabled
+            and not selected_apps
+            and not self.actions_page.system_power_checkbox.isChecked()
+        ):
             raise ValueError(self._translations.text("action_select_one"))
         return replace(
             self._settings,
             microphone_device_key=key,
             stt=stt,
             action_execution_enabled=actions_enabled,
+            system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
+            allowed_chat_apps=self.actions_page.selected_chat_apps(),
+            allowed_window_apps=self.actions_page.selected_window_apps(),
+            allowed_close_apps=self.actions_page.selected_close_apps(),
+            wake_aliases=tuple(
+                alias.strip()
+                for alias in self.wake_aliases_edit.text().split(",")
+                if alias.strip()
+            ),
         )
 
     def _has_unsaved_changes(self) -> bool:
@@ -625,6 +767,12 @@ class ControlWindow(QWidget):
             != (stt.language if stt is not None else "en")
             or self.device_combo.currentData()
             != (stt.device.value if stt is not None else DevicePreference.AUTO.value)
+            or tuple(
+                alias.strip()
+                for alias in self.wake_aliases_edit.text().split(",")
+                if alias.strip()
+            )
+            != self._settings.wake_aliases
             or self.actions_page.has_unsaved_changes(self._settings)
         )
 
@@ -652,12 +800,15 @@ class ControlWindow(QWidget):
             self._show_error(error)
             return
         self._settings = candidate
+        self.models_page.set_current_selection(candidate.stt)
         self._update_action_label()
         self.feedback_label.setText(self._translations.text("saved"))
         self._start_current()
 
     def _start_current(self) -> None:
         assert self._settings is not None
+        self._active_stt_device = None
+        self._update_active_device_label()
         try:
             self._controller.start(self._settings)
         except RuntimeError as error:
@@ -695,6 +846,7 @@ class ControlWindow(QWidget):
         self._refresh()
 
     def _refresh(self) -> None:
+        self._controller.expire_system_action()
         status = self._controller.status()
         state_text = (
             self._translations.text(_STATE_KEYS[ApplicationState.PAUSED])
@@ -736,18 +888,84 @@ class ControlWindow(QWidget):
             self.apply_button.setEnabled(not self._quitting)
 
     def _on_event(self, event: ApplicationEvent) -> None:
-        if isinstance(event, PresentedResponse):
+        t = self._translations.text
+        if isinstance(event, PowerPrompt):
+            self._power_prompt = (
+                event if event.stage in (PowerStage.FIRST, PowerStage.SECOND) else None
+            )
+            self.power_panel.setVisible(self._power_prompt is not None)
+            if self._power_prompt is not None:
+                self.power_prompt_label.setText(event.text)
+                self.power_continue_button.setText(
+                    "Continue"
+                    if event.stage is PowerStage.FIRST
+                    else event.phrase or "Confirm"
+                )
+                self.showNormal()
+                self.raise_()
+                self.activateWindow()
+            self.feedback_label.setText(event.text)
+        elif isinstance(event, SttDeviceReady):
+            self._active_stt_device = event.device
+            self._update_active_device_label()
+        elif isinstance(event, PresentedResponse):
             self.feedback_label.setText(event.text)
         elif (
             isinstance(event, TranscriptUpdate)
             and event.status is TranscriptStatus.FINAL
         ):
-            self.feedback_label.setText(
-                f"{self._translations.text('heard')}: {event.text}"
+            self.feedback_label.setText(f"{t('heard')}: {event.text}")
+            self.diagnostics_output.appendPlainText(
+                f"{t('heard')} ({event.language or '?'}): {event.text or '—'}"
+            )
+        elif isinstance(event, CommandResolution):
+            decision = (
+                t("diagnostics_no_command")
+                if event.intent is None
+                else f"{event.intent.kind.value}: {event.intent.target}"
+            )
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_decision')}: {decision}"
+            )
+        elif isinstance(event, CommandPlanResolution):
+            steps = " → ".join(
+                f"{step.kind.value}: {step.target}" for step in event.plan.steps
+            )
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_decision')}: {steps}"
+            )
+        elif isinstance(event, ResponseRequest):
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_reason')}: {event.kind.value}"
+            )
+        elif isinstance(event, ActionNotice):
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_reason')}: {event.reason.value}"
+            )
+        elif isinstance(event, ActionFeedback):
+            detail = f" ({event.error_code})" if event.error_code else ""
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_result')}: {event.outcome.value}{detail}"
             )
 
     def _show_error(self, error: Exception) -> None:
         self.feedback_label.setText(_friendly_error(error, self._translations.text))
+
+    def _start_power(self, action: PowerAction) -> None:
+        self._controller.request_system_action(action)
+
+    def _confirm_power(self) -> None:
+        prompt = self._power_prompt
+        if prompt is not None:
+            self._controller.respond_to_system_action(
+                prompt.request_id,
+                "continue" if prompt.stage is PowerStage.FIRST else prompt.phrase or "",
+            )
+
+    def _cancel_power(self) -> None:
+        prompt = self._power_prompt
+        if prompt is not None:
+            self._controller.respond_to_system_action(prompt.request_id, "cancel")
 
     def _quit(self) -> None:
         if self._pending_settings is not None:

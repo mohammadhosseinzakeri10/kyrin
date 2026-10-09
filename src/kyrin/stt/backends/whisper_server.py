@@ -2,10 +2,13 @@
 
 import io
 import json
+import math
 import os
 import socket
 import subprocess
+import tempfile
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep
 from typing import cast
@@ -13,9 +16,32 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
 
-from kyrin.stt.errors import SpeechToTextError
+from kyrin.stt.device import ComputeDevice
+from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 
 _HTTP = build_opener(ProxyHandler({}))
+
+_LANGUAGE_CODES = {
+    "english": "en",
+    "persian": "fa",
+    "farsi": "fa",
+    "german": "de",
+    "spanish": "es",
+    "french": "fr",
+    "italian": "it",
+    "chinese": "zh",
+    "hindi": "hi",
+    "russian": "ru",
+    "arabic": "ar",
+    "japanese": "ja",
+    "korean": "ko",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class WhisperResult:
+    text: str
+    language: str | None
 
 
 def _free_loopback_port() -> int:
@@ -35,10 +61,15 @@ def _wav(pcm: bytes) -> bytes:
 
 
 class WhisperCppServer:
-    """Own one CPU model process and serve local 16 kHz PCM requests."""
+    """Own a local whisper.cpp process on the requested compute device."""
 
     def __init__(
-        self, executable: str | Path, model: str | Path, *, threads: int = 4
+        self,
+        executable: str | Path,
+        model: str | Path,
+        *,
+        threads: int = 4,
+        compute_device: ComputeDevice = ComputeDevice.CPU,
     ) -> None:
         executable_path = Path(executable).expanduser().resolve()
         model_path = Path(model).expanduser().resolve()
@@ -50,32 +81,51 @@ class WhisperCppServer:
             raise FileNotFoundError(f"Whisper model does not exist: {model_path}")
         if threads <= 0:
             raise ValueError("threads must be positive")
+        if not isinstance(compute_device, ComputeDevice):
+            raise ValueError("compute_device must be cpu or gpu")
+        self._port = _free_loopback_port()
+        arguments = [
+            str(executable_path),
+            "--model",
+            str(model_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self._port),
+            "--threads",
+            str(threads),
+        ]
+        if compute_device is ComputeDevice.CPU:
+            arguments.append("--no-gpu")
+        diagnostic = (
+            tempfile.TemporaryFile() if compute_device is ComputeDevice.GPU else None
+        )
         try:
-            self._port = _free_loopback_port()
-            self._process = subprocess.Popen(
-                [
-                    str(executable_path),
-                    "--model",
-                    str(model_path),
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(self._port),
-                    "--threads",
-                    str(threads),
-                    "--no-gpu",
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError as exc:
-            raise SpeechToTextError("local whisper-server could not start") from exc
-        try:
-            self._wait_ready()
-        except OSError, SpeechToTextError:
-            self.close()
-            raise
+            try:
+                self._process = subprocess.Popen(
+                    arguments,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=diagnostic if diagnostic is not None else subprocess.DEVNULL,
+                )
+            except OSError as exc:
+                raise SpeechToTextError("local whisper-server could not start") from exc
+            try:
+                self._wait_ready()
+                if diagnostic is not None:
+                    diagnostic.seek(0)
+                    # A CPU-only binary can accept the same CLI flags. Require
+                    # the pinned whisper.cpp runtime to confirm CUDA selection.
+                    if b"whisper_backend_init_gpu: using CUDA" not in diagnostic.read():
+                        raise DeviceUnavailableError(
+                            "Whisper did not initialize a CUDA backend"
+                        )
+            except OSError, SpeechToTextError:
+                self.close()
+                raise
+        finally:
+            if diagnostic is not None:
+                diagnostic.close()
 
     def _wait_ready(self) -> None:
         deadline = monotonic() + 30
@@ -92,14 +142,16 @@ class WhisperCppServer:
                 sleep(0.1)
         raise SpeechToTextError("whisper-server did not start within 30 seconds")
 
-    def transcribe(self, pcm: bytes, language: str) -> str:
+    def _request_inference(
+        self, pcm: bytes, language: str, response_format: str
+    ) -> dict[str, object]:
         if self._process.poll() is not None:
             raise SpeechToTextError("whisper-server stopped unexpectedly")
         boundary = uuid4().hex
         body = bytearray()
         for name, value in (
             ("language", language),
-            ("response_format", "json"),
+            ("response_format", response_format),
             ("no_timestamps", "true"),
         ):
             body.extend(
@@ -130,7 +182,38 @@ class WhisperCppServer:
             raise SpeechToTextError("local Whisper inference failed") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
             raise SpeechToTextError("whisper-server returned an invalid response")
-        return cast(str, payload["text"]).strip()
+        return cast("dict[str, object]", payload)
+
+    def transcribe(self, pcm: bytes, language: str) -> str:
+        return cast(str, self._request_inference(pcm, language, "json")["text"]).strip()
+
+    def transcribe_auto(self, pcm: bytes) -> WhisperResult:
+        """Keep the original speech and report a detected language when supplied."""
+        payload = self._request_inference(pcm, "auto", "verbose_json")
+        detected = payload.get("language")
+        code = (
+            _LANGUAGE_CODES.get(detected.casefold(), detected.casefold())
+            if isinstance(detected, str)
+            else None
+        )
+        if code is not None and (not 2 <= len(code) <= 3 or not code.isalpha()):
+            code = None
+        if code is None and isinstance(
+            probabilities := payload.get("language_probabilities"), dict
+        ):
+            valid = {
+                language: float(probability)
+                for language, probability in probabilities.items()
+                if isinstance(language, str)
+                and 2 <= len(language) <= 3
+                and language.isalpha()
+                and type(probability) in (int, float)
+                and math.isfinite(probability)
+                and 0 <= probability <= 1
+            }
+            if valid:
+                code = max(valid, key=lambda language: valid[language])
+        return WhisperResult(cast(str, payload["text"]).strip(), code)
 
     def close(self) -> None:
         if self._process.poll() is None:

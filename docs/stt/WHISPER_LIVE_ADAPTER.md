@@ -5,8 +5,13 @@
 The owner chose the existing multilingual Whisper `small` weights for the next
 English STT development step. On five local English clips this candidate
 recognized command words better than the installed Vosk English candidate,
-but those clips are from one speaker. Vosk remains available. This change does
-not add an automatic product default, installer, GPU backend, or downloader.
+but those clips are from one speaker. Vosk remains available. This initial
+change did not add an automatic product default, installer, GPU backend, or
+downloader.
+GPU support was added in a later slice; see `WHISPER_GPU_EXECUTION.md`.
+Automatic language detection and session-only command diagnostics were added
+later; see `MULTILINGUAL_COMMAND_INPUT.md`. The statements below about the
+initial English-only adapter describe that earlier stage.
 
 ## Data flow
 
@@ -53,8 +58,8 @@ finally:
 ```
 
 These paths are Git-ignored development assets. A packaged app will need
-deployment configuration for both. The adapter currently supports CPU only;
-an explicit GPU request fails. Its language tag is configured English, not
+deployment configuration for both. At the time of this initial slice, the
+adapter supported CPU only. Its language tag is configured English, not
 automatic language detection.
 
 The existing microphone diagnostic can select this backend explicitly. It

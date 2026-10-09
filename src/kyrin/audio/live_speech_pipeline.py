@@ -21,7 +21,7 @@ from kyrin.audio.audio_framer import AudioFramer
 from kyrin.audio.audio_input import AudioInput
 from kyrin.audio.sample_rate_converter import SampleRateConverter
 from kyrin.stt.contracts import SpeechToTextEngine, TurnAwareSpeechToTextSession
-from kyrin.stt.device import SpeechToTextOptions
+from kyrin.stt.device import ComputeDevice, SpeechToTextOptions
 from kyrin.stt.transcript import TranscriptUpdate
 
 LiveSpeechEvent = SpeechActivityFrame | TranscriptUpdate | BacklogNotice
@@ -48,6 +48,7 @@ class LiveSpeechPipeline:
         backlog_maximum_ms: int = 5000,
         start_confirm_ms: int = 64,
         pause_confirm_ms: int = 384,
+        on_compute_device: Callable[[ComputeDevice], None] | None = None,
     ) -> None:
         vad_converter = SampleRateConverter(
             source_format, detector.input_format.sample_rate
@@ -67,6 +68,7 @@ class LiveSpeechPipeline:
         self.backlog_maximum_ms = backlog_maximum_ms
         self.start_confirm_ms = start_confirm_ms
         self.pause_confirm_ms = pause_confirm_ms
+        self.on_compute_device = on_compute_device
         self._vad_converter = vad_converter
         self._session_lock = Lock()
         self._stop_requested = Event()
@@ -87,6 +89,8 @@ class LiveSpeechPipeline:
             session = self.engine.open_session(self.options)
             worker_owns_session = False
             try:
+                if self.on_compute_device is not None:
+                    self.on_compute_device(session.compute_device)
                 turn_aware = isinstance(session, TurnAwareSpeechToTextSession)
                 turn_session = (
                     cast(TurnAwareSpeechToTextSession, session) if turn_aware else None

@@ -26,7 +26,12 @@ def test_missing_settings_start_in_safe_setup_state(tmp_path: Path) -> None:
     assert settings.listening_enabled
     assert settings.stt is None
     assert not settings.action_execution_enabled
+    assert not settings.system_power_enabled
     assert settings.allowed_apps == ()
+    assert settings.allowed_chat_apps == ()
+    assert settings.allowed_window_apps == ()
+    assert settings.allowed_close_apps == ()
+    assert settings.wake_aliases == ()
     assert not store.path.exists()
 
 
@@ -42,12 +47,14 @@ def test_selected_gpu_is_saved_without_claiming_it_is_available(tmp_path: Path) 
         ),
         action_execution_enabled=True,
         allowed_apps=(AllowedApp("telegram", "org.telegram.desktop"),),
+        allowed_chat_apps=("telegram",),
+        wake_aliases=("kayrin", "کایرین من"),
     )
 
     store.save(settings)
 
     assert store.load() == settings
-    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 5
     assert store.path.stat().st_mode & 0o077 == 0
 
 
@@ -68,12 +75,12 @@ def test_unsupported_version_and_wrong_types_are_rejected(tmp_path: Path) -> Non
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
     document = json.loads(store.path.read_text(encoding="utf-8"))
-    document["schema_version"] = 2
+    document["schema_version"] = 6
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="schema version"):
         store.load()
 
-    document["schema_version"] = 1
+    document["schema_version"] = 5
     document["listening_enabled"] = 1
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="boolean"):
@@ -126,6 +133,73 @@ def test_duplicate_app_bindings_and_relative_models_are_invalid(tmp_path: Path) 
     with pytest.raises(ValueError, match="absolute"):
         SttSelection("whisper", Path("relative.bin"), "en")
     assert not (tmp_path / "relative.bin").exists()
+    with pytest.raises(ValueError, match="chat permission"):
+        AppSettings(allowed_chat_apps=("telegram",))
+    with pytest.raises(ValueError, match="wake aliases"):
+        AppSettings(wake_aliases=("kayrin", "KAYRIN"))
+
+
+def test_version_one_settings_migrate_with_chat_permission_off(tmp_path: Path) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 1
+    del document["allowed_chat_apps"]
+    del document["wake_aliases"]
+    del document["allowed_window_apps"]
+    del document["allowed_close_apps"]
+    del document["system_power_enabled"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded.allowed_apps == (AllowedApp("telegram", "telegram.desktop"),)
+    assert loaded.allowed_chat_apps == ()
+    assert loaded.wake_aliases == ()
+
+
+def test_version_two_settings_migrate_with_no_custom_wake_aliases(
+    tmp_path: Path,
+) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(wake_aliases=("kayrin",)))
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 2
+    del document["wake_aliases"]
+    del document["allowed_window_apps"]
+    del document["allowed_close_apps"]
+    del document["system_power_enabled"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert store.load().wake_aliases == ()
+
+
+def test_legacy_settings_do_not_enable_window_or_close_permissions(
+    tmp_path: Path,
+) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 3
+    del document["allowed_window_apps"]
+    del document["allowed_close_apps"]
+    del document["system_power_enabled"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = store.load()
+    assert loaded.allowed_window_apps == ()
+    assert loaded.allowed_close_apps == ()
+    assert not loaded.system_power_enabled
+
+
+def test_version_four_never_enables_power_permission(tmp_path: Path) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(system_power_enabled=True))
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 4
+    del document["system_power_enabled"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert not store.load().system_power_enabled
 
 
 def test_linux_settings_path_uses_absolute_config_root(

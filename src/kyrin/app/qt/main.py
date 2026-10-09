@@ -12,6 +12,11 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from kyrin.app.controller import ApplicationController
+from kyrin.app.model_library import (
+    ModelLibrary,
+    ModelLibraryError,
+    linux_model_library_path,
+)
 from kyrin.app.platforms.ubuntu import UbuntuSessionFactory, standard_stt_openers
 from kyrin.app.platforms.xdg_startup import (
     DESKTOP_FILE_ID,
@@ -20,6 +25,10 @@ from kyrin.app.platforms.xdg_startup import (
     user_desktop_paths,
 )
 from kyrin.app.qt.branding import LOGO_PATH
+from kyrin.app.qt.chat_verifier import QtChatVerifier
+from kyrin.app.qt.ocr_setup import installed_ocr_engine
+from kyrin.app.qt.screen_access import ScreenAccess
+from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.single_instance import SingleInstanceError, SingleInstanceGuard
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
@@ -31,13 +40,20 @@ from kyrin.app.settings_store import (
 from kyrin.audio.microphone.devices import PortAudioMicrophoneResolver
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
+from kyrin.desktop.platforms.gnome_activation import GnomeExistingAppActivator
+from kyrin.desktop.platforms.gnome_window_control import GnomeAppWindowController
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.gnome_status import GnomeVisualStatusSink
+from kyrin.system_power.flow import SystemPowerFlow
+from kyrin.system_power.gnome import GnomePowerBackend
+from kyrin.vision.ocr.contracts import OcrOptions
 
 
-def _whisper_server_path() -> Path | None:
-    """Use an explicit local binary or one installed on PATH; never download it."""
-    configured = os.environ.get("KYRIN_WHISPER_SERVER")
+def _whisper_server_path(
+    variable: str, command: str, *, scripts_directory: Path | None = None
+) -> Path | None:
+    """Find a configured or installed runtime without downloading it."""
+    configured = os.environ.get(variable)
     if configured:
         candidate = Path(configured)
         if (
@@ -47,7 +63,10 @@ def _whisper_server_path() -> Path | None:
         ):
             return candidate
         return None
-    found = shutil.which("whisper-server")
+    installed = (scripts_directory or Path(sysconfig.get_path("scripts"))) / command
+    if installed.is_file() and os.access(installed, os.X_OK):
+        return installed
+    found = shutil.which(command)
     return Path(found) if found else None
 
 
@@ -84,6 +103,8 @@ def main() -> int:
         print(f"KYRIN could not start: {error}", file=sys.stderr)
         return 1
     app.aboutToQuit.connect(guard.close)
+    screen_access = ScreenAccess(app)
+    app.aboutToQuit.connect(screen_access.close)
     store = JsonSettingsStore(linux_settings_path())
     load_error: SettingsError | None = None
     try:
@@ -101,23 +122,71 @@ def main() -> int:
         )
     except DesktopRegistrationError as error:
         startup_error = error
-    server = _whisper_server_path()
+    server = _whisper_server_path("KYRIN_WHISPER_SERVER", "whisper-server")
+    gpu_server = _whisper_server_path("KYRIN_WHISPER_GPU_SERVER", "whisper-server-gpu")
+    model_library = ModelLibrary(linux_model_library_path())
+    try:
+        model_library.cleanup_incomplete_imports()
+    except ModelLibraryError as error:
+        print(f"KYRIN model library: {error}", file=sys.stderr)
     microphones = PortAudioMicrophoneResolver()
     events = EventBridge()
+    power_flow = SystemPowerFlow(
+        GnomePowerBackend(),
+        events.publish,
+        enabled=bool(
+            settings
+            and settings.action_execution_enabled
+            and settings.system_power_enabled
+        ),
+    )
     catalog = XdgDesktopAppCatalog()
+    active_identity = GnomeShellActiveAppObserver({})
+
+    def focused_window() -> tuple[str, int] | None:
+        observed = active_identity.read_active_window_identity()
+        if observed is None:
+            return None
+        return observed.platform_app_id, observed.process_id
+
+    ocr_root = linux_model_library_path().parent / "ocr" / "tesseract"
+    screen_reader = ScreenTextReader(
+        screen_access,
+        installed_ocr_engine(ocr_root),
+        focused_window,
+        OcrOptions("eng"),
+        app,
+    )
+    app.aboutToQuit.connect(screen_reader.close)
+    chat_verifier = QtChatVerifier(screen_access, screen_reader, app)
     visual_sink = GnomeVisualStatusSink() if GnomeVisualStatusSink.available() else None
     observer_factory = (
         _gnome_observer if GnomeShellActiveAppObserver.available() else None
     )
+    activator_factory = (
+        GnomeExistingAppActivator
+        if observer_factory is not None and GnomeExistingAppActivator.available()
+        else None
+    )
+    window_controller_factory = (
+        GnomeAppWindowController if GnomeAppWindowController.available() else None
+    )
     factory = UbuntuSessionFactory(
-        stt_openers=standard_stt_openers(whisper_server_path=server),
+        stt_openers=standard_stt_openers(
+            whisper_server_path=server, whisper_gpu_server_path=gpu_server
+        ),
         on_event=events.publish,
         microphones=microphones,
         catalog=catalog,
+        window_controller_factory=window_controller_factory,
         observer_factory=observer_factory,
+        activator_factory=activator_factory,
+        chat_verifier=chat_verifier,
+        focused_window=focused_window,
+        system_power=power_flow,
         visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
-    controller = ApplicationController(factory)
+    controller = ApplicationController(factory, power_flow)
     window = ControlWindow(
         settings,
         store,
@@ -125,9 +194,13 @@ def main() -> int:
         microphones,
         events,
         whisper_server_available=server is not None,
+        whisper_gpu_server_available=gpu_server is not None,
+        model_library=model_library,
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),
         app_catalog=catalog,
+        screen_access=screen_access,
+        screen_reader=screen_reader,
         startup_registration=registration,
         startup_error=startup_error,
     )

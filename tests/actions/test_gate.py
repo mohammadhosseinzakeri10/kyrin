@@ -57,6 +57,62 @@ def test_candidate_never_issues_action_and_final_issues_once() -> None:
         gate.record_result(ActionResult(key, ActionOutcome.CONFIRMED, "telegram"))
 
 
+def test_window_close_needs_its_own_permission() -> None:
+    close = CommandIntent(CommandKind.CLOSE_APP_WINDOW, "telegram")
+    supported = frozenset({CommandKind.OPEN_APP, CommandKind.CLOSE_APP_WINDOW})
+    gate = ActionGate(
+        ActionPolicy(allowed_apps=frozenset({"telegram"}), supported_kinds=supported)
+    )
+    assert gate.observe(CommandResolution(0, close)) == ActionNotice(
+        ActionKey(0, 0), close, ActionNoticeReason.NOT_ALLOWED
+    )
+
+    allowed = ActionGate(
+        ActionPolicy(
+            allowed_apps=frozenset({"telegram"}),
+            allowed_close_apps=frozenset({"telegram"}),
+            supported_kinds=supported,
+        )
+    )
+    assert allowed.observe(CommandResolution(0, close)) == ActionRequest(
+        ActionKey(0, 0), close
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    (
+        CommandKind.RESTORE_APP,
+        CommandKind.MINIMIZE_APP,
+        CommandKind.MAXIMIZE_APP,
+        CommandKind.UNMAXIMIZE_APP,
+        CommandKind.FULLSCREEN_APP,
+        CommandKind.UNFULLSCREEN_APP,
+    ),
+)
+def test_window_size_and_focus_commands_need_window_permission(
+    kind: CommandKind,
+) -> None:
+    intent = CommandIntent(kind, "telegram")
+    policy = ActionPolicy(
+        allowed_apps=frozenset({"telegram"}),
+        supported_kinds=frozenset({CommandKind.OPEN_APP, kind}),
+    )
+    assert ActionGate(policy).observe(CommandResolution(0, intent)) == ActionNotice(
+        ActionKey(0, 0), intent, ActionNoticeReason.NOT_ALLOWED
+    )
+    permitted = ActionGate(
+        ActionPolicy(
+            allowed_apps=frozenset({"telegram"}),
+            allowed_window_apps=frozenset({"telegram"}),
+            supported_kinds=frozenset({CommandKind.OPEN_APP, kind}),
+        )
+    )
+    assert permitted.observe(CommandResolution(0, intent)) == ActionRequest(
+        ActionKey(0, 0), intent
+    )
+
+
 def test_retracted_or_revised_candidate_uses_only_final_intent() -> None:
     gate = ActionGate(POLICY)
     gate.observe(CommandCandidateUpdate(0, TELEGRAM))

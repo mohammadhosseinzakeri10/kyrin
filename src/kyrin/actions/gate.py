@@ -28,6 +28,8 @@ class ActionPolicy:
 
     allowed_apps: frozenset[str] = field(default_factory=frozenset)
     allowed_chat_apps: frozenset[str] = field(default_factory=frozenset)
+    allowed_window_apps: frozenset[str] = field(default_factory=frozenset)
+    allowed_close_apps: frozenset[str] = field(default_factory=frozenset)
     confirmation_required_for: frozenset[CommandKind] = field(default_factory=frozenset)
     supported_kinds: frozenset[CommandKind] = field(
         default_factory=lambda: frozenset({CommandKind.OPEN_APP, CommandKind.OPEN_CHAT})
@@ -37,7 +39,13 @@ class ActionPolicy:
     def __post_init__(self) -> None:
         if self.max_pending <= 0:
             raise ValueError("max_pending must be positive")
-        if any(not app.strip() for app in self.allowed_apps | self.allowed_chat_apps):
+        if any(
+            not app.strip()
+            for app in self.allowed_apps
+            | self.allowed_chat_apps
+            | self.allowed_window_apps
+            | self.allowed_close_apps
+        ):
             raise ValueError("allowed app identifiers must not be empty")
 
 
@@ -112,7 +120,17 @@ class ActionGate:
         except KeyError as exc:
             raise ValueError("result does not match an outstanding action") from exc
         if (
-            request.intent.kind is CommandKind.OPEN_APP
+            request.intent.kind
+            in (
+                CommandKind.OPEN_APP,
+                CommandKind.RESTORE_APP,
+                CommandKind.MINIMIZE_APP,
+                CommandKind.CLOSE_APP_WINDOW,
+                CommandKind.MAXIMIZE_APP,
+                CommandKind.UNMAXIMIZE_APP,
+                CommandKind.FULLSCREEN_APP,
+                CommandKind.UNFULLSCREEN_APP,
+            )
             and result.outcome is not ActionOutcome.FAILED
         ):
             self._verified_context = VerifiedContext()
@@ -141,6 +159,17 @@ class ActionGate:
     def _allowed(self, intent: CommandIntent) -> bool:
         if intent.kind is CommandKind.OPEN_APP:
             return intent.target in self.policy.allowed_apps
+        if intent.kind in (
+            CommandKind.RESTORE_APP,
+            CommandKind.MINIMIZE_APP,
+            CommandKind.MAXIMIZE_APP,
+            CommandKind.UNMAXIMIZE_APP,
+            CommandKind.FULLSCREEN_APP,
+            CommandKind.UNFULLSCREEN_APP,
+        ):
+            return intent.target in self.policy.allowed_window_apps
+        if intent.kind is CommandKind.CLOSE_APP_WINDOW:
+            return intent.target in self.policy.allowed_close_apps
         if intent.kind is CommandKind.OPEN_CHAT:
             return intent.app in self.policy.allowed_chat_apps
         return False

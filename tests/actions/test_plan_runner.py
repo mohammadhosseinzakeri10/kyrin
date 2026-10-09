@@ -27,6 +27,7 @@ from kyrin.commands.models import (
     ResponseChannel,
 )
 from kyrin.responses.presenter import ResponsePresenter
+from kyrin.runtime.command_runtime import execute_final_command
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 OPEN_TELEGRAM = CommandIntent(CommandKind.OPEN_APP, "telegram")
@@ -153,6 +154,26 @@ def test_verified_app_allows_supported_chat_step() -> None:
     ]
     assert len(events) == 2
     assert all(isinstance(event, ActionFeedback) for event in events)
+
+
+def test_runtime_passes_fresh_observation_to_compound_action_runner() -> None:
+    executor = FakeExecutor((ActionOutcome.CONFIRMED, ActionOutcome.CONFIRMED))
+    observations: list[str] = []
+
+    def observe() -> str:
+        observations.append("telegram")
+        return "telegram"
+
+    events = execute_final_command(
+        PLAN,
+        ActionGate(policy(chats_supported=True)),
+        executor,
+        observe_active_app=observe,
+    )
+
+    assert len(events) == 2
+    assert len(executor.calls) == 2
+    assert observations == ["telegram"]
 
 
 def test_stale_verified_app_does_not_authorize_chat_after_focus_changes() -> None:

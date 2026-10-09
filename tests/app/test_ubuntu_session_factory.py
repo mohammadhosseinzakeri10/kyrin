@@ -3,6 +3,7 @@
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
+from typing import cast
 
 import pytest
 
@@ -17,11 +18,14 @@ from kyrin.app.settings import AllowedApp, AppSettings, SttSelection
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
+from kyrin.commands.models import CommandKind
+from kyrin.desktop.app_activation import ActivationAttempt
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.visual_status import VisualPresentation, VisualStatus
+from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference
-from kyrin.stt.errors import DeviceUnavailableError
+from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 
@@ -51,6 +55,62 @@ class FakeEngine:
 
     def close(self) -> None:
         self.closed = True
+
+
+def test_whisper_openers_select_device_before_starting_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[tuple[Path, ComputeDevice]] = []
+    cpu = tmp_path / "cpu-server"
+    gpu = tmp_path / "gpu-server"
+
+    def fake_engine(
+        path: Path, model: Path, *, language: str, compute_device: ComputeDevice
+    ) -> FakeEngine:
+        assert model == tmp_path / "model"
+        assert language == "en"
+        opened.append((path, compute_device))
+        return FakeEngine()
+
+    monkeypatch.setattr(ubuntu, "WhisperEngine", fake_engine)
+    opener = ubuntu.standard_stt_openers(
+        whisper_server_path=cpu, whisper_gpu_server_path=gpu
+    )["whisper"]
+    for preference in (
+        DevicePreference.CPU,
+        DevicePreference.GPU,
+        DevicePreference.AUTO,
+    ):
+        opener(SttSelection("whisper", tmp_path / "model", "en", preference))
+    assert opened == [
+        (cpu, ComputeDevice.CPU),
+        (gpu, ComputeDevice.GPU),
+        (gpu, ComputeDevice.GPU),
+    ]
+
+
+def test_whisper_auto_falls_back_but_explicit_gpu_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[ComputeDevice] = []
+
+    def fake_engine(
+        path: Path, model: Path, *, language: str, compute_device: ComputeDevice
+    ) -> FakeEngine:
+        opened.append(compute_device)
+        if compute_device is ComputeDevice.GPU:
+            raise SpeechToTextError("GPU process failed")
+        return FakeEngine()
+
+    monkeypatch.setattr(ubuntu, "WhisperEngine", fake_engine)
+    opener = ubuntu.standard_stt_openers(
+        whisper_server_path=tmp_path / "cpu",
+        whisper_gpu_server_path=tmp_path / "gpu",
+    )["whisper"]
+    opener(SttSelection("whisper", tmp_path / "model", "en"))
+    assert opened == [ComputeDevice.GPU, ComputeDevice.CPU]
+    with pytest.raises(DeviceUnavailableError, match="GPU runtime"):
+        opener(SttSelection("whisper", tmp_path / "model", "en", DevicePreference.GPU))
 
 
 class FakeSpeechController:
@@ -210,6 +270,60 @@ def test_optional_foreground_observer_and_mascot_report_confirmed_action(
     assert VisualStatus.CONFIRMED in {item.status for item in visuals}
 
 
+def test_registered_existing_window_is_activated_without_relaunch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action_completed = Event()
+
+    class WaitingSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
+            assert action_completed.wait(1)
+
+    class TelegramObserver:
+        def observe_active_app(self) -> str:
+            return "telegram"
+
+    class TelegramActivator:
+        def activate_existing_app(self, app_id: str) -> ActivationAttempt:
+            activated.append(app_id)
+            return ActivationAttempt.REQUESTED
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", WaitingSpeechController)
+    events: list[ubuntu.ApplicationEvent] = []
+    activated: list[str] = []
+    launcher = RecordingExecutor()
+
+    def on_event(event: ubuntu.ApplicationEvent) -> None:
+        events.append(event)
+        if isinstance(event, ActionFeedback):
+            action_completed.set()
+
+    def activator_factory(ids: dict[str, str]) -> TelegramActivator:
+        assert ids == {"telegram": "telegram.desktop"}
+        return TelegramActivator()
+
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=on_event,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: launcher,
+        observer_factory=lambda app_ids, catalog: TelegramObserver(),
+        activator_factory=activator_factory,
+    )
+    with factory(_settings(tmp_path, action_execution_enabled=True)) as runtime:
+        runtime.run()
+
+    assert activated == ["telegram"]
+    assert launcher.requests == []
+    assert any(
+        isinstance(event, ActionFeedback) and event.outcome is ActionOutcome.CONFIRMED
+        for event in events
+    )
+
+
 def test_missing_microphone_and_explicit_gpu_fail_without_capture(
     tmp_path: Path,
 ) -> None:
@@ -257,3 +371,56 @@ def test_unknown_backend_fails_before_touching_microphone(tmp_path: Path) -> Non
         with factory(_settings(tmp_path)):
             pass
     assert microphones.keys == []
+
+
+def test_chat_capability_requires_saved_permission_and_verification_dependencies(
+    tmp_path: Path,
+) -> None:
+    catalog = _catalog(tmp_path)
+
+    class ChatVerifier:
+        def ready(self) -> bool:
+            return True
+
+        def verify(self, app_id: str, pid: int) -> bool:
+            return True
+
+    class TelegramObserver:
+        def observe_active_app(self) -> str:
+            return "telegram"
+
+    def factory(
+        *, verifier: ubuntu.ChatVerifier | None, identity: bool
+    ) -> ubuntu.UbuntuSessionFactory:
+        return ubuntu.UbuntuSessionFactory(
+            stt_openers={"fake": lambda selection: FakeEngine()},
+            on_event=lambda event: None,
+            microphones=FakeMicrophones(),
+            catalog=catalog,
+            detector_factory=lambda: object(),
+            executor_factory=lambda paths: RecordingExecutor(),
+            observer_factory=lambda app_ids, catalog: TelegramObserver(),
+            chat_verifier=verifier,
+            focused_window=(lambda: ("telegram.desktop", 12)) if identity else None,
+        )
+
+    settings = _settings(tmp_path, action_execution_enabled=True)
+    with factory(verifier=ChatVerifier(), identity=True)(settings) as runtime:
+        gate = cast(LiveCommandRuntime, runtime)._gate
+        assert gate is not None
+        assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
+
+    permitted = replace(settings, allowed_chat_apps=("telegram",))
+    with factory(verifier=None, identity=True)(permitted) as runtime:
+        gate = cast(LiveCommandRuntime, runtime)._gate
+        assert gate is not None
+        assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
+    with factory(verifier=ChatVerifier(), identity=False)(permitted) as runtime:
+        gate = cast(LiveCommandRuntime, runtime)._gate
+        assert gate is not None
+        assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
+    with factory(verifier=ChatVerifier(), identity=True)(permitted) as runtime:
+        gate = cast(LiveCommandRuntime, runtime)._gate
+        assert gate is not None
+        assert gate.policy.allowed_chat_apps == frozenset({"telegram"})
+        assert CommandKind.OPEN_CHAT in gate.policy.supported_kinds

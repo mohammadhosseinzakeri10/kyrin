@@ -36,6 +36,52 @@ def test_first_ready_partial_is_candidate_and_final_resolves_same_segment() -> N
     assert coordinator.observe(update(0, partial.text, TranscriptStatus.FINAL)) == ()
 
 
+def test_custom_wake_spelling_changes_only_prefix_recognition() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter(wake_aliases=("Kayrin",)))
+    assert coordinator.observe(
+        update(0, "Kayrin open Telegram", TranscriptStatus.FINAL)
+    ) == (CommandResolution(0, CommandIntent(CommandKind.OPEN_APP, "telegram")),)
+    assert coordinator.observe(update(1, "Kayrin", TranscriptStatus.FINAL)) == (
+        CommandResolution(1, None),
+        ResponseRequest(1, ResponseKind.READY_FOR_COMMAND, ResponseChannel.TEXT_ONLY),
+    )
+
+
+@pytest.mark.parametrize("name", ("Kyreen", "Kyrie", "Kairi", "Kairin!"))
+def test_observed_wake_spellings_alone_acknowledge_without_an_action(
+    name: str,
+) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, name, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+        ResponseRequest(0, ResponseKind.READY_FOR_COMMAND, ResponseChannel.TEXT_ONLY),
+    )
+    assert coordinator.observe(
+        update(1, f"{name} open Telegram", TranscriptStatus.FINAL)
+    ) == (CommandResolution(1, CommandIntent(CommandKind.OPEN_APP, "telegram")),)
+
+
+def test_observed_unsupported_door_phrase_does_not_become_an_action() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, "Kairin please open door", TranscriptStatus.FINAL)
+    ) == (
+        CommandResolution(0, None),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+    )
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ("Kairin Open Telegram", "تلیگرام را باز کن"),
+)
+def test_observed_stt_spellings_resolve_to_telegram(phrase: str) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, CommandIntent(CommandKind.OPEN_APP, "telegram")),
+    )
+
+
 def test_revised_partial_retracts_candidate_and_final_can_disagree() -> None:
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     first = update(0, "تلگرام را باز کن", TranscriptStatus.PARTIAL)
@@ -68,6 +114,40 @@ def test_final_only_backend_can_produce_command_without_partials() -> None:
     assert coordinator.observe(
         update(0, "open the Telegram", TranscriptStatus.FINAL)
     ) == (CommandResolution(0, CommandIntent(CommandKind.OPEN_APP, "telegram")),)
+
+
+@pytest.mark.parametrize(
+    ("phrase", "kind"),
+    (
+        ("Restore Telegram", CommandKind.RESTORE_APP),
+        ("Show Telegram", CommandKind.RESTORE_APP),
+        ("Minimize Telegram", CommandKind.MINIMIZE_APP),
+        ("Close Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("تلگرام را دوباره نشان بده", CommandKind.RESTORE_APP),
+        ("تلگرام را کوچک کن", CommandKind.MINIMIZE_APP),
+        ("تلگرام را ببند", CommandKind.CLOSE_APP_WINDOW),
+        ("Maximize Telegram", CommandKind.MAXIMIZE_APP),
+        ("Unmaximize Telegram", CommandKind.UNMAXIMIZE_APP),
+        ("Make Telegram fullscreen", CommandKind.FULLSCREEN_APP),
+        ("Exit fullscreen on Telegram", CommandKind.UNFULLSCREEN_APP),
+        ("تلگرام را بزرگ کن", CommandKind.MAXIMIZE_APP),
+        ("تلگرام را به اندازه عادی برگردان", CommandKind.UNMAXIMIZE_APP),
+        ("تلگرام را تمام صفحه کن", CommandKind.FULLSCREEN_APP),
+        ("تلگرام را از تمام صفحه خارج کن", CommandKind.UNFULLSCREEN_APP),
+    ),
+)
+def test_window_command_requires_exact_app_name(phrase: str, kind: CommandKind) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, CommandIntent(kind, "telegram")),
+    )
+
+
+def test_unknown_window_target_never_becomes_action() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, "Close Telegrum", TranscriptStatus.FINAL))[
+        0
+    ] == (CommandResolution(0, None))
 
 
 def test_chat_requires_fresh_active_app_or_asks_for_app() -> None:

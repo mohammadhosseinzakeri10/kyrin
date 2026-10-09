@@ -28,6 +28,7 @@ from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.command_bridge import observe_command_update
 from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.system_power.flow import SystemPowerFlow
 
 
 def dispatch_command_action(
@@ -66,10 +67,13 @@ def execute_final_command(
     event: FinalActionCommand,
     gate: ActionGate,
     executor: ActionExecutor,
+    observe_active_app: Callable[[], str | None] | None = None,
 ) -> tuple[ActionOutput, ...]:
     """Execute one final decision on the worker that owns the action gate."""
     if isinstance(event, CommandPlanResolution):
-        return ActionPlanRunner(gate, executor).run(event)
+        return ActionPlanRunner(
+            gate, executor, observe_active_app=observe_active_app
+        ).run(event)
     decision = gate.observe(event)
     if decision is None:
         return ()
@@ -105,6 +109,7 @@ class LiveCommandRuntime:
         on_action_output: Callable[[ActionDecision | ActionFeedback], None],
         on_session_end: Callable[[SpeechSessionEnded], None],
         on_active_app: Callable[[str | None], None] | None = None,
+        system_power: SystemPowerFlow | None = None,
     ) -> None:
         if (coordinator is None) != (gate is None):
             raise ValueError("coordinator and action gate must be supplied together")
@@ -119,9 +124,15 @@ class LiveCommandRuntime:
         self._on_action_output = on_action_output
         self._on_session_end = on_session_end
         self._on_active_app = on_active_app
+        self._system_power = system_power
         self._worker = (
             QueuedActionDispatcher(
-                lambda command: execute_final_command(command, gate, executor),
+                lambda command: execute_final_command(
+                    command,
+                    gate,
+                    executor,
+                    observer.observe_active_app if observer is not None else None,
+                ),
                 on_action_output,
             )
             if executor is not None and gate is not None
@@ -129,7 +140,20 @@ class LiveCommandRuntime:
         )
 
     def stop(self) -> None:
+        if self._system_power is not None:
+            self._system_power.cancel()
         self._controller.stop()
+
+    def respond_to_system_action(self, request_id: int, answer: str) -> bool:
+        return (
+            self._system_power.respond(request_id, answer)
+            if self._system_power is not None
+            else False
+        )
+
+    def expire_system_action(self) -> None:
+        if self._system_power is not None:
+            self._system_power.expire()
 
     def run(self) -> None:
         """Consume speech until stopped, exhausted, or a terminal failure."""
@@ -146,6 +170,12 @@ class LiveCommandRuntime:
                         continue
                     self._on_live_event(event)
                     if coordinator is None or not isinstance(event, TranscriptUpdate):
+                        continue
+                    if (
+                        event.status is TranscriptStatus.FINAL
+                        and self._system_power is not None
+                        and self._system_power.on_final_speech(event.text)
+                    ):
                         continue
                     active_app, decisions = observe_command_update(
                         coordinator, event, self._observer
@@ -176,6 +206,8 @@ class LiveCommandRuntime:
                 worker.close()
 
     def _end_stream(self) -> None:
+        if self._system_power is not None:
+            self._system_power.cancel()
         if self._coordinator is not None:
             for decision in self._coordinator.start_new_stream():
                 self._on_command_event(decision)

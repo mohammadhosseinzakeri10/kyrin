@@ -9,6 +9,13 @@ from kyrin.commands.app_names import SpokenAppCandidate
 class CommandKind(StrEnum):
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
+    RESTORE_APP = "restore_app"
+    MINIMIZE_APP = "minimize_app"
+    CLOSE_APP_WINDOW = "close_app_window"
+    MAXIMIZE_APP = "maximize_app"
+    UNMAXIMIZE_APP = "unmaximize_app"
+    FULLSCREEN_APP = "fullscreen_app"
+    UNFULLSCREEN_APP = "unfullscreen_app"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,8 +27,8 @@ class CommandIntent:
     def __post_init__(self) -> None:
         if not self.target.strip():
             raise ValueError("command target must not be empty")
-        if self.kind is CommandKind.OPEN_APP and self.app is not None:
-            raise ValueError("open_app must not have a separate app")
+        if self.kind is not CommandKind.OPEN_CHAT and self.app is not None:
+            raise ValueError("app window commands must not have a separate app")
         if self.kind is CommandKind.OPEN_CHAT and (
             self.app is None or not self.app.strip()
         ):
@@ -90,6 +97,7 @@ class ResponseChannel(StrEnum):
 
 
 class ResponseKind(StrEnum):
+    READY_FOR_COMMAND = "ready_for_command"
     CHOOSE_CHAT_APP = "choose_chat_app"
     CHOOSE_APP = "choose_app"
     CONFIRM_APP = "confirm_app"

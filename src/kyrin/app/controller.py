@@ -9,6 +9,7 @@ from time import monotonic
 from typing import Protocol
 
 from kyrin.app.settings import AppSettings
+from kyrin.system_power.flow import PowerAction, SystemPowerFlow
 
 
 class RuntimeSession(Protocol):
@@ -47,8 +48,11 @@ class ApplicationController:
     Status is a snapshot the future UI can poll without touching the worker.
     """
 
-    def __init__(self, factory: SessionFactory) -> None:
+    def __init__(
+        self, factory: SessionFactory, system_power: SystemPowerFlow | None = None
+    ) -> None:
         self._factory = factory
+        self._system_power = system_power
         self._lock = Lock()
         self._status = ApplicationStatus(ApplicationState.STOPPED)
         self._thread: Thread | None = None
@@ -76,6 +80,13 @@ class ApplicationController:
     def start(self, settings: AppSettings) -> ApplicationStatus:
         """Begin listening if configured; never open audio for incomplete setup."""
         with self._lock:
+            if self._system_power is not None:
+                self._system_power.configure(
+                    enabled=(
+                        settings.action_execution_enabled
+                        and settings.system_power_enabled
+                    )
+                )
             if (self._thread is not None and self._thread.is_alive()) or (
                 self._stop_thread is not None and self._stop_thread.is_alive()
             ):
@@ -123,6 +134,31 @@ class ApplicationController:
             )
             self._stop_thread = stop_thread
             stop_thread.start()
+
+    def respond_to_system_action(self, request_id: int, answer: str) -> bool:
+        if self._system_power is not None:
+            return self._system_power.respond(request_id, answer)
+        with self._lock:
+            session = self._session
+        method = getattr(session, "respond_to_system_action", None)
+        return bool(method(request_id, answer)) if method is not None else False
+
+    def expire_system_action(self) -> None:
+        if self._system_power is not None:
+            self._system_power.expire()
+            return
+        with self._lock:
+            session = self._session
+        method = getattr(session, "expire_system_action", None)
+        if method is not None:
+            method()
+
+    def request_system_action(self, action: PowerAction) -> bool:
+        return (
+            self._system_power.start(action)
+            if self._system_power is not None
+            else False
+        )
 
     def wait_until_stopped(self, timeout_s: float | None = None) -> bool:
         """Allow an application shutdown path to wait for complete cleanup."""

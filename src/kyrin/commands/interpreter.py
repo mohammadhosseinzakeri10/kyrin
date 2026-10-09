@@ -46,6 +46,11 @@ class NotACommand:
     """Ordinary or unrelated speech should not trigger a response."""
 
 
+@dataclass(frozen=True, slots=True)
+class WakeOnly:
+    """An address without an action; acknowledge without executing anything."""
+
+
 Interpretation = (
     ReadyCommand
     | ReadyPlan
@@ -54,6 +59,7 @@ Interpretation = (
     | IncompleteCommand
     | UnrecognizedCommand
     | NotACommand
+    | WakeOnly
 )
 
 

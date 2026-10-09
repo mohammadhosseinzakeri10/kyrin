@@ -67,7 +67,12 @@ class AppSettings:
     microphone_device_key: str | None = None
     stt: SttSelection | None = None
     action_execution_enabled: bool = False
+    system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
+    allowed_chat_apps: tuple[str, ...] = ()
+    allowed_window_apps: tuple[str, ...] = ()
+    allowed_close_apps: tuple[str, ...] = ()
+    wake_aliases: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.listening_enabled) is not bool:
@@ -83,6 +88,8 @@ class AppSettings:
             raise ValueError("stt must be a model selection or null")
         if type(self.action_execution_enabled) is not bool:
             raise ValueError("action_execution_enabled must be a boolean")
+        if type(self.system_power_enabled) is not bool:
+            raise ValueError("system_power_enabled must be a boolean")
         if not isinstance(self.allowed_apps, tuple) or not all(
             isinstance(binding, AllowedApp) for binding in self.allowed_apps
         ):
@@ -93,3 +100,40 @@ class AppSettings:
             set(desktop_ids)
         ):
             raise ValueError("allowed_apps contains duplicate bindings")
+        if (
+            not isinstance(self.allowed_chat_apps, tuple)
+            or any(
+                not isinstance(app_id, str) or not _IDENTIFIER.fullmatch(app_id)
+                for app_id in self.allowed_chat_apps
+            )
+            or len(self.allowed_chat_apps) != len(set(self.allowed_chat_apps))
+            or not set(self.allowed_chat_apps).issubset(app_ids)
+        ):
+            raise ValueError("chat permission requires a unique allowed app")
+        for label, identifiers in (
+            ("window", self.allowed_window_apps),
+            ("close", self.allowed_close_apps),
+        ):
+            if (
+                not isinstance(identifiers, tuple)
+                or any(
+                    not isinstance(app_id, str) or not _IDENTIFIER.fullmatch(app_id)
+                    for app_id in identifiers
+                )
+                or len(identifiers) != len(set(identifiers))
+                or not set(identifiers).issubset(app_ids)
+            ):
+                raise ValueError(f"{label} permission requires unique allowed apps")
+        if (
+            not isinstance(self.wake_aliases, tuple)
+            or len(self.wake_aliases) > 12
+            or any(
+                not isinstance(alias, str)
+                or not 2 <= len(alias.strip()) <= 40
+                or "," in alias
+                for alias in self.wake_aliases
+            )
+            or len({alias.casefold().strip() for alias in self.wake_aliases})
+            != len(self.wake_aliases)
+        ):
+            raise ValueError("wake aliases must be unique short phrases")

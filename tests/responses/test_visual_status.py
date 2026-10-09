@@ -74,6 +74,19 @@ def test_final_non_command_returns_to_ready_before_an_optional_question() -> Non
     assert latest_status(states) is VisualStatus.QUESTION
 
 
+def test_wake_only_shows_readiness_without_a_question_state() -> None:
+    states: list[VisualPresentation] = []
+    controller = VisualStatusController(states.append)
+    controller.on_command_event(
+        ResponseRequest(
+            0, ResponseKind.READY_FOR_COMMAND, ResponseChannel.TEXT_ONLY, language="en"
+        )
+    )
+    assert states[-1] == VisualPresentation(
+        VisualStatus.READY, "I'm listening. Tell me what to do."
+    )
+
+
 def test_non_command_does_not_hide_an_action_still_running() -> None:
     states: list[VisualPresentation] = []
     controller = VisualStatusController(states.append)

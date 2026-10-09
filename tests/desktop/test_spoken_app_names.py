@@ -33,6 +33,34 @@ def _final(segment: int, text: str) -> TranscriptUpdate:
     return TranscriptUpdate(segment, text, TranscriptStatus.FINAL, "en")
 
 
+def test_observed_whisper_spellings_resolve_with_registered_telegram(
+    tmp_path: Path,
+) -> None:
+    _entry(tmp_path, "telegram.desktop", "Telegram")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"telegram.desktop": "telegram"},
+        {"telegram": ("تلگرام", "تلیگرام")},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    for segment, spoken, language in (
+        (0, "Kairin Open Telegram", "en"),
+        (1, "تلیگرام را باز کن", "fa"),
+    ):
+        assert coordinator.observe(
+            TranscriptUpdate(segment, spoken, TranscriptStatus.FINAL, language)
+        ) == (
+            CommandResolution(
+                segment,
+                CommandIntent(CommandKind.OPEN_APP, "telegram"),
+                language=language,
+            ),
+        )
+    assert coordinator.observe(_final(2, "Kairin do not open Telegram")) == (
+        CommandResolution(2, None, language="en"),
+    )
+
+
 def test_catalog_alias_and_approximate_name_require_different_decisions(
     tmp_path: Path,
 ) -> None:

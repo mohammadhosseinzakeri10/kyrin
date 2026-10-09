@@ -9,7 +9,7 @@ from typing import cast
 from kyrin.app.settings import AllowedApp, AppSettings, SttSelection
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 5
 
 
 class SettingsError(ValueError):
@@ -56,21 +56,32 @@ def _string(value: object, location: str) -> str:
 
 
 def _parse_settings(document: object) -> AppSettings:
-    root = _object(
-        document,
-        {
-            "schema_version",
-            "listening_enabled",
-            "start_at_login",
-            "microphone_device_key",
-            "stt",
-            "action_execution_enabled",
-            "allowed_apps",
-        },
-        "settings",
-    )
-    if type(root["schema_version"]) is not int or root["schema_version"] != 1:
+    if (
+        not isinstance(document, dict)
+        or type(document.get("schema_version")) is not int
+    ):
         raise SettingsError("unsupported settings schema version")
+    version = document["schema_version"]
+    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
+        raise SettingsError("unsupported settings schema version")
+    fields = {
+        "schema_version",
+        "listening_enabled",
+        "start_at_login",
+        "microphone_device_key",
+        "stt",
+        "action_execution_enabled",
+        "allowed_apps",
+    }
+    if version >= 2:
+        fields.add("allowed_chat_apps")
+    if version >= 3:
+        fields.add("wake_aliases")
+    if version >= 4:
+        fields.update({"allowed_window_apps", "allowed_close_apps"})
+    if version >= 5:
+        fields.add("system_power_enabled")
+    root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
         microphone = _string(microphone, "microphone_device_key")
@@ -105,6 +116,37 @@ def _parse_settings(document: object) -> AppSettings:
                 _string(item["desktop_id"], f"allowed_apps[{index}].desktop_id"),
             )
         )
+    raw_chat_apps = root["allowed_chat_apps"] if version >= 2 else []
+    if not isinstance(raw_chat_apps, list):
+        raise SettingsError("allowed_chat_apps must be a list")
+    chat_apps = tuple(
+        _string(app_id, f"allowed_chat_apps[{index}]")
+        for index, app_id in enumerate(raw_chat_apps)
+    )
+    raw_wake_aliases = root["wake_aliases"] if version >= 3 else []
+    if not isinstance(raw_wake_aliases, list):
+        raise SettingsError("wake_aliases must be a list")
+    wake_aliases = tuple(
+        _string(alias, f"wake_aliases[{index}]")
+        for index, alias in enumerate(raw_wake_aliases)
+    )
+    window_apps: tuple[str, ...] = ()
+    close_apps: tuple[str, ...] = ()
+    if version >= 4:
+        raw_window_apps = root["allowed_window_apps"]
+        raw_close_apps = root["allowed_close_apps"]
+        if not isinstance(raw_window_apps, list):
+            raise SettingsError("allowed_window_apps must be a list")
+        if not isinstance(raw_close_apps, list):
+            raise SettingsError("allowed_close_apps must be a list")
+        window_apps = tuple(
+            _string(app_id, f"allowed_window_apps[{index}]")
+            for index, app_id in enumerate(raw_window_apps)
+        )
+        close_apps = tuple(
+            _string(app_id, f"allowed_close_apps[{index}]")
+            for index, app_id in enumerate(raw_close_apps)
+        )
     try:
         return AppSettings(
             listening_enabled=_boolean(root["listening_enabled"], "listening_enabled"),
@@ -114,7 +156,16 @@ def _parse_settings(document: object) -> AppSettings:
             action_execution_enabled=_boolean(
                 root["action_execution_enabled"], "action_execution_enabled"
             ),
+            system_power_enabled=(
+                _boolean(root["system_power_enabled"], "system_power_enabled")
+                if version >= 5
+                else False
+            ),
             allowed_apps=tuple(apps),
+            allowed_chat_apps=chat_apps,
+            allowed_window_apps=window_apps,
+            allowed_close_apps=close_apps,
+            wake_aliases=wake_aliases,
         )
     except ValueError as exc:
         raise SettingsError(str(exc)) from exc
@@ -138,10 +189,15 @@ def _document(settings: AppSettings) -> dict[str, object]:
             }
         ),
         "action_execution_enabled": settings.action_execution_enabled,
+        "system_power_enabled": settings.system_power_enabled,
         "allowed_apps": [
             {"app_id": app.app_id, "desktop_id": app.desktop_id}
             for app in settings.allowed_apps
         ],
+        "allowed_chat_apps": list(settings.allowed_chat_apps),
+        "allowed_window_apps": list(settings.allowed_window_apps),
+        "allowed_close_apps": list(settings.allowed_close_apps),
+        "wake_aliases": list(settings.wake_aliases),
     }
 
 

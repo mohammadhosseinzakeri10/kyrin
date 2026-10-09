@@ -4,7 +4,15 @@
 
 For a command such as “open Ali's chat,” conversation history alone cannot establish which app the user is currently using. The `kyrin.desktop.active_app.ActiveAppObserver` contract provides a fresh observation. `None` means the active app is unknown; command understanding should ask the user when that distinction matters.
 
-This integration targets GNOME Shell 50 only. The extension reports the desktop ID of the focused app. It does not read window titles, text, images, files, or the list of open windows. `GnomeShellActiveAppObserver` maps reported desktop IDs to KYRIN's internal app IDs through an explicit mapping. An unrecognized app, no focused app, an unavailable extension, or a D-Bus error produces `None`. Results are not cached; each request makes a new observation.
+This integration targets GNOME Shell 50 only. The extension reports the desktop ID of the focused app. Its `GetActiveWindow` method also reports the focused window PID for the separate, read-only [screen observation](SCREEN_OBSERVATION.md) adapter. It does not read window titles, text, images, or files. `GnomeShellActiveAppObserver` maps reported desktop IDs to KYRIN's internal app IDs through an explicit mapping. An unrecognized app, no focused app, an unavailable extension, or a D-Bus error produces `None`. Results are not cached; each request makes a new observation.
+
+For an explicitly allowed `OPEN_APP` action, `GnomeExistingAppActivator` can ask the same extension to raise an existing window. The extension checks whether the exact registered desktop ID has a window and uses GNOME's `Main.activateWindow` with a fresh display timestamp only in that case. This follows the window path used by Ubuntu Dock and handles a minimized window or another workspace. The result `requested` is not proof of focus: `ActivateOrLaunchExecutor` reads the foreground app again before reporting `CONFIRMED`. An explicit `no_window` falls back to the existing `.desktop` launcher; a missing or uncertain reply never triggers a second launch. The action gate still decides which app KYRIN may control. When the updated extension is not installed, KYRIN keeps the previous launcher behavior. Other desktop environments can implement the same `ExistingAppActivator` contract.
+
+## Existing-window commands
+
+`RESTORE_APP`, `MINIMIZE_APP`, `MAXIMIZE_APP`, `UNMAXIMIZE_APP`, `FULLSCREEN_APP`, `UNFULLSCREEN_APP`, and `CLOSE_APP_WINDOW` have separate settings permissions from `OPEN_APP`. Existing settings migrate with both new permissions disabled. The GNOME extension accepts only an exact registered desktop ID. When an app has multiple windows, it targets the focused window only if that window belongs to the named app; otherwise it asks the user to focus the desired window and repeat the command. This rule also applies to raising an existing app with `OPEN_APP`. Restore never launches a missing app. Unmaximize means returning to normal size and also exits fullscreen if needed. Close sends a normal window close request and never kills a process; the app may keep running in its tray or ask about unsaved work. Full application quit is a separate future action.
+
+`GnomeAppWindowController` receives an opaque window token and checks the state of that exact window before returning success. A sent request alone is not a confirmed result. The extension returns only state flags and the token, never a window title or content. On an unsupported session or when the updated extension has not loaded yet, the window commands are unavailable. This GNOME-specific adapter sits behind `AppWindowController`, so other platforms can implement the same contract without changing command understanding. The control center exposes separate opt-in checkboxes for non-closing window controls and close, scoped to the selected applications.
 
 ## Components
 
@@ -55,6 +63,8 @@ If the current session does not recognize the new extension, logging out and bac
 ```
 
 Switch between several apps during that interval. The output should show the app that actually has focus, followed by its registered name when available; when no app ID can be determined, the diagnostic prints `unknown`. This test does not execute commands.
+
+After updating an already loaded extension, a new GNOME session may be needed before `ActivateExistingApp` appears on D-Bus. A deterministic GJS test covers the extension method without touching the user's desktop. A separate live check must confirm that an already open Telegram window actually moves to the foreground on this GNOME installation.
 
 ### Validation results on 2026-10-05
 

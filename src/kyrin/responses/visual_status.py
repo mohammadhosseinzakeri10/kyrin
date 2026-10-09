@@ -21,6 +21,7 @@ from kyrin.commands.models import (
     CommandEvent,
     CommandKind,
     CommandResolution,
+    ResponseKind,
     ResponseRequest,
 )
 from kyrin.responses.presenter import ResponsePresenter
@@ -135,7 +136,17 @@ class VisualStatusController:
             self._set(VisualStatus.LISTENING, unless_executing=True)
 
     def on_command_event(self, event: CommandEvent) -> None:
-        if isinstance(event, ResponseRequest):
+        if (
+            isinstance(event, ResponseRequest)
+            and event.kind is ResponseKind.READY_FOR_COMMAND
+        ):
+            self._set(
+                VisualStatus.READY,
+                caption=self._presenter.present(event).text,
+                language=event.language,
+                unless_executing=True,
+            )
+        elif isinstance(event, ResponseRequest):
             self._set(
                 VisualStatus.QUESTION,
                 caption=self._presenter.present(event).text,

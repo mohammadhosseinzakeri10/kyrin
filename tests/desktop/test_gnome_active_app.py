@@ -6,7 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
-from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
+from kyrin.desktop.platforms.gnome import (
+    ActiveWindowIdentity,
+    GnomeShellActiveAppObserver,
+)
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 
 
@@ -77,6 +80,26 @@ def test_bus_timeout_is_unknown() -> None:
         assert observer.observe_active_app() is None
 
 
+def test_focused_window_identity_requires_valid_id_and_pid() -> None:
+    observer = GnomeShellActiveAppObserver({})
+    valid = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout='{"type":"su","data":["telegram.desktop",123]}',
+    )
+    invalid = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout='{"type":"su","data":["telegram.desktop",0]}',
+    )
+    with patch(
+        "kyrin.desktop.platforms.gnome.subprocess.run",
+        side_effect=[valid, invalid],
+    ):
+        assert observer.read_active_window_identity() == ActiveWindowIdentity(
+            "telegram.desktop", 123
+        )
+        assert observer.read_active_window_identity() is None
+
+
 def test_invalid_configuration_is_rejected() -> None:
     with pytest.raises(ValueError, match="timeout_s"):
         GnomeShellActiveAppObserver({}, timeout_s=0)
@@ -85,7 +108,9 @@ def test_invalid_configuration_is_rejected() -> None:
 
 
 def test_optional_active_app_endpoint_is_detected_without_reading_focus() -> None:
-    result = subprocess.CompletedProcess(args=[], returncode=0)
+    result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
+        args=[], returncode=0
+    )
     with patch(
         "kyrin.desktop.platforms.gnome.subprocess.run", return_value=result
     ) as run:
