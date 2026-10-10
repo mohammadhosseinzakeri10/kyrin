@@ -8,6 +8,7 @@ from kyrin.system_power.flow import (
     PowerPrompt,
     PowerStage,
     SystemPowerFlow,
+    recognized_power_request,
 )
 
 
@@ -32,6 +33,32 @@ def _wait_for(events: list[PowerPrompt], stage: PowerStage) -> PowerPrompt:
             return matching[-1]
         sleep(0.01)
     raise AssertionError(f"missing {stage} prompt")
+
+
+def test_restart_requires_explicit_computer_scope() -> None:
+    events: list[PowerPrompt] = []
+    flow = SystemPowerFlow(FakeBackend(), events.append, enabled=False)
+
+    for phrase in (
+        "Restart",
+        "KYRIN, please restart",
+        "Restart Telegram",
+        "Restart the browser",
+        "تلگرام را دوباره راه‌اندازی کن",
+        "ریستارت کن",
+    ):
+        assert not flow.on_final_speech(phrase)
+    assert events == []
+
+    for phrase in (
+        "Restart this computer",
+        "Reboot this machine",
+        "این رایانه را دوباره راه‌اندازی کن",
+    ):
+        assert flow.on_final_speech(phrase)
+        assert events[-1].action is PowerAction.RESTART
+        assert events[-1].stage is PowerStage.FAILED
+    assert recognized_power_request("Restart Telegram") is None
 
 
 def test_voice_and_click_share_two_step_flow() -> None:

@@ -143,17 +143,25 @@ class WhisperCppServer:
         raise SpeechToTextError("whisper-server did not start within 30 seconds")
 
     def _request_inference(
-        self, pcm: bytes, language: str, response_format: str
+        self,
+        pcm: bytes,
+        language: str,
+        response_format: str,
+        hints: tuple[str, ...] = (),
     ) -> dict[str, object]:
         if self._process.poll() is not None:
             raise SpeechToTextError("whisper-server stopped unexpectedly")
         boundary = uuid4().hex
         body = bytearray()
-        for name, value in (
+        fields = [
             ("language", language),
             ("response_format", response_format),
             ("no_timestamps", "true"),
-        ):
+        ]
+        if hints:
+            separator = "، " if language == "fa" else ", "
+            fields.append(("prompt", separator.join(hints) + "."))
+        for name, value in fields:
             body.extend(
                 (
                     f"--{boundary}\r\n"
@@ -184,12 +192,25 @@ class WhisperCppServer:
             raise SpeechToTextError("whisper-server returned an invalid response")
         return cast("dict[str, object]", payload)
 
-    def transcribe(self, pcm: bytes, language: str) -> str:
-        return cast(str, self._request_inference(pcm, language, "json")["text"]).strip()
+    def transcribe(
+        self, pcm: bytes, language: str, *, hints: tuple[str, ...] = ()
+    ) -> str:
+        payload = (
+            self._request_inference(pcm, language, "json", hints)
+            if hints
+            else self._request_inference(pcm, language, "json")
+        )
+        return cast(str, payload["text"]).strip()
 
-    def transcribe_auto(self, pcm: bytes) -> WhisperResult:
+    def transcribe_auto(
+        self, pcm: bytes, *, hints: tuple[str, ...] = ()
+    ) -> WhisperResult:
         """Keep the original speech and report a detected language when supplied."""
-        payload = self._request_inference(pcm, "auto", "verbose_json")
+        payload = (
+            self._request_inference(pcm, "auto", "verbose_json", hints)
+            if hints
+            else self._request_inference(pcm, "auto", "verbose_json")
+        )
         detected = payload.get("language")
         code = (
             _LANGUAGE_CODES.get(detected.casefold(), detected.casefold())

@@ -1,0 +1,5 @@
+id,path,language,reference
+safety-en-01,recordings/safety-en-01.wav,en,Close Telegram.
+safety-en-02,recordings/safety-en-02.wav,en,Open browser.
+safety-fa-01,recordings/safety-fa-01.wav,fa,مرورگر را باز کن.
+safety-fa-02,recordings/safety-fa-02.wav,fa,مرورگر را باز نکن.

@@ -22,7 +22,8 @@ DATA_ROOT = PROJECT_ROOT / "datasets" / "stt"
 TEMPLATE = DATA_ROOT / "manifest.template.csv"
 MULTILINGUAL_TEMPLATE = DATA_ROOT / "manifest.multilingual.template.csv"
 GERMAN_TEMPLATE = DATA_ROOT / "manifest.german.template.csv"
-TEMPLATES = (TEMPLATE, MULTILINGUAL_TEMPLATE, GERMAN_TEMPLATE)
+SAFETY_TEMPLATE = DATA_ROOT / "manifest.safety.template.csv"
+TEMPLATES = (TEMPLATE, MULTILINGUAL_TEMPLATE, GERMAN_TEMPLATE, SAFETY_TEMPLATE)
 
 
 def prompt_catalog() -> dict[str, tuple[str, Path]]:
@@ -142,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         TEMPLATE: "manifest.csv",
         MULTILINGUAL_TEMPLATE: "manifest.multilingual.csv",
         GERMAN_TEMPLATE: "manifest.german.csv",
+        SAFETY_TEMPLATE: "manifest.safety.csv",
     }
     manifest = DATA_ROOT / manifest_names[template]
     if all((DATA_ROOT / path).is_file() for path in expected) and not manifest.exists():

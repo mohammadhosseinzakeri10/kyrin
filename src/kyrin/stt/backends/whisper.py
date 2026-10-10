@@ -185,6 +185,7 @@ class WhisperEngine:
             supported_languages=None if language == "auto" else frozenset({language}),
             supports_partial_updates=True,
             supports_language_detection=language == "auto",
+            supports_vocabulary_hints=True,
         )
 
     def open_session(self, options: SpeechToTextOptions) -> WhisperSession:
@@ -209,11 +210,23 @@ class WhisperEngine:
                 raise SpeechToTextError("Whisper engine is closed")
             self._active_sessions += 1
             server = self._server
-            infer: Callable[[bytes, str], str | WhisperResult] = (
-                (lambda pcm, _language: server.transcribe_auto(pcm))
-                if self._language == "auto"
-                else server.transcribe
-            )
+            hints = options.vocabulary_hints
+            if self._language == "auto":
+                infer: Callable[[bytes, str], str | WhisperResult] = (
+                    (lambda pcm, _language: server.transcribe_auto(pcm, hints=hints))
+                    if hints
+                    else (lambda pcm, _language: server.transcribe_auto(pcm))
+                )
+            else:
+                infer = (
+                    (
+                        lambda pcm, language: server.transcribe(
+                            pcm, language, hints=hints
+                        )
+                    )
+                    if hints
+                    else server.transcribe
+                )
         return WhisperSession(
             infer,
             self._language,

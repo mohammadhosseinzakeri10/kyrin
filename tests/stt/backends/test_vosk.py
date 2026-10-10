@@ -104,6 +104,10 @@ def test_cpu_language_and_model_capabilities_are_explicit(
     assert engine.capabilities.supported_languages == frozenset({"fa"})
     assert engine.capabilities.supports_partial_updates
     assert not engine.capabilities.supports_language_detection
+    assert not engine.capabilities.supports_vocabulary_hints
+
+    with pytest.raises(SpeechToTextError, match="vocabulary hints"):
+        engine.open_session(SpeechToTextOptions(vocabulary_hints=("مرورگر",)))
 
     with pytest.raises(DeviceUnavailableError, match="CPU only"):
         engine.open_session(SpeechToTextOptions(device=DevicePreference.GPU))

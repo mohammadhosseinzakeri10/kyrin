@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ _DEVICES = {
     "vosk": frozenset({ComputeDevice.CPU}),
     "whisper": frozenset({ComputeDevice.CPU, ComputeDevice.GPU}),
 }
+_VOSK_NAMED_LANGUAGE = re.compile(r"^vosk-model(?:-small)?-([a-z]{2})(?:-|$)")
 
 
 class ModelLibraryError(ValueError):
@@ -41,6 +43,12 @@ def linux_model_library_path() -> Path:
     if not root.is_absolute():
         root = Path.home() / ".local" / "share"
     return root / "kyrin" / "models" / "stt"
+
+
+def vosk_language_hint(source: Path) -> str | None:
+    """Suggest the language encoded in an official-style Vosk folder name."""
+    match = _VOSK_NAMED_LANGUAGE.match(source.name.lower())
+    return match.group(1) if match else None
 
 
 def _validate_source(source: Path, backend: str) -> None:
@@ -190,8 +198,8 @@ class ModelLibrary:
             for existing in self.list_models():
                 if (
                     existing.backend == backend
-                    and existing.language == language
                     and existing.digest == digest
+                    and (backend == "whisper" or existing.language == language)
                 ):
                     return existing
             name = source.stem if backend == "whisper" else source.name

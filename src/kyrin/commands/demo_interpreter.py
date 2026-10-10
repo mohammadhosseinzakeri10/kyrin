@@ -3,6 +3,7 @@
 import re
 import unicodedata
 from collections.abc import Sequence
+from difflib import SequenceMatcher
 
 from kyrin.commands.app_names import AppNameResolver
 from kyrin.commands.context_resolver import (
@@ -44,6 +45,8 @@ _CHAT_APPS = frozenset({"telegram", "whatsapp"})
 _OPEN_APP_FA = re.compile(r"^(تلگرام|تلیگرام|مرورگر) را باز کن$")
 _OPEN_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(telegram|browser)$")
 _OPEN_NAMED_APP_FA = re.compile(r"^(.+?) را باز کن$")
+_OPEN_APP_SUGGESTION_FA = re.compile(r"^(.+?)(?: را| رو)? باز کن$")
+_UNCERTAIN_OPEN_FA = re.compile(r"^(.+?) (?:را|رو) (.+)$")
 _OPEN_NAMED_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(.+)$")
 _WINDOW_COMMAND_EN = re.compile(
     r"^(restore|show|bring back|minimize|close) (?:the )?(.+?)(?: window)?$"
@@ -124,6 +127,11 @@ class DemoCommandInterpreter:
         if not phrase:
             return WakeOnly() if addressed else NotACommand()
 
+        # A later explicit "do not open" also withdraws a pending app suggestion.
+        # Otherwise a still-pending "yes" could act on the older request.
+        if "باز نکن" in phrase or phrase.startswith(("don't open ", "do not open ")):
+            return DeclinedClarification() if pending is not None else NotACommand()
+
         if isinstance(pending, PendingIntentClarification):
             if phrase in ("no", "cancel", "نه", "خیر", "لغو"):
                 return DeclinedClarification()
@@ -166,10 +174,6 @@ class DemoCommandInterpreter:
                 return ReadyCommand(
                     CommandIntent(CommandKind.OPEN_CHAT, pending.target, app)
                 )
-
-        # Negation cancels the example command; it must never become "open".
-        if "باز نکن" in phrase or phrase.startswith(("don't open ", "do not open ")):
-            return NotACommand()
 
         size_match = _SIZE_COMMAND_EN.fullmatch(phrase)
         if size_match is not None:
@@ -302,7 +306,38 @@ class DemoCommandInterpreter:
                             result.candidates, confirmation=len(result.candidates) == 1
                         )
                     )
+                suggestion = self._app_name_resolver.suggest(match[1])
+                if suggestion.candidates:
+                    return NeedsClarification(
+                        PendingAppClarification(
+                            suggestion.candidates,
+                            confirmation=len(suggestion.candidates) == 1,
+                        )
+                    )
                 return UnrecognizedCommand()
+            # If the case marker is missing or colloquial, a plausible app
+            # name remains a suggestion even when it matches exactly.
+            suggestion_match = _OPEN_APP_SUGGESTION_FA.fullmatch(phrase)
+            if suggestion_match is not None:
+                result = self._app_name_resolver.suggest(suggestion_match[1])
+                if result.candidates:
+                    return NeedsClarification(
+                        PendingAppClarification(
+                            result.candidates, confirmation=len(result.candidates) == 1
+                        )
+                    )
+                return UnrecognizedCommand()
+            # An uncertain operation can request repetition but cannot become
+            # an executable open command through fuzzy matching.
+            uncertain = _UNCERTAIN_OPEN_FA.fullmatch(phrase)
+            if uncertain is not None:
+                operation = uncertain[2]
+                if (
+                    SequenceMatcher(None, operation.replace(" ", ""), "بازکن")
+                    .ratio()
+                    >= 0.60
+                ):
+                    return UnrecognizedCommand()
         else:
             match = _OPEN_APP_FA.fullmatch(phrase) or _OPEN_APP_EN.fullmatch(phrase)
             if match is not None:

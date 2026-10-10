@@ -151,6 +151,10 @@ def test_explicit_cpu_is_used_by_a_dual_device_engine() -> None:
 def test_contract_values_reject_invalid_metadata() -> None:
     with pytest.raises(ValueError, match="language_hint"):
         SpeechToTextOptions(language_hint=" ")
+    with pytest.raises(ValueError, match="vocabulary_hints"):
+        SpeechToTextOptions(vocabulary_hints=(" ",))
+    with pytest.raises(ValueError, match="vocabulary_hints"):
+        SpeechToTextOptions(vocabulary_hints=("name\ncommand",))
     with pytest.raises(ValueError, match="segment_id"):
         TranscriptUpdate(-1, "text", TranscriptStatus.PARTIAL)
     with pytest.raises(ValueError, match="language"):

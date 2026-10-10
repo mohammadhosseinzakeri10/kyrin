@@ -18,6 +18,7 @@ class SpeechToTextCapabilities:
     supported_languages: frozenset[str] | None
     supports_partial_updates: bool
     supports_language_detection: bool
+    supports_vocabulary_hints: bool = False
 
     def __post_init__(self) -> None:
         if not self.supported_devices:

@@ -1,4 +1,51 @@
-# Local speech models
+# Local model assets
+
+## Local command-understanding candidates
+
+The four owner-selected Ollama models were moved from the machine's default
+Ollama store into this repository's **Git-ignored** development store on
+2026-10-09:
+
+```text
+models/local/command-understanding/ollama/
+  blobs/       # content-addressed model weights and supporting assets
+  manifests/   # names/tags and references to the required blobs
+```
+
+Both directories are necessary. Ollama manages the names and shared files;
+do not move individual blob files manually. The store contains precisely the
+four complete tags below, with no unreferenced or partial blobs after import:
+
+| Tag | Ollama model ID | Listed size |
+| --- | --- | ---: |
+| `qwen3.5:4b` | `d8b0f5e9760c` | 3.3 GB |
+| `qwen3.5:9b` | `56671c2ab938` | 6.6 GB |
+| `gemma4:e4b` | `c6eb396dbd59` | 9.6 GB |
+| `gemma4:12b` | `6114515d63c1` | 8.0 GB |
+
+The transfer copied each referenced blob and verified its SHA-256 before
+registering a model. All four appeared in `ollama list` on a separate server
+pointed at the project store and answered a text-only smoke request. Their
+four tags were then removed through `ollama rm` from the default system
+store. The other default-store models were left in place. To inspect or use
+these project copies after a reboot, start a **separate** local server:
+
+```bash
+OLLAMA_MODELS=/mnt/ai_projects/KYRIN/models/local/command-understanding/ollama \
+  OLLAMA_HOST=127.0.0.1:11435 OLLAMA_NO_CLOUD=1 ollama serve
+```
+
+Then, in another terminal:
+
+```bash
+OLLAMA_HOST=127.0.0.1:11435 ollama list
+OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.5:4b
+```
+
+These are evaluation assets. The KYRIN app's model library and live command
+runtime do not yet discover or use them. The dry-run comparison tool and its
+limitations are described in
+[`LOCAL_MODEL_COMPARISON.md`](../docs/commands/LOCAL_MODEL_COMPARISON.md).
 
 This directory keeps development model assets in a predictable place. Model
 weights and archives are intentionally excluded from Git because they are large

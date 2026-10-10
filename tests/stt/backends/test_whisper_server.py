@@ -92,3 +92,38 @@ def test_auto_response_uses_language_code_for_unlisted_language(
     )
     server = object.__new__(whisper_server.WhisperCppServer)
     assert server.transcribe_auto(b"pcm").language == "fr"
+
+
+def test_whisper_request_includes_hints_only_when_supplied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[bytes] = []
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def read(self) -> bytes:
+            return b'{"text":"ok"}'
+
+    class Client:
+        def open(self, request: object, timeout: int) -> Response:
+            assert timeout == 8
+            requests.append(request.data)  # type: ignore[attr-defined]
+            return Response()
+
+    class Process:
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr(whisper_server, "_HTTP", Client())
+    server = object.__new__(whisper_server.WhisperCppServer)
+    server._process = Process()  # type: ignore[assignment]
+    server._port = 12345
+    server.transcribe(bytes(320), "fa")
+    server.transcribe(bytes(320), "fa", hints=("مرورگر", "تلگرام"))
+    assert b'name="prompt"' not in requests[0]
+    assert "مرورگر، تلگرام.".encode() in requests[1]

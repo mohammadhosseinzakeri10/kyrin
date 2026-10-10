@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-09.
+> Updated: 2026-10-10.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -2564,3 +2564,419 @@ but cannot establish that every editor buffer is saved. The adapter uses
 GNOME's normal session methods and does not bypass native prompts or blockers.
 Focused deterministic tests pass; no live system-power action has been run.
 See `docs/actions/SYSTEM_POWER_ACTIONS.md`.
+
+## 75. Semantic command reference cases and proposal contract
+
+The owner approved first defining reference behavior and a replaceable
+command-understanding boundary before choosing a multilingual NLU or local
+translation model. `datasets/commands/semantic_cases.jsonl` now contains
+owner-verified, owner-reported, and designed cases for English, Persian, and
+German. The cases specify desired decisions and structured meanings, including
+negation, ambiguous application names, app-versus-system restart, chat context,
+and ordered steps. They are not audio recordings or measured model results.
+
+`src/kyrin/commands/understanding.py` defines an engine-neutral, proposal-only
+input/output contract. It retains the original text, attributes a source
+language, permits optional STT alternatives, and reports proposed operations,
+unresolved spoken targets, polarity, and categorical uncertainty. A ready
+proposal must be singular, affirmative, and unambiguous. This contract is
+not wired into `LiveCommandRuntime`; the existing `CommandInterpreter`, action
+gate, and separate system-power confirmation behavior are unchanged. Before
+integration, a target/dialogue resolver must map proposals to the existing
+action domain and preserve the safety boundary. See
+`docs/commands/SEMANTIC_UNDERSTANDING_CONTRACT.md`.
+
+## 76. Local command model storage for comparison
+
+The owner selected four offline command-understanding candidates for a
+comparison: `qwen3.5:4b`, `qwen3.5:9b`, `gemma4:e4b`, and `gemma4:12b`.
+They were copied from the machine's default Ollama store into the Git-ignored
+`models/local/command-understanding/ollama/` store. Every referenced blob
+passed a SHA-256 check, all four manifests resolved, and each model answered
+a text-only request through a separate loopback Ollama server. After this
+validation, only these four tags were removed from the default Ollama store;
+the four unrelated tags there remained. The project store has four manifests,
+19 referenced blobs, and no unreferenced or partial files.
+
+This is a local development asset, not application model installation. The
+KYRIN UI and live command runtime do not yet use these models. An initial
+two-case dry-run showed all four could load. A later prompt with its JSON
+schema included was run over 26 text cases; all four still showed errors,
+including unsafe executable proposals. The corpus is small and includes
+designed cases; three non-English Qwen 9B responses were empty, and one
+browser-search reference may conflict with the owner's partial-execution
+preference. These results do not establish a final model ranking. See
+`models/README.md` and
+`docs/commands/LOCAL_MODEL_COMPARISON.md` for restart and benchmark details.
+
+## 77. Speech-language correction and command-model safety review
+
+A full repository audit on 2026-10-09 found 468 passing tests, intact local
+model data, and an incorrect `en` language label on the installed Persian
+Vosk model. Its user-local library metadata was corrected to `fa` without
+changing model weights. The existing active Whisper setting remains `en` on
+GPU with listening disabled; it was not silently changed while desktop
+actions and system-power permissions are enabled. New Whisper imports in the
+Qt Model Library default to `auto`. A standard Vosk folder name now warns on
+an obviously mismatched language code before copying. Reimporting identical
+Whisper weights under another language preference reuses one copy and tells
+the user to edit the active recognition language explicitly. Typing errors in
+the Telegram portal diagnostic were corrected. After these code changes,
+the full suite passed 475 tests, mypy found no issues in 119 source files,
+and Ruff checks passed.
+
+The semantic corpus was expanded with designed negative and app-versus-system
+cases. Three disputed references are retained but excluded from ranking until
+the partial-execution result and chat-target alias rules are defined. The
+benchmark now validates output shape and scope more strictly, records each
+model's full digest, and separately counts unsafe proposals involving system
+power. A 31-case run and an eight-case power-scope run are documented in
+`docs/commands/LOCAL_MODEL_COMPARISON.md`. None of the four models passed the
+additional safety set. In particular, `gemma4:12b` interpreted some requests
+to restart an application as requests to restart the computer. No candidate
+was chosen as a live default, and no command model was connected to actions.
+
+The existing `SystemPowerFlow` now treats a bare `Restart` as ambiguous and
+requires explicit computer scope for the initial restart request. A public
+`recognized_power_request` check on the original text is the required
+independent guard for future model proposals; system actions still need the
+existing separate opt-in permission and two confirmations. English and
+Persian explicit phrases are currently reviewed; other languages need a
+verified recognizer before voice power requests are supported.
+
+An additional ten-case rerun with a stronger app-versus-computer model prompt
+still yielded unsafe system proposals from Qwen 9B and Gemma 12B; Qwen 4B
+abstained more often and produced one invalid response. Prompting alone did
+not solve power scope. The model comparison remains a development diagnostic,
+not a production-quality ranking or approval for live action integration.
+
+## 78. Proposal target resolution and active Whisper language
+
+A pure `SemanticTargetResolver` now sits beside the proposal contract. It
+resolves app phrases against the installed, explicitly allowed catalog only;
+approximate or ambiguous names require clarification. Chat app context uses
+fresh foreground observation or a preceding resolved app-opening step in the
+same proposed plan. It returns no executable `CommandIntent`, performs no
+desktop action, and rejects model-proposed system-power steps from this path.
+The live `DemoCommandInterpreter` remains in use. Focused deterministic tests
+cover exact/fuzzy/unknown/duplicate names, chat context, multi-step proposals,
+negation, ambiguity, and system-power isolation.
+
+At the owner's request, the currently selected user-local multilingual Whisper
+model was changed from `en` to `auto` language detection. The model file, GPU
+device preference, listening-disabled state, and all action permissions were
+preserved. This is a local application setting, not a repository default or
+proof of multilingual command understanding: the live demo interpreter still
+recognizes only its bounded English/Persian grammar. A new app session is
+required to load the saved preference.
+
+## 79. Read-only multilingual decision replay
+
+The active Whisper `auto` setting was exercised on four already consented
+English/Persian WAV clips through the local GPU adapter, without a microphone
+or desktop action. All four detected the expected language. The Persian
+negative clip yielded wording different from its reference, reinforcing that
+detected language alone does not validate intent.
+
+An untrusted-JSON decoder now maps local command-model responses into the
+engine-neutral proposal contract, rejecting contradictory and malformed
+outputs. The benchmark calls this same decoder. A separate replay diagnostic
+applies the decoder and proposal-only target resolver to saved model outputs,
+using a fixed allowlisted app catalog and an independent source-text check for
+system-power eligibility. It neither invokes the action gate nor executes
+commands. The 31-case replay had no unsafe resolved proposals, but the
+separate eight-case scope replay found one: `gemma4:12b` proposed opening
+Telegram for a Persian request to restart Telegram. This wrong operation
+passed target lookup. Four actual Whisper transcripts were also compared
+against all four local models; the two open requests resolved correctly, while
+two models had one invalid/empty response each on negative requests. These
+small sets do not justify choosing a live model. The isolated Ollama server
+was stopped after evaluation. German is represented only by text examples,
+not a verified recording. See `docs/commands/LOCAL_MODEL_COMPARISON.md`.
+
+## 80. Independent source-operation verification in proposal replay
+
+The next read-only command-safety boundary compares each proposed operation
+and its order with independent evidence in the original text, before app-name
+resolution. The initial replaceable rule profile covers explicit English and
+Persian phrasing only. Negation, unsupported actions, uncertain alternatives,
+and uncovered languages clarify; system-power operations remain in their
+separate source-text recognizer and confirmation flow. Nothing in this boundary
+is connected to live desktop execution.
+
+Replaying the previously saved 31-case text set and eight-case app/system
+scope set removed the one earlier unsafe *resolved* proposal: the Persian
+request to restart Telegram can no longer be accepted as opening it. The four
+saved Whisper transcripts still yielded two correct resolved open requests
+per model. This is a small, partly designed corpus, not production accuracy.
+Importantly, the operation check does not yet prove that the proposed app or
+chat target appeared in the source. A focused test demonstrates that a wrong
+but allowlisted target can still resolve. Source-to-target grounding and
+broader language validation are required before live model integration.
+
+## 81. Source-to-target grounding in proposal replay
+
+The proposal-only replay now checks that each resolved app target and chat name
+is grounded in the original utterance. A wrong but allowlisted application
+can no longer pass merely because the proposed operation was correct. The
+source app must uniquely match the registered alias catalog; the chat name
+must match the source words after limited Unicode normalization. Explicit
+chat-app wording, multi-step alignment, and alternative transcripts are also
+checked. Ambiguous wording clarifies. This is independent of the local command
+model, but still depends on the STT transcript being faithful to actual speech.
+
+Replays of the same saved 31 text cases, eight scope cases, and four Whisper
+transcripts retained the previously correct proposal counts. Focused tests
+confirm that `open_app: browser` for "Open Telegram" now clarifies. No model
+has been connected to the live command path. Language coverage remains a
+conservative English/Persian subset, and the existing demo interpreter is
+unchanged. See `docs/commands/SEMANTIC_UNDERSTANDING_CONTRACT.md` and
+`docs/commands/LOCAL_MODEL_COMPARISON.md`.
+
+## 82. Paired spoken-reference command audit
+
+A read-only audit now joins four previously consented WAV clips to their
+user-verified spoken references, saved Whisper `auto` transcripts, and saved
+model proposal decisions. The tracked link file contains no audio; WAV files,
+transcripts, and generated reports remain Git-ignored. The audit rejects
+reference, language, or expected-label drift before scoring. It distinguishes
+a correct action, unsafe action, missed action, and non-action or uncertain
+result against what was **spoken**, rather than treating the STT text as truth.
+
+On these four one-speaker clips, each of the four models retained two correct
+positive proposals. Qwen 4B and Gemma 12B returned two correct non-actions;
+Qwen 9B and Gemma E4B returned one correct non-action and one invalid or
+uncertain result each. No unsafe action was observed in this tiny set. A
+synthetic regression case proves that if STT changes "Open Telegram" into
+"Open browser", source-to-target checks can match the mistaken transcript,
+while the spoken-reference audit still records the browser proposal as unsafe.
+No live command, microphone, or model was run in this stage. The remaining
+risk requires broader labeled speech and a separate runtime design decision;
+this audit alone cannot recover words STT failed to recognize.
+
+## 83. Safety-command recordings captured and speaker-verified
+
+A four-item English/Persian prompt template was added for a focused speech
+safety set: close Telegram, open browser, open browser in Persian, and do not
+open browser in Persian. The owner authorized microphone capture. The first
+attempt missed the start cue and was rejected as nearly silent. After the USB
+input level was set to 60%, four 20-second recordings were saved locally under
+Git-ignored `datasets/stt/recordings/`; the manifest is also ignored. The raw
+recordings are preserved. Single-utterance segments were extracted into the
+ignored `recordings/segments/` directory. The owner confirmed saying each of
+the four template sentences and intentionally repeating them. One complete
+utterance per prompt is selected in the local manifest. Local Whisper `small`
+on GPU returned exact normalized English text for `Close Telegram` and `Open
+browser`; Persian results were `مرورگی را باز کن` and `مارورگره باز نکن` for
+the affirmative and negative browser requests. The four-clip, one-speaker
+character error rate was 5/59 (8.5%). The negative verb remained negative;
+the proposal-only rule pack rejects it as non-executable. The misspelled
+affirmative browser name produces a fuzzy candidate but not an exact app
+match, so the proposal-only boundary would clarify. A separate read-only call
+to the current live `DemoCommandInterpreter` returned actionable close/open
+intents for the two English transcripts, clarification for the Persian
+affirmative, and `NotACommand` for the Persian negative. This was an
+interpreter call only, not a live end-to-end command or executor run. The local report is at
+`datasets/stt/results/whisper-small-gpu-safety-2026-10-10.json` and is
+Git-ignored. No command was executed. More speakers and languages are needed
+before any broader accuracy or safety claim.
+
+## 84. Four-model safety-command speech audit
+
+The four newly verified safety recordings were passed through the local
+Whisper `small` GPU adapter. Each resulting transcript, not the clean spoken
+reference, was sent to the same four isolated Ollama command models used in
+earlier comparisons. Saved proposals were replayed through the strict decoder,
+source-operation check, exact app resolver, and source-target grounder, then
+audited against the owner's verified spoken words. This is a read-only
+development comparison; no command executor or app action was invoked.
+
+All four models produced correct resolved proposals for `Close Telegram` and
+`Open browser`. All missed spoken `مرورگر را باز کن`: Qwen 4B/9B requested
+clarification, while Gemma E4B/12B proposed the browser but the source-target
+grounder rejected the misspelled STT target `مرورگی` as non-exact. For spoken
+`مرورگر را باز نکن`, Whisper retained the negation. Qwen 9B and both Gemma
+models produced `no_action`; Qwen 4B returned an invalid model response that
+failed closed. No unsafe resolved proposal appeared. A combined audit of the
+original four clips and these four clips found four correct actions and one
+missed action per model, with two or three correct no-actions depending on the
+model. Eight one-speaker clips are not sufficient to select a model or claim
+general safety. The isolated local Ollama server was stopped after the run.
+The recorded links are tracked in `datasets/commands/verified_speech_links.jsonl`;
+WAV files and model/audit reports remain Git-ignored.
+
+## 85. Existing spoken app clarification completed for the observed Persian misspelling
+
+The current live `DemoCommandInterpreter` already offered a single fuzzy,
+registered app as an explicit `CONFIRM_APP` question. A deterministic run with
+Whisper's observed `مرورگی را باز کن` confirmed that no action request was
+issued before the next final transcript `بله`; `نه` declined the suggestion.
+The question is sent through the existing text-and-voice response channel.
+Two narrow corrections were made: the generic `browser` display label is
+rendered as `مرورگر` in a Persian confirmation question, and a later explicit
+negative open command now cancels the pending suggestion. Previously a
+negative final had no action but left the old suggestion pending, so a still
+later `بله` could have authorized the older open request. Focused tests use
+the actual saved Persian STT spellings for the positive and negative turns,
+check the action gate, and confirm no stale request remains. The full test
+suite passed (543 tests). No new command model was integrated and no live
+microphone or desktop action was run for this correction.
+
+## 86. Live clarification attempt and recorded-audio replay
+
+A dry-run microphone check of section 85 did not reach the app-name confirmation.
+The diagnostic initially used its CPU default and fell behind the live audio,
+causing an explicit capture/backlog failure. The diagnostic now accepts an
+explicit `--compute-device gpu` for the existing Whisper backend; focused
+parser and engine-injection tests passed. This is a development-tool option,
+not a change to product settings or the selected STT model.
+
+With GPU inference, a short Persian utterance under `--language auto` was
+misclassified as Greek. A subsequent `--language fa` run produced the final
+text `مرور گیر را باسکن`; an intentionally slow repeat was split into several
+short VAD turns and yielded word fragments. No confirmation question, voice
+reply, app action, or desktop execution occurred in those live runs. No audio
+was saved during them. These observations concern this speaker and session;
+they do not establish a general Whisper accuracy rate or a VAD defect.
+
+To isolate the path, a previously authorized, locally ignored recording of
+spoken `مرورگر را باز کن` was replayed at real-time chunk pace through the
+current `LiveSpeechPipeline`, Silero VAD, and Whisper `small` GPU with Persian
+selected. One speech start, one pause, and the final `مرورگی را باز کن` were
+observed. Deterministic command tests show that this text asks for explicit
+browser confirmation, and `بله` or `نه` then authorizes or declines the
+suggestion. No command was executed during replay. Live microphone validation
+of the complete question-and-answer exchange is still open. The next focused
+check should observe the live STT final before testing that exchange; avoid
+repeating app execution until the question actually appears.
+
+In the next owner-approved live dry run, the USB microphone at 48 kHz and
+Whisper `small` GPU with `--language fa` received complete speech turns.
+The first final was `مورورگیر را باسکو`; two later finals were
+`مرورگیار روباسکن` and `مورورگیر را باسکن`. The demo interpreter classified
+each as `NotACommand`, so there was no clarification question or action.
+The microphone was stopped cleanly. These observations point to unstable
+recognition of both the app name and the operation in this session; they do
+not justify silently correcting an uncertain operation into an executable
+open command. A product decision is still needed on how command-like but
+unrecognized speech should request repetition or clarification without
+turning ordinary speech or a missed negation into an action.
+
+The USB source was then found at 36% input volume, compared with 60% during
+the earlier successful recording. With the owner's prior authorization for
+this input setting, a second dry run temporarily used 60% and restored 36%
+afterward. The two final transcripts were `مورور جره باز کن` and
+`مرور جار را باز کن.` Both received the existing Persian repeat-command
+response and no action; the first lacked the expected `را` pattern, while the
+second app-name spelling fell below the registered-name proposal threshold.
+The action verb was clearer at 60%, but two samples do not prove volume alone
+caused the difference. No clarification confirmation or browser launch was
+tested. A safer next design would generate non-executable app suggestions for
+credible command-shaped text, retain explicit verbal confirmation, and keep
+uncertain or negative operations from becoming actions. That behavior needs
+owner approval and focused safety cases before implementation.
+
+## 87. Candidate-only recovery for observed spoken app names
+
+The owner approved a narrow recovery step after the live findings in section
+86. `AppNameResolver.resolve()` retains its original stricter suggestion
+threshold for normal lookups. A separate `suggest()` operation now tolerates
+weaker, longer names and spacing differences, but returns candidates only;
+it never marks them exact. The demo interpreter uses this only after a clear
+Persian `باز کن` phrase, including a missing or colloquial case marker, and
+asks for explicit confirmation before any action. Observed live forms such as
+`مرور جار را باز کن` and `مورور جره باز کن` now lead to the browser question.
+An uncertain verb such as `مورورگیر را باسکو` can request repetition but
+cannot become an open action. An explicit negative command cancels a pending
+question, so a later `بله` cannot approve it. The model-neutral semantic
+proposal/grounding boundary remains separate and no language model was
+connected to the live runtime.
+
+Focused tests cover these paths and stale catalog-name behavior. A wider
+commands/desktop/runtime/app run had 300 passing tests and two local socket
+failures under the sandbox; those two passed on rerun with local socket access.
+The affected source passes Ruff and Mypy. The new behavior has not yet been
+validated in a fresh live microphone question-and-answer run.
+
+## 88. Follow-up live microphone check of candidate-only recovery
+
+The owner approved a live dry run of section 87. The first diagnostic launch
+used a stale PortAudio device index 23 and stopped without capturing speech;
+the USB source had moved to index 22. With the current device and a temporary
+60% input volume, Whisper `small` GPU with Persian selected produced one
+non-command-like final and then `مروریا را باسکن` for the target phrase.
+Because the operation `باز کن` was not recognized, no browser suggestion or
+action was issued. Audio was not saved and the microphone was stopped. The
+USB volume was restored to the 30% value observed immediately before this
+test. A live `بله`/`نه` exchange still has not been validated.
+
+The new text also exposed a response gap: the uncertain-verb repeat path
+required a plausible app-name candidate, but `مروریا` fell below even the
+question-only name threshold. The path now recognizes a command-shaped
+Persian `name را/رو operation` utterance whose operation resembles `باز کن`
+as unrecognized, and requests repetition without opening an app or retaining
+a pending confirmation. Negated `باز نکن` is handled earlier and cannot enter
+this path. Focused tests use both observed uncertain-verb spellings and confirm
+that a later `بله` has no action. Commands/desktop/runtime tests passed (187);
+the affected code passes Ruff and Mypy. This change does not improve the
+underlying Whisper transcript or establish broad Persian speech accuracy.
+
+## 89. USB microphone input-level comparison
+
+The owner approved a bounded three-level check and confirmed reading the same
+Persian phrase `مرورگر را باز کن` once at 30%, 60%, and 100% USB input volume.
+Each 15-second mono 48 kHz WAV was recorded locally under Git-ignored
+`datasets/stt/recordings/gain-comparison-2026-10-10/`. No desktop command was
+executed. The source was 27% immediately before the check and was restored to
+27% afterward. An ephemeral capture script in `/tmp` was used; no product
+microphone behavior or default gain was changed.
+
+Silero VAD identified one speech interval in each file. The cropped speech
+RMS values were -13.3, -16.0, and -16.6 dBFS respectively; the 30% clip had
+19 samples near the digital limit, while the 60% and 100% clips had none.
+These differing amplitudes are not a controlled measurement of microphone
+gain alone: the three utterances were spoken separately and may differ in
+distance or loudness. Whisper `small` GPU with Persian selected missed the
+exact reference at all three levels, both on the VAD crops and on the full
+15-second files. The full-file character edit distances were 7, 6, and 4
+respectively out of a 16-character normalized reference; this tiny apparent
+ordering is insufficient to recommend 100% as a default. The existing
+`large-v3-turbo-q5_0` GPU model was also tried on the three crops and returned
+mixed Latin-script phonetic text, not a better Persian transcription. The
+ignored local report is `datasets/stt/results/mic-gain-comparison-2026-10-10.json`.
+
+The captured speech was not near silence, and 100% did not by itself solve
+the command error. Input volume remains a per-device setting. The next
+technical investigation should concentrate on Persian short-command STT
+behavior and turn context rather than hard-coding an input gain or silently
+relaxing the action gate. This check does not identify the best speech model
+or establish a general accuracy rate.
+
+## 90. Optional STT vocabulary hints: offline feasibility and contract
+
+The owner approved a staged context-aware STT investigation after the gain
+comparison. The pinned local whisper.cpp server accepts a per-request `prompt`.
+On 11 existing Persian recordings with user-provided reference text, a fixed
+four-term vocabulary prompt reduced summed normalized character edit distance
+from 44 to 18; 10 samples improved and one became slightly worse. Both tested
+negative commands preserved their negation. Timings on a warmed GPU server
+were almost identical, but this is not a general latency benchmark. The
+detailed output is in the Git-ignored local result file
+`datasets/stt/results/context-prompt-2026-10-10.json`.
+
+A bounded, optional `vocabulary_hints` field now exists in the backend-neutral
+`SpeechToTextOptions` contract. Whisper forwards it as request context; Vosk
+explicitly rejects unsupported nonempty hints. The Ubuntu product runtime
+does not supply hints by default. Focused tests and a two-file real Whisper
+session check (one positive, one negative) passed without microphone access
+or desktop action. This is a feasibility result, not approval to infer actions
+from approximate text or evidence of general multilingual accuracy. See
+`docs/stt/CONTEXT_VOCABULARY_HINTS.md`.
+
+The owner then confirmed two fresh live test utterances, positive
+`مرورگر را باز کن` followed by negative `مرورگر را باز نکن`, during a
+35-second STT-only microphone run with the four-term hint. Their final
+transcripts were `مورورگر، بوسکن.` and `مورورگر را باز نکن.`. The first
+remained ambiguous; the second retained negation. No audio was stored or
+desktop command executed. Because the hint did not solve the positive live
+case, automatic hint generation/activation in the product remains deferred.

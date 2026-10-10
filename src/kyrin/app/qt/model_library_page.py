@@ -22,6 +22,7 @@ from kyrin.app.model_library import (
     InstalledModel,
     ModelLibrary,
     ModelLibraryError,
+    vosk_language_hint,
 )
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import SttSelection
@@ -77,10 +78,11 @@ class ModelLibraryPage(QWidget):
         import_row.addWidget(self.backend_combo)
         self.language_label = QLabel()
         import_row.addWidget(self.language_label)
-        self.language_edit = QLineEdit("en")
+        self.language_edit = QLineEdit("auto")
         self.language_edit.setAccessibleName("Imported model language code")
         self.language_edit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         import_row.addWidget(self.language_edit)
+        self.backend_combo.currentIndexChanged.connect(self._backend_changed)
         layout.addLayout(import_row)
 
         self.tabs = QTabWidget()
@@ -130,6 +132,13 @@ class ModelLibraryPage(QWidget):
 
     def refresh(self) -> None:
         self._fill_lists()
+
+    def _backend_changed(self) -> None:
+        """Replace only the Whisper auto default when Vosk is chosen."""
+        language = self.language_edit.text().strip()
+        backend = self.backend_combo.currentData()
+        if backend == "vosk" and language == "auto":
+            self.language_edit.setText("en")
 
     def _models(self) -> tuple[InstalledModel, ...]:
         models = self._library.list_models() if self._library is not None else ()
@@ -210,6 +219,9 @@ class ModelLibraryPage(QWidget):
         if not language or any(character.isspace() for character in language):
             self.status.setText(t("models_language_required"))
             return
+        if backend == "vosk" and language == "auto":
+            self.status.setText(t("vosk_language_required"))
+            return
         if backend == "vosk":
             selected = QFileDialog.getExistingDirectory(self, t("vosk_directory"))
         else:
@@ -219,6 +231,13 @@ class ModelLibraryPage(QWidget):
         if not selected:
             return
         source = Path(selected)
+        if (
+            backend == "vosk"
+            and (hint := vosk_language_hint(source)) is not None
+            and hint != language.lower().split("-")[0]
+        ):
+            self.status.setText(t("models_vosk_language_mismatch").format(hint=hint))
+            return
         self._busy = True
         for button in self.import_buttons.values():
             button.setEnabled(False)
@@ -247,7 +266,13 @@ class ModelLibraryPage(QWidget):
         for button in self.import_buttons.values():
             button.setEnabled(True)
         self.refresh()
-        self.status.setText(self._translations.text("models_imported"))
+        if (
+            model.backend == "whisper"
+            and model.language != self.language_edit.text().strip()
+        ):
+            self.status.setText(self._translations.text("models_reused_language"))
+        else:
+            self.status.setText(self._translations.text("models_imported"))
 
     def _import_failed(self, message: str) -> None:
         self._busy = False

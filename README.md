@@ -19,8 +19,8 @@ STT settings, show status, and start or stop listening. Opening it again in the
 same user session activates the existing window. On Ubuntu, Preferences can
 install a per-user desktop launcher and enable or disable login startup.
 The Desktop Actions page can select installed applications for an explicit
-allowlist and enable execution. TTS and model management are not yet available
-in that window.
+allowlist and enable execution. Spoken TTS responses and management of TTS or
+command-understanding models are not yet available in that window.
 The selected black-hole K logo appears in the window and Ubuntu launcher.
 The **Model Library** page lists installed speech models in All, CPU, and GPU
 views and can add a downloaded local model without editing code. A Whisper
@@ -29,7 +29,9 @@ See [model library](docs/app/MODEL_LIBRARY.md).
 
 The current interpreter recognizes a small set of English and Persian example
 commands. It does not provide general multilingual understanding or desktop
-automation. Local Vosk and Whisper models are development assets, not bundled
+automation. Four local Ollama command models are being compared in a text-only
+diagnostic; none is connected to the live command runtime. Local Vosk and
+Whisper models are development assets, not bundled
 defaults. Vosk currently runs on CPU. Whisper can use CPU or an explicitly
 installed CUDA runtime on supported NVIDIA hardware; the same model weights
 are used for both. See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md).
@@ -44,14 +46,14 @@ development environment, inspect the microphone diagnostic options with:
 ```
 
 The diagnostic needs an explicit local STT model and language for speech or
-command modes. Application execution additionally requires `--execute-actions`
+command modes. Whisper runs on CPU by default in this diagnostic; pass
+`--compute-device gpu` with a working GPU-enabled `--whisper-server` to test
+the GPU path. Application execution additionally requires `--execute-actions`
 and an explicit `--launch-app` binding. See
 [live application launch](docs/actions/LIVE_OPEN_APP_INTEGRATION.md) and
 [local models](models/README.md). No microphone audio is saved by the
 diagnostic. See [project context](PROJECT_CONTEXT.md) for confirmed state,
-experiments, and remaining limitations. The two V1 Word guides in `docs/`
-teach the early microphone foundation; some example file paths reflect that
-historical stage rather than the current package layout.
+experiments, and remaining limitations.
 
 For the experimental control window, install the optional desktop dependency
 in a connected development environment, then run:

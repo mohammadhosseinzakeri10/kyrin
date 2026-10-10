@@ -6,6 +6,7 @@ from runpy import run_path
 
 import pytest
 
+from kyrin.stt.device import ComputeDevice
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/audio/check_live_speech.py"
@@ -43,6 +44,30 @@ def test_long_listening_is_explicit_and_keeps_the_short_default() -> None:
         parse_args([*_base_args(), "--seconds", "121"])
     with pytest.raises(SystemExit):
         parse_args([*_base_args(), "--mode", "stt", "--until-stopped"])
+    assert parse_args(_base_args()).compute_device == "cpu"
+    assert (
+        parse_args([*_base_args(), "--compute-device", "gpu"]).compute_device == "gpu"
+    )
+    with pytest.raises(SystemExit):
+        parse_args([*_base_args(), "--stt-backend", "vosk", "--compute-device", "gpu"])
+
+
+def test_vocabulary_hints_are_explicit_and_bounded() -> None:
+    args = parse_args([*_base_args(), "--vocabulary-hint", "مرورگر"])
+    assert args.stt_options.vocabulary_hints == ("مرورگر",)
+    assert parse_args(_base_args()).stt_options.vocabulary_hints == ()
+    with pytest.raises(SystemExit):
+        parse_args([*_base_args(), "--vocabulary-hint", " "])
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                *_base_args(),
+                "--stt-backend",
+                "vosk",
+                "--vocabulary-hint",
+                "مرورگر",
+            ]
+        )
 
 
 def test_manual_stop_closes_controller_and_engine_without_a_timer(
@@ -53,6 +78,7 @@ def test_manual_stop_closes_controller_and_engine_without_a_timer(
     class FakeEngine:
         def __init__(self, *args: object, **kwargs: object) -> None:
             self.closed = False
+            self.compute_device = kwargs["compute_device"]
             engines.append(self)
 
         def close(self) -> None:
@@ -82,7 +108,7 @@ def test_manual_stop_closes_controller_and_engine_without_a_timer(
     monkeypatch.setitem(runtime_globals, "SpeechSessionController", FakeController)
     monkeypatch.setitem(runtime_globals, "Timer", forbidden_timer)
 
-    run(parse_args([*_base_args(), "--until-stopped"]))
+    run(parse_args([*_base_args(), "--until-stopped", "--compute-device", "gpu"]))
 
     output = capsys.readouterr().out
     assert output.count("authorized dry-run request") == 2
@@ -90,3 +116,4 @@ def test_manual_stop_closes_controller_and_engine_without_a_timer(
     assert len(controllers) == len(engines) == 1
     assert controllers[0].stopped
     assert engines[0].closed
+    assert engines[0].compute_device is ComputeDevice.GPU

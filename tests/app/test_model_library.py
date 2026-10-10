@@ -8,6 +8,7 @@ from kyrin.app.model_library import (
     ModelLibrary,
     ModelLibraryError,
     linux_model_library_path,
+    vosk_language_hint,
 )
 from kyrin.stt.device import ComputeDevice
 
@@ -28,6 +29,27 @@ def test_whisper_model_is_one_copy_in_both_device_views(tmp_path: Path) -> None:
     assert cpu.model_path.read_bytes() == source.read_bytes()
     assert cpu.devices == frozenset({ComputeDevice.CPU, ComputeDevice.GPU})
     assert library.list_models() == (cpu,)
+
+
+def test_same_whisper_weights_with_another_language_are_not_copied_twice(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "ggml-small.bin"
+    source.write_bytes(b"lmgg" + b"example weights")
+    library = ModelLibrary(tmp_path / "installed")
+    english = library.import_model(
+        source, backend="whisper", language="en", requested_device=ComputeDevice.CPU
+    )
+
+    detected = library.import_model(
+        source,
+        backend="whisper",
+        language="auto",
+        requested_device=ComputeDevice.GPU,
+    )
+
+    assert detected == english
+    assert len(library.list_models()) == 1
 
 
 def test_vosk_is_cpu_only_and_gpu_import_does_not_create_library(
@@ -51,6 +73,12 @@ def test_vosk_is_cpu_only_and_gpu_import_does_not_create_library(
     )
     assert model.devices == frozenset({ComputeDevice.CPU})
     assert (model.model_path / "am" / "final.mdl").read_bytes() == b"acoustic model"
+
+
+def test_official_vosk_folder_name_suggests_language_without_guessing_others() -> None:
+    assert vosk_language_hint(Path("vosk-model-small-fa-0.42")) == "fa"
+    assert vosk_language_hint(Path("vosk-model-en-us-0.22-lgraph")) == "en"
+    assert vosk_language_hint(Path("renamed-custom-model")) is None
 
 
 def test_invalid_whisper_file_is_rejected_without_copy(tmp_path: Path) -> None:

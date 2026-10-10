@@ -37,11 +37,21 @@ _REQUESTS = {
     "power off": PowerAction.POWER_OFF,
     "shut down": PowerAction.POWER_OFF,
     "shutdown": PowerAction.POWER_OFF,
+    "power off this computer": PowerAction.POWER_OFF,
+    "shut down this computer": PowerAction.POWER_OFF,
     "خاموش کن": PowerAction.POWER_OFF,
-    "restart": PowerAction.RESTART,
-    "reboot": PowerAction.RESTART,
-    "ریستارت کن": PowerAction.RESTART,
-    "راه اندازی مجدد": PowerAction.RESTART,
+    "این رایانه را خاموش کن": PowerAction.POWER_OFF,
+    "سیستم را خاموش کن": PowerAction.POWER_OFF,
+    "restart this computer": PowerAction.RESTART,
+    "restart the computer": PowerAction.RESTART,
+    "restart my computer": PowerAction.RESTART,
+    "restart the system": PowerAction.RESTART,
+    "reboot this computer": PowerAction.RESTART,
+    "reboot the computer": PowerAction.RESTART,
+    "reboot this machine": PowerAction.RESTART,
+    "این رایانه را ریستارت کن": PowerAction.RESTART,
+    "سیستم را ریستارت کن": PowerAction.RESTART,
+    "این رایانه را دوباره راه اندازی کن": PowerAction.RESTART,
     "log out": PowerAction.LOG_OUT,
     "logout": PowerAction.LOG_OUT,
     "خروج از حساب": PowerAction.LOG_OUT,
@@ -54,11 +64,12 @@ _NEGATIVE = frozenset({"no", "cancel", "نه", "لغو", "خیر"})
 
 
 def _normalize(text: str) -> str:
-    text = text.casefold().replace("ي", "ی").replace("ك", "ک")
+    text = text.casefold().replace("ي", "ی").replace("ك", "ک").replace("\u200c", " ")
     return " ".join(re.sub(r"[.,!?؟،؛:]", " ", text).split())
 
 
-def _requested_action(text: str) -> PowerAction | None:
+def recognized_power_request(text: str) -> PowerAction | None:
+    """Recognize an explicit request; model proposals cannot supply this proof."""
     normalized = _normalize(text)
     for prefix in ("kyrin ", "kairin ", "kyreen ", "کایرین "):
         if normalized.startswith(prefix):
@@ -124,7 +135,7 @@ class SystemPowerFlow:
                 return True
             self.respond(pending.request_id, phrase, spoken=True)
             return True
-        action = _requested_action(text)
+        action = recognized_power_request(text)
         if action is None:
             return False
         self.start(action)

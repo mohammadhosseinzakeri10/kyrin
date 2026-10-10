@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 from time import sleep
+from typing import Any
 from uuid import uuid4
 
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
@@ -26,13 +27,16 @@ ZERO = ord("0")
 
 
 def _request(
-    connection: Gio.DBusConnection, method: str, arguments: tuple, timeout_ms: int
-):  # type: ignore[type-arg]
+    connection: Gio.DBusConnection,
+    method: str,
+    arguments: tuple[Any, ...],
+    timeout_ms: int,
+) -> dict[str, Any] | None:
     token = "kyrin_" + uuid4().hex
     sender = connection.get_unique_name().replace(":", "").replace(".", "_")
     path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
     loop = GLib.MainLoop()
-    response: list[tuple[int, dict]] = []  # type: ignore[type-arg]
+    response: list[tuple[int, dict[str, Any]]] = []
 
     def on_response(_connection, _sender, _path, _interface, _signal, parameters):  # type: ignore[no-untyped-def]
         response.append(parameters.unpack())

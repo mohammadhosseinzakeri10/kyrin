@@ -14,7 +14,14 @@ button is stored once and appears in both filtered views. A GPU view entry may
 still say that the GPU runtime is unavailable on this computer. An explicit
 GPU choice is never silently executed on CPU.
 
-The page asks for an engine and a language code before import. It accepts an
+The page asks for an engine and a language code before import. A new Whisper
+import defaults to `auto` for multilingual detection; Vosk defaults to `en`
+and requires the actual language of its selected model. The importer cannot
+infer a Vosk model's language from its weights, so the user must enter the
+correct code. For a standard `vosk-model-...` folder name, the page checks
+its language hint and stops an obviously mismatched import before copying.
+The Speech Recognition form can change the active language
+without copying Whisper weights again. It accepts an
 extracted Vosk model directory with its required acoustic and configuration
 files, or a `whisper.cpp` `.bin` file with the GGML magic value in its on-disk
 little-endian form. Import copies the
@@ -26,11 +33,16 @@ $XDG_DATA_HOME/kyrin/models/stt/<model-id>/
 ```
 
 The import uses a private temporary directory and publishes the model only
-after copying and writing its metadata. A repeated import of the same model
-and language is deduplicated by content. The original user-selected file is
+after copying and writing its metadata. A repeated Vosk import of the same
+model and language is deduplicated by content. Whisper weights are deduplicated
+by content even when requested with a different language preference. The
+original user-selected file is
 not moved or deleted. Models outside this library that are already selected
 in KYRIN remain visible as the current external model; the existing settings
 format and manual path field still work.
+If an existing Whisper copy is reused with a different requested language,
+the page asks the user to set that language in Speech Recognition before
+saving; it does not silently change the current session preference.
 An interrupted import leaves no published model; KYRIN removes its own
 incomplete staging directories at the next app start.
 

@@ -153,8 +153,8 @@ _TEXT: dict[str, dict[str, str]] = {
 }
 
 _APP_NAMES: dict[str, dict[str, str]] = {
-    "fa": {"telegram": "تلگرام", "whatsapp": "واتساپ"},
-    "en": {"telegram": "Telegram", "whatsapp": "WhatsApp"},
+    "fa": {"telegram": "تلگرام", "whatsapp": "واتساپ", "browser": "مرورگر"},
+    "en": {"telegram": "Telegram", "whatsapp": "WhatsApp", "browser": "browser"},
 }
 
 
@@ -233,7 +233,8 @@ class ResponsePresenter:
         if event.kind is ResponseKind.REPEAT_COMMAND:
             return messages[event.kind.value]
         if event.kind in (ResponseKind.CONFIRM_APP, ResponseKind.CHOOSE_APP_OR_CHAT):
-            return messages[event.kind.value].format(target=event.target)
+            target = _APP_NAMES[language].get(event.target or "", event.target)
+            return messages[event.kind.value].format(target=target)
         if event.kind is ResponseKind.CHOOSE_APP:
             if len(set(event.app_candidates)) == 1:
                 return messages["choose_app_duplicate"].format(

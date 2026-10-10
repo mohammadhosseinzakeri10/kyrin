@@ -5,6 +5,12 @@ settings migrate to schema 5 with `system_power_enabled = false`. The global
 action switch and the separate system-power permission must both be enabled.
 No model, microphone, or desktop application allowlist is needed to use the
 four on-screen request buttons. Spoken requests require an active STT session.
+The initial spoken restart request now needs an explicit computer target,
+such as `Restart this computer` or `این رایانه را دوباره راه‌اندازی کن`.
+Bare `Restart` is ambiguous and does not begin a system-power flow; `Restart
+Telegram` also cannot be treated as a computer restart. The reviewed phrase
+recognizer is separate from any future language-model proposal. A new language
+needs its own verified recognition path before voice power control is enabled.
 
 `SystemPowerFlow` owns one pending request with a 45-second deadline. Only a
 final transcript can start or advance it. A pending request consumes unrelated

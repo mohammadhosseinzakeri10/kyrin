@@ -18,3 +18,7 @@ class SpokenAppMatch:
 
 class AppNameResolver(Protocol):
     def resolve(self, spoken_name: str) -> SpokenAppMatch: ...
+
+    def suggest(self, spoken_name: str) -> SpokenAppMatch:
+        """Find possible names for a confirmation question, never an action."""
+        ...

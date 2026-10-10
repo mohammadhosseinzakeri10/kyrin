@@ -153,6 +153,10 @@ class VoskEngine:
         self._active_sessions = 0
 
     def open_session(self, options: SpeechToTextOptions) -> VoskSession:
+        if options.vocabulary_hints:
+            raise SpeechToTextError(
+                "this Vosk adapter does not support vocabulary hints"
+            )
         if options.device is DevicePreference.GPU:
             raise DeviceUnavailableError("this Vosk adapter supports CPU only")
         if options.language_hint is not None:

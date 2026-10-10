@@ -11,6 +11,7 @@ from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
     CommandResolution,
+    ResponseChannel,
     ResponseKind,
     ResponseRequest,
 )
@@ -129,6 +130,140 @@ def test_rejected_suggestion_never_becomes_an_action(tmp_path: Path) -> None:
     assert coordinator.observe(_final(2, "yes")) == (
         CommandResolution(2, None, language="en"),
     )
+
+
+def test_observed_persian_browser_spelling_asks_before_action(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"browser"})))
+    first = coordinator.observe(
+        TranscriptUpdate(0, "مرورگی را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert first[0] == CommandResolution(0, None, language="fa")
+    assert gate.observe(first[0]) is None
+    assert isinstance(first[1], ResponseRequest)
+    assert first[1].kind is ResponseKind.CONFIRM_APP
+    assert first[1].channel is ResponseChannel.TEXT_AND_VOICE
+    assert ResponsePresenter("fa").present(first[1]).text == (
+        "منظورتان برنامهٔ مرورگر است؟"
+    )
+
+    accepted = coordinator.observe(
+        TranscriptUpdate(1, "بله", TranscriptStatus.FINAL, "fa")
+    )
+    assert accepted == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_APP, "browser"), language="fa"
+        ),
+    )
+    assert isinstance(gate.observe(accepted[0]), ActionRequest)
+
+
+def test_negative_reply_cancels_stale_persian_app_confirmation(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"browser"})))
+    coordinator.observe(
+        TranscriptUpdate(0, "مرورگی را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    cancelled = coordinator.observe(
+        TranscriptUpdate(1, "مارورگره باز نکن", TranscriptStatus.FINAL, "fa")
+    )
+    assert cancelled == (CommandResolution(1, None, language="fa"),)
+    assert gate.observe(cancelled[0]) is None
+    assert coordinator.pending_clarification is None
+    later_yes = coordinator.observe(
+        TranscriptUpdate(2, "بله", TranscriptStatus.FINAL, "fa")
+    )
+    assert later_yes == (CommandResolution(2, None, language="fa"),)
+    assert gate.observe(later_yes[0]) is None
+
+
+def test_live_persian_name_variants_only_suggest_browser(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"browser"})))
+    for heard in ("مرور جار را باز کن", "مورور جره باز کن"):
+        name = heard.removesuffix(" باز کن").removesuffix(" را")
+        assert resolver.resolve(name).candidates == ()
+        assert resolver.suggest(name).candidates
+        coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+        proposed = coordinator.observe(
+            TranscriptUpdate(0, heard, TranscriptStatus.FINAL, "fa")
+        )
+        assert proposed[0] == CommandResolution(0, None, language="fa")
+        assert gate.observe(proposed[0]) is None
+        assert isinstance(proposed[1], ResponseRequest)
+        assert proposed[1].kind is ResponseKind.CONFIRM_APP
+        assert ResponsePresenter("fa").present(proposed[1]).text == (
+            "منظورتان برنامهٔ مرورگر است؟"
+        )
+        declined = coordinator.observe(
+            TranscriptUpdate(1, "نه", TranscriptStatus.FINAL, "fa")
+        )
+        assert declined == (CommandResolution(1, None, language="fa"),)
+        assert gate.observe(declined[0]) is None
+
+
+def test_uncertain_persian_verb_only_requests_repetition(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"browser"})))
+    for stream_id, heard in enumerate(("مورورگیر را باسکو", "مروریا را باسکن")):
+        events = coordinator.observe(
+            TranscriptUpdate(0, heard, TranscriptStatus.FINAL, "fa")
+        )
+        assert events[0] == CommandResolution(
+            0, None, stream_id=stream_id, language="fa"
+        )
+        assert gate.observe(events[0]) is None
+        assert isinstance(events[1], ResponseRequest)
+        assert events[1].kind is ResponseKind.REPEAT_COMMAND
+        assert coordinator.pending_clarification is None
+        coordinator.start_new_stream()
+    assert coordinator.observe(
+        TranscriptUpdate(0, "بله", TranscriptStatus.FINAL, "fa")
+    ) == (CommandResolution(0, None, stream_id=2, language="fa"),)
+
+
+def test_negative_persian_open_never_becomes_suggestion(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    coordinator.observe(
+        TranscriptUpdate(0, "مرور جار را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert coordinator.pending_clarification is not None
+    assert coordinator.observe(
+        TranscriptUpdate(1, "مرور جار را باز نکن", TranscriptStatus.FINAL, "fa")
+    ) == (CommandResolution(1, None, language="fa"),)
+    assert coordinator.pending_clarification is None
+    assert coordinator.observe(
+        TranscriptUpdate(2, "بله", TranscriptStatus.FINAL, "fa")
+    ) == (CommandResolution(2, None, language="fa"),)
 
 
 def test_partial_match_and_negation_never_authorize_an_action(tmp_path: Path) -> None:

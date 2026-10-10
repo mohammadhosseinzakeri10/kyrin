@@ -25,7 +25,21 @@ class SpeechToTextOptions:
 
     device: DevicePreference = DevicePreference.AUTO
     language_hint: str | None = None
+    vocabulary_hints: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.language_hint is not None and not self.language_hint.strip():
             raise ValueError("language_hint must not be empty")
+        if (
+            not isinstance(self.vocabulary_hints, tuple)
+            or len(self.vocabulary_hints) > 16
+            or any(
+                not isinstance(hint, str)
+                or not hint.strip()
+                or len(hint) > 64
+                or "\r" in hint
+                or "\n" in hint
+                for hint in self.vocabulary_hints
+            )
+        ):
+            raise ValueError("vocabulary_hints must contain at most 16 short terms")

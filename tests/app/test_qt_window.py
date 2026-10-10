@@ -20,6 +20,7 @@ from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
 from kyrin.app.events import SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
+from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.translations import ENGLISH, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
 from kyrin.app.settings import AppSettings, SttSelection
@@ -272,6 +273,12 @@ def test_model_library_gpu_import_appears_in_both_views_and_can_be_selected(
     try:
         page = window.models_page
         assert page.tabs.currentIndex() == 0
+        assert page.language_edit.text() == "auto"
+        page.backend_combo.setCurrentIndex(page.backend_combo.findData("vosk"))
+        assert page.language_edit.text() == "en"
+        page.backend_combo.setCurrentIndex(page.backend_combo.findData("whisper"))
+        assert page.language_edit.text() == "en"
+        page.language_edit.setText("auto")
         page.tabs.setCurrentIndex(2)
         page.import_buttons[ComputeDevice.GPU].click()
         _pump_until(
@@ -291,14 +298,43 @@ def test_model_library_gpu_import_appears_in_both_views_and_can_be_selected(
         assert saved is not None
         assert saved.model_path == library.list_models()[0].model_path
         assert saved.device is DevicePreference.GPU
+        assert saved.language == "auto"
     finally:
         window._timer.stop()
         window.deleteLater()
         application.processEvents()
 
 
+def test_vosk_import_rejects_mismatched_folder_language_before_copy(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "vosk-model-small-fa-0.42"
+    source.mkdir()
+    library = ModelLibrary(tmp_path / "library")
+    page = ModelLibraryPage(
+        library,
+        UiTranslations(tmp_path),
+        cpu_runtime_available=True,
+        gpu_runtime_available=False,
+        current_selection=None,
+    )
+    monkeypatch.setattr(
+        "kyrin.app.qt.model_library_page.QFileDialog.getExistingDirectory",
+        lambda *args: str(source),
+    )
+    try:
+        page.backend_combo.setCurrentIndex(page.backend_combo.findData("vosk"))
+        assert page.language_edit.text() == "en"
+        page._start_import(ComputeDevice.CPU)
+        assert "fa" in page.status.text()
+        assert not library.root.exists()
+    finally:
+        page.deleteLater()
+        application.processEvents()
+
+
 def test_gpu_model_stays_visible_when_gpu_runtime_is_missing(
-    application: QApplication, tmp_path: Path
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "ggml-example.bin"
     source.write_bytes(b"lmgg" + b"example weights")
@@ -320,10 +356,20 @@ def test_gpu_model_stays_visible_when_gpu_runtime_is_missing(
         model_library=library,
         ui_translations=UiTranslations(tmp_path),
     )
+    monkeypatch.setattr(
+        "kyrin.app.qt.model_library_page.QFileDialog.getOpenFileName",
+        lambda *args: (str(source), ""),
+    )
     try:
         page = window.models_page
         page.tabs.setCurrentIndex(2)
         assert page.lists[2].count() == 1
+        page.import_buttons[ComputeDevice.GPU].click()
+        _pump_until(
+            application,
+            lambda: page.status.text() == ENGLISH["models_reused_language"],
+        )
+        assert len(library.list_models()) == 1
         assert ENGLISH["models_gpu_unavailable"] in page.lists[2].item(0).text()
         page.lists[2].setCurrentRow(0)
         page.use_button.click()

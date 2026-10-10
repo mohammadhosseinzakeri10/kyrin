@@ -59,6 +59,15 @@ class CatalogSpokenAppResolver:
         self._names = names
 
     def resolve(self, spoken_name: str) -> SpokenAppMatch:
+        return self._match(spoken_name, allow_weak_suggestion=False)
+
+    def suggest(self, spoken_name: str) -> SpokenAppMatch:
+        """Allow weaker names only as candidates for an explicit question."""
+        return self._match(spoken_name, allow_weak_suggestion=True)
+
+    def _match(
+        self, spoken_name: str, *, allow_weak_suggestion: bool
+    ) -> SpokenAppMatch:
         name = _normalize(spoken_name)
         if not name:
             return SpokenAppMatch()
@@ -70,28 +79,44 @@ class CatalogSpokenAppResolver:
         if exact:
             return SpokenAppMatch(exact, exact=True)
 
-        scores = sorted(
-            [
+        scores: list[tuple[float, SpokenAppCandidate]] = []
+        for candidate, spellings in self._names.values():
+            score = max(
                 (
+                    SequenceMatcher(None, name, spelling).ratio()
+                    for spelling in spellings
+                    if spelling
+                ),
+                default=0.0,
+            )
+            if allow_weak_suggestion:
+                compact_name = name.replace(" ", "")
+                score = max(
+                    score,
                     max(
                         (
-                            SequenceMatcher(None, name, spelling).ratio()
+                            SequenceMatcher(
+                                None, compact_name, spelling.replace(" ", "")
+                            ).ratio()
                             for spelling in spellings
                             if spelling
                         ),
                         default=0.0,
                     ),
-                    candidate,
                 )
-                for candidate, spellings in self._names.values()
-            ],
-            key=lambda item: (-item[0], item[1].app_id),
-        )
+            scores.append((score, candidate))
+        scores.sort(key=lambda item: (-item[0], item[1].app_id))
         if not scores:
             return SpokenAppMatch()
         best = scores[0][0]
-        # Conservative proposal threshold; never authorizes an action by itself.
-        if best < 0.82:
+        # Longer, speech-split names can be suggested at a lower score. Fuzzy
+        # matches never authorize an action: the interpreter must ask first.
+        proposal_threshold = (
+            0.70
+            if allow_weak_suggestion and len(name.replace(" ", "")) >= 5
+            else 0.82
+        )
+        if best < proposal_threshold:
             return SpokenAppMatch()
         near = tuple(candidate for score, candidate in scores if score >= best - 0.08)
         return SpokenAppMatch(near)

@@ -202,3 +202,33 @@ def test_auto_engine_uses_multilingual_server_result(
     assert session.end_turn()[0].language == "en"
     session.close()
     engine.close()
+
+
+def test_whisper_session_passes_optional_hints_without_changing_other_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class FakeServer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def transcribe(
+            self, pcm: bytes, language: str, *, hints: tuple[str, ...] = ()
+        ) -> str:
+            calls.append((language, hints))
+            return "مرورگر را باز نکن"
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("kyrin.stt.backends.whisper.WhisperCppServer", FakeServer)
+    engine = WhisperEngine("server", "model", language="fa")
+    assert engine.capabilities.supports_vocabulary_hints
+    for hints in (("مرورگر",), ()):
+        session = engine.open_session(SpeechToTextOptions(vocabulary_hints=hints))
+        session.start_turn()
+        assert session.end_turn()[0].text == "مرورگر را باز نکن"
+        session.close()
+    engine.close()
+    assert calls == [("fa", ("مرورگر",)), ("fa", ())]

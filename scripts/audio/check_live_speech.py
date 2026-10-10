@@ -70,6 +70,7 @@ from kyrin.runtime.speech_sessions import (
 from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import SpeechToTextEngine
+from kyrin.stt.device import ComputeDevice, SpeechToTextOptions
 from kyrin.stt.errors import SpeechToTextError
 from kyrin.stt.transcript import TranscriptUpdate
 
@@ -117,7 +118,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--whisper-server", type=Path, help="local whisper.cpp server executable"
     )
     parser.add_argument("--whisper-threads", type=int, default=4)
+    parser.add_argument(
+        "--compute-device",
+        choices=("cpu", "gpu"),
+        default="cpu",
+        help="Whisper inference device; default cpu",
+    )
     parser.add_argument("--language", help="language code of the supplied model")
+    parser.add_argument(
+        "--vocabulary-hint",
+        action="append",
+        default=[],
+        help="optional spoken term for a supported STT backend; repeatable",
+    )
     parser.add_argument(
         "--response-language",
         help="preferred response language; defaults to the model language",
@@ -187,6 +200,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error("Whisper requires --whisper-server")
         if args.whisper_threads <= 0:
             parser.error("--whisper-threads must be positive")
+    if args.compute_device == "gpu" and args.stt_backend != "whisper":
+        parser.error("GPU diagnostic currently requires Whisper")
+    try:
+        args.stt_options = SpeechToTextOptions(
+            vocabulary_hints=tuple(args.vocabulary_hint)
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.vocabulary_hint and args.stt_backend != "whisper":
+        parser.error("vocabulary hints currently require Whisper")
     if (
         args.active_app_binding or args.spoken_app_binding or args.spoken_app_alias
     ) and args.mode != "commands":
@@ -534,6 +557,7 @@ def run(args: argparse.Namespace) -> None:
             args.model_path,
             language=args.language,
             threads=args.whisper_threads,
+            compute_device=ComputeDevice(args.compute_device),
         )
     else:
         engine = VoskEngine(args.model_path, language=args.language)
@@ -566,7 +590,9 @@ def run(args: argparse.Namespace) -> None:
             f"{frames_per_chunk} frames/chunk.",
             flush=True,
         )
-        return LiveSpeechPipeline(guarded_source, audio_format, detector, engine)
+        return LiveSpeechPipeline(
+            guarded_source, audio_format, detector, engine, options=args.stt_options
+        )
 
     controller = SpeechSessionController(create_pipeline, args.recovery_policy)
     start = monotonic()

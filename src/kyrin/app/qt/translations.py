@@ -58,7 +58,7 @@ ENGLISH: dict[str, str] = {
     "models_all": "All models",
     "models_cpu": "CPU models",
     "models_gpu": "GPU models",
-    "models_language": "Language code (for example, en)",
+    "models_language": "Whisper: auto or code; Vosk: model language code",
     "models_import_cpu": "Add model for CPU…",
     "models_import_gpu": "Add model for GPU…",
     "models_use": "Use selected model",
@@ -67,8 +67,15 @@ ENGLISH: dict[str, str] = {
     "models_unavailable": "The model library is unavailable.",
     "models_vosk_cpu": "Vosk currently supports CPU only.",
     "models_language_required": "Enter a language code before adding a model.",
+    "models_vosk_language_mismatch": (
+        "This Vosk folder appears to be for {hint}. Enter {hint} as its language code."
+    ),
     "models_importing": "Adding model to your library…",
     "models_imported": "Model added. Select it and choose Use selected model.",
+    "models_reused_language": (
+        "These Whisper weights are already installed. Select the model, then "
+        "set your preferred language in Speech Recognition before saving."
+    ),
     "models_select_first": "Select a model from this list first.",
     "models_gpu_unavailable": "GPU runtime is not installed for this engine.",
     "models_cpu_unavailable": "CPU runtime is not installed for this engine.",

@@ -92,3 +92,37 @@ also Git-ignored, as is `manifest.german.csv`. General-speech samples from publi
 source, license and item IDs recorded separately from KYRIN commands.
 
 See `docs/stt/STT_EVALUATION_FA.md` for the evaluation command and metrics.
+
+`manifest.safety.template.csv` adds four short English/Persian commands for a
+separate source-to-action safety check: closing versus opening an application,
+the browser target, and a negated browser request. The recording utility knows
+these IDs but does not start the microphone until it is explicitly run after
+consent. The corresponding local `manifest.safety.csv` and recordings are
+Git-ignored. A human must confirm the spoken wording of every accepted clip
+before the reference can be scored; a saved template is not proof of speech.
+
+The owner authorized and recorded all four prompts on 2026-10-10. A first
+near-silent English close attempt was rejected; the owner reported missing its
+start cue. The accepted captures are 20 seconds each, with the USB microphone
+input set to 60%. Full original WAVs remain in `recordings/`. Candidate
+single-utterance crops are in `recordings/segments/`:
+
+| ID | Candidate interval from original | Note |
+| --- | --- | --- |
+| `safety-en-01` | 7.7–10.1 s | Complete first utterance; a second follows |
+| `safety-en-02` | 15.6–18.1 s | One complete utterance |
+| `safety-fa-01` | 15.2–18.1 s | More complete of two candidate utterances |
+| `safety-fa-02` | 13.7–16.9 s | Complete first utterance; later audio reaches file end |
+
+The speaker confirmed saying each prompt and intentionally repeating it. The
+four selected crops above are now listed in the ignored `manifest.safety.csv`,
+with speaker-verified references. Whisper `small` on GPU returned exact
+normalized text for both English crops, `مرورگی را باز کن` for the Persian
+affirmative, and `مارورگره باز نکن` for the Persian negative. Its four-clip
+character error rate was 5/59 (8.5%). The detailed ignored report is
+`results/whisper-small-gpu-safety-2026-10-10.json`. This tiny one-speaker
+sample does not estimate population accuracy. No desktop action was executed.
+In a separate dry interpreter call, the current `DemoCommandInterpreter`
+recognized both English operations, requested clarification for the misspelled
+Persian browser name, and returned no action for the negative Persian text.
+This does not exercise the full live microphone-to-executor path.
