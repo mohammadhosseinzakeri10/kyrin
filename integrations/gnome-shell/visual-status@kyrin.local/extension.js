@@ -82,8 +82,9 @@ export default class KyrinVisualStatusExtension extends Extension {
             style_class: 'kyrin-status-caption',
             x_align: Clutter.ActorAlign.CENTER,
         });
-        this._caption.width = 158;
-        this._caption.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        this._caption.clutter_text.line_wrap = true;
+        this._caption.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        this._caption.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         this._content = new St.BoxLayout({
             vertical: true,
             reactive: true,
@@ -123,6 +124,8 @@ export default class KyrinVisualStatusExtension extends Extension {
         const monitor = Main.layoutManager.primaryMonitor;
         this._actor.set_position(monitor.x + monitor.width - 175, monitor.y + 55);
         Main.layoutManager.addChrome(this._actor, {trackFullscreen: false});
+        this._resizeCaption();
+        this._keepOnMonitor();
         this._closeHoverId = this._closeButton.connect('notify::hover', () => {
             if (this._closeButton.hover)
                 this._closeHint.show();
@@ -215,6 +218,24 @@ export default class KyrinVisualStatusExtension extends Extension {
             this._actor.set_position(...position);
     }
 
+    _resizeCaption() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const [, textWidth] = this._caption.clutter_text.get_preferred_width(-1);
+        const maxWidth = Math.max(112, Math.min(360, monitor.width - 24));
+        // Leave room for the caption's CSS padding and border.
+        this._caption.width = Math.min(maxWidth, Math.max(112, Math.ceil(textWidth) + 14));
+    }
+
+    _keepOnMonitor() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const [, width] = this._actor.get_preferred_width(-1);
+        const [, height] = this._actor.get_preferred_height(width);
+        this._actor.set_position(
+            Math.max(monitor.x, Math.min(this._actor.x, monitor.x + monitor.width - width)),
+            Math.max(monitor.y, Math.min(this._actor.y, monitor.y + monitor.height - height))
+        );
+    }
+
     SetStatus(status) {
         if (STATES[status])
             this.SetPresentation(status, STATES[status][0]);
@@ -224,8 +245,10 @@ export default class KyrinVisualStatusExtension extends Extension {
         const state = STATES[status];
         if (!state)
             return;
-        const visibleCaption = caption.replace(/\s+/g, ' ').trim().slice(0, 160);
+        const visibleCaption = caption.replace(/\s+/g, ' ').trim();
         this._caption.text = visibleCaption || state[0];
+        this._resizeCaption();
+        this._keepOnMonitor();
         this._actor.set_accessible_name(state[1]);
         this._animator.setStatus(status);
     }

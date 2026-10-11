@@ -126,3 +126,9 @@ In a separate dry interpreter call, the current `DemoCommandInterpreter`
 recognized both English operations, requested clarification for the misspelled
 Persian browser name, and returned no action for the negative Persian text.
 This does not exercise the full live microphone-to-executor path.
+
+For new speakers, use `record_command_corpus.py --speaker-id speaker-02`.
+This stores the WAV in a separate ignored directory and does not change any
+reference manifest automatically. The speaker must verify the actual words
+before a unique-ID row and matching verified link enter evaluation. See
+`docs/stt/MULTI_SPEAKER_SAFETY_EVALUATION.md`.

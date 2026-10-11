@@ -76,13 +76,8 @@ class DesktopActionsPage(QWidget):
         layout.addWidget(self.system_power_checkbox)
         self.power_buttons: dict[PowerAction, QPushButton] = {}
         power_row = QHBoxLayout()
-        for action, title in (
-            (PowerAction.POWER_OFF, "Power off…"),
-            (PowerAction.RESTART, "Restart…"),
-            (PowerAction.LOG_OUT, "Log out…"),
-            (PowerAction.SUSPEND, "Suspend…"),
-        ):
-            button = QPushButton(title)
+        for action in PowerAction:
+            button = QPushButton()
             self.power_buttons[action] = button
             power_row.addWidget(button)
         layout.addLayout(power_row)
@@ -188,6 +183,13 @@ class DesktopActionsPage(QWidget):
         self.search.setPlaceholderText(text("actions_search"))
         self.select_visible_button.setText(text("actions_select_visible"))
         self.clear_visible_button.setText(text("actions_clear_visible"))
+        for action, key in (
+            (PowerAction.POWER_OFF, "power_off_button"),
+            (PowerAction.RESTART, "restart_button"),
+            (PowerAction.LOG_OUT, "log_out_button"),
+            (PowerAction.SUSPEND, "suspend_button"),
+        ):
+            self.power_buttons[action].setText(text(key))
         for index in range(self.apps.count()):
             item = self.apps.item(index)
             if item is None:

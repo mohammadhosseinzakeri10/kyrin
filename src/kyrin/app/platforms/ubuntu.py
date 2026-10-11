@@ -1,7 +1,7 @@
 """Build one Ubuntu live session from explicit settings and replaceable adapters."""
 
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
@@ -24,7 +24,7 @@ from kyrin.actions.platforms.telegram import (
 from kyrin.actions.window_control import WindowControlExecutor
 from kyrin.app.controller import RuntimeSession
 from kyrin.app.events import ApplicationEvent, SttDeviceReady
-from kyrin.app.settings import AppSettings, SttSelection
+from kyrin.app.settings import AppSettings, CommandModelSelection, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
 from kyrin.audio.audio_backlog import BacklogNotice
@@ -39,12 +39,17 @@ from kyrin.audio.microphone.devices import (
 from kyrin.audio.playback_guard import PlaybackGuardInput
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
+from kyrin.commands.interpreter import CommandInterpreter
+from kyrin.commands.model_interpreter import ModelAssistedInterpreter
 from kyrin.commands.models import (
     CommandEvent,
     CommandKind,
     ResponseChannel,
     ResponseRequest,
 )
+from kyrin.commands.ollama_engine import OllamaCommandEngine
+from kyrin.commands.ollama_models import installed_ollama_models
+from kyrin.commands.ollama_server import LocalOllamaServer
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.app_activation import ExistingAppActivator
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
@@ -75,6 +80,11 @@ EventSink = Callable[[ApplicationEvent], None]
 ObserverFactory = Callable[[Mapping[str, str], XdgDesktopAppCatalog], ActiveAppObserver]
 ActivatorFactory = Callable[[Mapping[str, str]], ExistingAppActivator]
 WindowControllerFactory = Callable[[Mapping[str, str]], AppWindowController]
+CommandServerFactory = Callable[[CommandModelSelection], AbstractContextManager[str]]
+
+
+def _command_server(selection: CommandModelSelection) -> AbstractContextManager[str]:
+    return LocalOllamaServer(selection.store_path, selection.model)
 
 
 def standard_stt_openers(
@@ -182,6 +192,7 @@ class UbuntuSessionFactory:
         synthesizer: SpeechSynthesizer | None = None,
         power_backend_factory: Callable[[], PowerBackend] = GnomePowerBackend,
         system_power: SystemPowerFlow | None = None,
+        command_server_factory: CommandServerFactory = _command_server,
     ) -> None:
         self._stt_openers = dict(stt_openers)
         self._on_event = on_event
@@ -199,6 +210,7 @@ class UbuntuSessionFactory:
         self._synthesizer = synthesizer
         self._power_backend_factory = power_backend_factory
         self._system_power = system_power
+        self._command_server_factory = command_server_factory
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
@@ -226,16 +238,19 @@ class UbuntuSessionFactory:
             CatalogSpokenAppResolver(
                 self._catalog,
                 platform_ids,
-                aliases={"telegram": ("تلگرام", "تلیگرام")}
-                if "telegram" in platform_ids.values()
-                else None,
+                aliases={
+                    app_id: names
+                    for app_id, names in {
+                        "telegram": ("تلگرام", "تلیگرام"),
+                        "browser": ("مرورگر",),
+                    }.items()
+                    if app_id in platform_ids.values()
+                },
             )
             if platform_ids
             else None
         )
-        coordinator = CommandCoordinator(
-            DemoCommandInterpreter(spoken_names, wake_aliases=settings.wake_aliases)
-        )
+        rules = DemoCommandInterpreter(spoken_names, wake_aliases=settings.wake_aliases)
         chat_enabled = (
             settings.action_execution_enabled
             and "telegram" in settings.allowed_chat_apps
@@ -286,6 +301,7 @@ class UbuntuSessionFactory:
         safe_to_close_engine = True
         speaker: ResponseSpeaker | None = None
         power_flow: SystemPowerFlow | None = None
+        command_server: AbstractContextManager[str] | None = None
         try:
             if (
                 selection.device is DevicePreference.GPU
@@ -294,6 +310,33 @@ class UbuntuSessionFactory:
                 raise DeviceUnavailableError(
                     "the selected STT model and backend cannot run on GPU"
                 )
+            interpreter: CommandInterpreter = rules
+            command_selection = settings.command_model
+            if command_selection is not None:
+                if spoken_names is None:
+                    raise ValueError(
+                        "select an allowed installed app before using a command model"
+                    )
+                if command_selection.model not in installed_ollama_models(
+                    command_selection.store_path
+                ):
+                    raise ValueError(
+                        "selected command model is incomplete or unavailable"
+                    )
+                command_server = self._command_server_factory(command_selection)
+                endpoint = command_server.__enter__()
+                interpreter = ModelAssistedInterpreter(
+                    rules,
+                    OllamaCommandEngine(
+                        endpoint, command_selection.model, command_selection.device
+                    ),
+                    spoken_names,
+                    allowed_apps=frozenset(installed),
+                    supported_chat_apps=frozenset({"telegram"})
+                    if "telegram" in settings.allowed_chat_apps
+                    else frozenset(),
+                )
+            coordinator = CommandCoordinator(interpreter)
             detector = self._detector_factory()
             presenter = ResponsePresenter(selection.language)
             visual = (
@@ -461,6 +504,8 @@ class UbuntuSessionFactory:
             safe_to_close_engine = False
             raise
         finally:
+            if command_server is not None:
+                command_server.__exit__(None, None, None)
             if self._system_power is not None and power_flow is not None:
                 power_flow.cancel()
                 power_flow.set_announcement(None)

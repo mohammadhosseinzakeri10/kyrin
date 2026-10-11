@@ -65,7 +65,7 @@ class GnomeVisualStatusSink:
                         "SetPresentation",
                         "ss",
                         presentation.status.value,
-                        presentation.caption[:160],
+                        presentation.caption,
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

@@ -6,6 +6,7 @@ showing --help. Run it once per prompt ID after the speaker is ready.
 
 import argparse
 import csv
+import re
 import shutil
 import tempfile
 import wave
@@ -24,6 +25,16 @@ MULTILINGUAL_TEMPLATE = DATA_ROOT / "manifest.multilingual.template.csv"
 GERMAN_TEMPLATE = DATA_ROOT / "manifest.german.template.csv"
 SAFETY_TEMPLATE = DATA_ROOT / "manifest.safety.template.csv"
 TEMPLATES = (TEMPLATE, MULTILINGUAL_TEMPLATE, GERMAN_TEMPLATE, SAFETY_TEMPLATE)
+SPEAKER_ID_PATTERN = re.compile(r"speaker-[a-z0-9][a-z0-9_-]{0,31}")
+
+
+def recording_destination(prompt_id: str, speaker_id: str | None) -> Path:
+    """Keep repeat prompts from different speakers in separate local paths."""
+    if speaker_id is None:
+        return DATA_ROOT / "recordings" / f"{prompt_id}.wav"
+    if SPEAKER_ID_PATTERN.fullmatch(speaker_id) is None:
+        raise ValueError("speaker ID must match speaker-[a-z0-9_-] and be short")
+    return DATA_ROOT / "recordings" / "speakers" / speaker_id / f"{prompt_id}.wav"
 
 
 def prompt_catalog() -> dict[str, tuple[str, Path]]:
@@ -45,6 +56,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample-rate", type=int, help="device default if absent")
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--countdown", type=int, default=3)
+    parser.add_argument(
+        "--speaker-id",
+        help="pseudonymous speaker ID, e.g. speaker-02; omitting preserves legacy path",
+    )
     args = parser.parse_args(argv)
     prompt, template = catalog[args.id]
     if not 2 <= args.seconds <= 30:
@@ -54,8 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.sample_rate is not None and args.sample_rate <= 0:
         parser.error("--sample-rate must be positive")
 
-    recordings = DATA_ROOT / "recordings"
-    destination = recordings / f"{args.id}.wav"
+    try:
+        destination = recording_destination(args.id, args.speaker_id)
+    except ValueError as exc:
+        parser.error(str(exc))
+    recordings = destination.parent
     if destination.exists():
         parser.error(
             f"recording already exists and will not be overwritten: {destination}"
@@ -137,18 +155,24 @@ def main(argv: list[str] | None = None) -> int:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
 
-    with template.open(encoding="utf-8", newline="") as source:
-        expected = tuple(row["path"] for row in csv.DictReader(source))
-    manifest_names = {
-        TEMPLATE: "manifest.csv",
-        MULTILINGUAL_TEMPLATE: "manifest.multilingual.csv",
-        GERMAN_TEMPLATE: "manifest.german.csv",
-        SAFETY_TEMPLATE: "manifest.safety.csv",
-    }
-    manifest = DATA_ROOT / manifest_names[template]
-    if all((DATA_ROOT / path).is_file() for path in expected) and not manifest.exists():
-        shutil.copyfile(template, manifest)
-        print(f"همهٔ فایل‌ها آماده‌اند. متن‌های مرجع را در {manifest} بررسی کن.")
+    if args.speaker_id is None:
+        with template.open(encoding="utf-8", newline="") as source:
+            expected = tuple(row["path"] for row in csv.DictReader(source))
+        manifest_names = {
+            TEMPLATE: "manifest.csv",
+            MULTILINGUAL_TEMPLATE: "manifest.multilingual.csv",
+            GERMAN_TEMPLATE: "manifest.german.csv",
+            SAFETY_TEMPLATE: "manifest.safety.csv",
+        }
+        manifest = DATA_ROOT / manifest_names[template]
+        if (
+            all((DATA_ROOT / path).is_file() for path in expected)
+            and not manifest.exists()
+        ):
+            shutil.copyfile(template, manifest)
+            print(f"همهٔ فایل‌ها آماده‌اند. متن‌های مرجع را در {manifest} بررسی کن.")
+    else:
+        print("این ضبط فقط پس از تأیید متنِ واقعاً گفته‌شده وارد مجموعهٔ ارزیابی شود.")
     print(f"ضبط در {destination} ذخیره شد.", flush=True)
     return 0
 

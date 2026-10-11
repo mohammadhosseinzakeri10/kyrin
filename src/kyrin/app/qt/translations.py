@@ -6,6 +6,11 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from string import Formatter
+
+from PySide6.QtCore import QLocale
+
+from kyrin.app.qt.locale_fa import PERSIAN
 
 ENGLISH: dict[str, str] = {
     "window_title": "KYRIN — Control Center",
@@ -13,6 +18,22 @@ ENGLISH: dict[str, str] = {
     "audio": "Audio Input",
     "recognition": "Speech Recognition",
     "models": "Model Library",
+    "command_models": "Command Understanding",
+    "command_models_heading": "Command understanding",
+    "command_models_caption": (
+        "Choose a local language model for commands the fast rules cannot resolve. "
+        "Model output is checked against the original words and action permissions. "
+        "CPU may take much longer than GPU."
+    ),
+    "command_models_rules": "Fast rules only (default)",
+    "command_models_engine": "Engine",
+    "command_models_store": "Local model store",
+    "command_models_device": "Run model on",
+    "command_models_refresh": "Refresh installed models",
+    "command_models_store_title": "Select an Ollama model store",
+    "command_models_found": "{count} complete local models found.",
+    "command_models_missing_store": "Choose an absolute local Ollama model store.",
+    "command_models_choose": "Select an installed command model first.",
     "actions": "Desktop Actions",
     "screen": "Screen Access",
     "preferences": "Preferences",
@@ -134,6 +155,16 @@ ENGLISH: dict[str, str] = {
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",
+    "system_language": "System language",
+    "power_off_button": "Power off…",
+    "restart_button": "Restart…",
+    "log_out_button": "Log out…",
+    "suspend_button": "Suspend…",
+    "cancel_button": "Cancel",
+    "continue_button": "Continue",
+    "confirm_button": "Confirm",
+    "branding_subtitle": "DESKTOP INTELLIGENCE",
+    "branding_footer": "KYRIN  /  V1 CONTROL CENTER",
     "start_at_login": "Start KYRIN when I sign in",
     "apply_startup": "Apply startup setting",
     "startup_saved": "Login startup setting saved.",
@@ -170,61 +201,9 @@ ENGLISH: dict[str, str] = {
     "language_file": "Select a KYRIN language pack",
 }
 
-_OPTIONAL_LEGACY_KEYS = (
-    frozenset(
-        {
-            "actions",
-            "actions_heading",
-            "actions_caption",
-            "enable_actions",
-            "allow_telegram_chats",
-            "allow_window_controls",
-            "allow_window_close",
-            "actions_search",
-            "actions_select_visible",
-            "actions_clear_visible",
-            "actions_selected",
-            "action_select_one",
-            "app_unavailable",
-            "device_actual",
-            "device_actual_pending",
-            "diagnostics_heading",
-            "diagnostics_clear",
-            "diagnostics_decision",
-            "diagnostics_no_command",
-            "diagnostics_reason",
-            "diagnostics_result",
-            "wake_aliases",
-            "speech_language_help",
-            "vosk_language_required",
-            "models",
-            "models_heading",
-            "models_caption",
-            "models_all",
-            "models_cpu",
-            "models_gpu",
-            "models_language",
-            "models_import_cpu",
-            "models_import_gpu",
-            "models_use",
-            "models_empty",
-            "models_external",
-            "models_unavailable",
-            "models_vosk_cpu",
-            "models_language_required",
-            "models_importing",
-            "models_imported",
-            "models_select_first",
-            "models_gpu_unavailable",
-            "models_cpu_unavailable",
-            "models_selected",
-        }
-    )
-    | frozenset(key for key in ENGLISH if key == "screen" or key.startswith("screen_"))
-    | frozenset({"allow_system_power"})
+_LOCALE = re.compile(
+    r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$"
 )
-
-_LOCALE = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
 
 
 class TranslationError(ValueError):
@@ -239,23 +218,27 @@ class UiPreferences:
 class UiTranslations:
     """Install complete JSON catalogs into the user's private config folder."""
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, *, system_locale: str | None = None) -> None:
         if not directory.is_absolute():
             raise ValueError("UI config directory must be absolute")
         self.directory = directory
+        self.system_locale = system_locale or QLocale.system().bcp47Name()
         self.load_error: TranslationError | None = None
         try:
             preferences = self._load_preferences()
-            _, strings = self._catalog(preferences.locale)
+            active_locale = self._resolve_locale(preferences.locale)
+            _, strings = self._catalog(active_locale)
         except TranslationError as error:
             # Keep the damaged file untouched. The English UI can still open,
             # explain the problem, and let the user explicitly save a choice.
             self.load_error = error
             self.preferences = UiPreferences()
             self._strings = ENGLISH
+            self.active_locale = "en"
         else:
             self.preferences = preferences
             self._strings = strings
+            self.active_locale = active_locale
 
     def _load_preferences(self) -> UiPreferences:
         path = self.directory / "ui.json"
@@ -268,9 +251,29 @@ class UiTranslations:
         if not isinstance(data, dict) or set(data) != {"locale"}:
             raise TranslationError("UI preferences have invalid fields")
         locale = data["locale"]
-        if not isinstance(locale, str) or not _LOCALE.fullmatch(locale):
+        if not isinstance(locale, str) or (
+            locale != "system" and not _LOCALE.fullmatch(locale)
+        ):
             raise TranslationError("Invalid UI locale")
         return UiPreferences(locale)
+
+    def _resolve_locale(self, choice: str) -> str:
+        if choice != "system":
+            return choice
+        normalized = self.system_locale.replace("_", "-")
+        if _LOCALE.fullmatch(normalized):
+            parts = normalized.split("-")
+            candidates = [normalized]
+            if len(parts) == 3:
+                candidates.extend(("-".join(parts[:2]), f"{parts[0]}-{parts[2]}"))
+            candidates.append(parts[0])
+            for candidate in dict.fromkeys(candidates):
+                try:
+                    self._catalog(candidate)
+                except TranslationError:
+                    continue
+                return candidate
+        return "en"
 
     def _catalog(self, locale: str) -> tuple[str, dict[str, str]]:
         if locale == "en":
@@ -280,8 +283,19 @@ class UiTranslations:
         path = self.directory / "languages" / f"{locale}.json"
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            if locale == "fa":
+                return "فارسی", {**ENGLISH, **PERSIAN}
+            raise TranslationError(
+                f"Language pack {locale} could not be read"
+            ) from None
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise TranslationError(f"Language pack {locale} could not be read") from exc
+        self._validate_pack(data, locale)
+        return data["name"], {**ENGLISH, **data["strings"]}
+
+    @staticmethod
+    def _validate_pack(data: object, locale: str) -> None:
         if (
             not isinstance(data, dict)
             or set(data) != {"locale", "name", "strings"}
@@ -289,29 +303,61 @@ class UiTranslations:
             or not isinstance(data["name"], str)
             or not data["name"].strip()
             or not isinstance(data["strings"], dict)
+            or not data["strings"]
             or not set(data["strings"]).issubset(ENGLISH)
-            or not set(ENGLISH)
-            .difference(data["strings"])
-            .issubset(_OPTIONAL_LEGACY_KEYS)
-            or not all(
-                isinstance(value, str) and value.strip()
-                for value in data["strings"].values()
-            )
         ):
-            raise TranslationError("Language pack must contain every UI string")
-        return data["name"], {**ENGLISH, **data["strings"]}
+            raise TranslationError("Language pack has invalid fields")
+        formatter = Formatter()
+        for key, value in data["strings"].items():
+            if not isinstance(value, str) or not value.strip():
+                raise TranslationError("Language pack has an empty translation")
+            try:
+                expected = {
+                    field
+                    for _, field, _, _ in formatter.parse(ENGLISH[key])
+                    if field is not None
+                }
+                actual: set[str] = set()
+                for _, field, spec, conversion in formatter.parse(value):
+                    if field is None:
+                        continue
+                    if (
+                        not field
+                        or "." in field
+                        or "[" in field
+                        or "{" in (spec or "")
+                        or "}" in (spec or "")
+                        or conversion is not None
+                    ):
+                        raise TranslationError(
+                            "Language pack has invalid placeholders"
+                        )
+                    actual.add(field)
+            except ValueError as exc:
+                raise TranslationError(
+                    "Language pack has invalid placeholders"
+                ) from exc
+            if actual != expected:
+                raise TranslationError("Language pack placeholders do not match")
 
     def text(self, key: str) -> str:
         return self._strings[key]
 
     def languages(self) -> tuple[tuple[str, str], ...]:
-        languages = [("en", "English")]
+        languages = [
+            ("system", self.text("system_language")),
+            ("en", "English"),
+            ("fa", "فارسی"),
+        ]
         for path in sorted((self.directory / "languages").glob("*.json")):
             try:
                 name, _ = self._catalog(path.stem)
             except TranslationError:
                 continue
-            languages.append((path.stem, name))
+            if path.stem == "fa":
+                languages[2] = ("fa", name)
+            else:
+                languages.append((path.stem, name))
         return tuple(languages)
 
     def import_pack(self, source: Path) -> str:
@@ -328,35 +374,22 @@ class UiTranslations:
             or not _LOCALE.fullmatch(locale)
         ):
             raise TranslationError("Language pack has an invalid locale")
-        # Validate before writing anything.
-        if (
-            set(data) != {"locale", "name", "strings"}
-            or not isinstance(data["name"], str)
-            or not data["name"].strip()
-            or not isinstance(data["strings"], dict)
-            or not set(data["strings"]).issubset(ENGLISH)
-            or not set(ENGLISH)
-            .difference(data["strings"])
-            .issubset(_OPTIONAL_LEGACY_KEYS)
-            or not all(
-                isinstance(value, str) and value.strip()
-                for value in data["strings"].values()
-            )
-        ):
-            raise TranslationError("Language pack must contain every UI string")
+        self._validate_pack(data, locale)
         self._atomic_json(self.directory / "languages" / f"{locale}.json", data)
-        if locale == self.preferences.locale:
+        if locale == self.active_locale:
             self._strings = {**ENGLISH, **data["strings"]}
         return locale
 
     def save(self, preferences: UiPreferences) -> None:
-        _, strings = self._catalog(preferences.locale)
+        active_locale = self._resolve_locale(preferences.locale)
+        _, strings = self._catalog(active_locale)
         self._atomic_json(
             self.directory / "ui.json",
             {"locale": preferences.locale},
         )
         self.preferences = preferences
         self._strings = strings
+        self.active_locale = active_locale
         self.load_error = None
 
     @staticmethod

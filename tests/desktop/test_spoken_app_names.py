@@ -164,6 +164,54 @@ def test_observed_persian_browser_spelling_asks_before_action(tmp_path: Path) ->
     assert isinstance(gate.observe(accepted[0]), ActionRequest)
 
 
+def test_exact_colloquial_case_marker_keeps_name_check_strict(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "Browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    direct = coordinator.observe(
+        TranscriptUpdate(0, "مرورگر رو باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert direct == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_APP, "browser"), language="fa"
+        ),
+    )
+    unclear = coordinator.observe(
+        TranscriptUpdate(1, "مرورگی رو باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert unclear[0] == CommandResolution(1, None, language="fa")
+    assert isinstance(unclear[1], ResponseRequest)
+    assert unclear[1].kind is ResponseKind.CONFIRM_APP
+
+
+def test_new_unclear_command_cancels_older_app_confirmation(tmp_path: Path) -> None:
+    _entry(tmp_path, "browser.desktop", "Browser")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"browser.desktop": "browser"},
+        {"browser": ("مرورگر",)},
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    coordinator.observe(
+        TranscriptUpdate(0, "مرورگی را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert coordinator.pending_clarification is not None
+    unclear = coordinator.observe(
+        TranscriptUpdate(1, "مرورگر رو باسکن", TranscriptStatus.FINAL, "fa")
+    )
+    assert unclear[0] == CommandResolution(1, None, language="fa")
+    assert isinstance(unclear[1], ResponseRequest)
+    assert unclear[1].kind is ResponseKind.REPEAT_COMMAND
+    assert coordinator.pending_clarification is None
+    assert coordinator.observe(
+        TranscriptUpdate(2, "بله", TranscriptStatus.FINAL, "fa")
+    ) == (CommandResolution(2, None, language="fa"),)
+
+
 def test_negative_reply_cancels_stale_persian_app_confirmation(tmp_path: Path) -> None:
     _entry(tmp_path, "browser.desktop", "browser")
     resolver = CatalogSpokenAppResolver(

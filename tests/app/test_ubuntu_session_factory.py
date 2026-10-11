@@ -14,11 +14,23 @@ from kyrin.actions.models import (
     ActionResult,
 )
 from kyrin.app.platforms import ubuntu
-from kyrin.app.settings import AllowedApp, AppSettings, SttSelection
+from kyrin.app.settings import (
+    AllowedApp,
+    AppSettings,
+    CommandModelSelection,
+    SttSelection,
+)
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
 from kyrin.commands.models import CommandKind
+from kyrin.commands.understanding import (
+    MeaningStep,
+    ProposedMeaning,
+    RequestedOperation,
+    UnderstandingResult,
+    UnderstandingStatus,
+)
 from kyrin.desktop.app_activation import ActivationAttempt
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.visual_status import VisualPresentation, VisualStatus
@@ -181,6 +193,102 @@ def test_dry_run_allows_only_configured_app_without_executing(
     assert executor.requests == []
     requests = [event for event in events if isinstance(event, ActionRequest)]
     assert [item.intent.target for item in requests] == ["telegram"]
+
+
+def test_selected_command_model_reaches_live_transcript_without_executing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class PoliteSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(
+                0, "Please open Telegram", TranscriptStatus.FINAL, "en"
+            )
+
+    class FakeServer:
+        def __enter__(self) -> str:
+            return "http://127.0.0.1:11435"
+
+        def __exit__(self, *_exc: object) -> None:
+            pass
+
+    class FakeCommandModel:
+        def __init__(self, endpoint: str, model: str, device: DevicePreference):
+            assert endpoint == "http://127.0.0.1:11435"
+            assert model == "qwen3.5:4b"
+            assert device is DevicePreference.CPU
+
+        def understand(self, source, *, context):  # type: ignore[no-untyped-def]
+            assert source.text == "Please open Telegram"
+            return UnderstandingResult(
+                UnderstandingStatus.READY,
+                (
+                    ProposedMeaning(
+                        (MeaningStep(RequestedOperation.OPEN_APP, "Telegram"),)
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", PoliteSpeechController)
+    monkeypatch.setattr(ubuntu, "OllamaCommandEngine", FakeCommandModel)
+    monkeypatch.setattr(
+        ubuntu, "installed_ollama_models", lambda path: ("qwen3.5:4b",)
+    )
+    events: list[ubuntu.ApplicationEvent] = []
+    executor = RecordingExecutor()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: executor,
+        command_server_factory=lambda selection: FakeServer(),
+    )
+    settings = _settings(
+        tmp_path,
+        command_model=CommandModelSelection(
+            "ollama", "qwen3.5:4b", tmp_path, DevicePreference.CPU
+        ),
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+    assert [
+        event.intent.target for event in events if isinstance(event, ActionRequest)
+    ] == ["telegram"]
+    assert executor.requests == []
+
+
+def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class PersianSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "مرورگر رو باز کن", TranscriptStatus.FINAL, "fa")
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", PersianSpeechController)
+    events: list[ubuntu.ApplicationEvent] = []
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+    )
+    allowed = _settings(
+        tmp_path,
+        allowed_apps=(AllowedApp("browser", "browser.desktop"),),
+    )
+    with factory(allowed) as runtime:
+        runtime.run()
+    assert [
+        event.intent.target for event in events if isinstance(event, ActionRequest)
+    ] == ["browser"]
+
+    events.clear()
+    with factory(_settings(tmp_path)) as runtime:
+        runtime.run()
+    assert not any(isinstance(event, ActionRequest) for event in events)
 
 
 def test_enabled_actions_use_only_exact_registered_allowlist(

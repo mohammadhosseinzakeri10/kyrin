@@ -125,6 +125,10 @@ def main() -> int:
     server = _whisper_server_path("KYRIN_WHISPER_SERVER", "whisper-server")
     gpu_server = _whisper_server_path("KYRIN_WHISPER_GPU_SERVER", "whisper-server-gpu")
     model_library = ModelLibrary(linux_model_library_path())
+    development_command_store = (
+        Path(__file__).resolve().parents[4]
+        / "models/local/command-understanding/ollama"
+    )
     try:
         model_library.cleanup_incomplete_imports()
     except ModelLibraryError as error:
@@ -196,6 +200,9 @@ def main() -> int:
         whisper_server_available=server is not None,
         whisper_gpu_server_available=gpu_server is not None,
         model_library=model_library,
+        suggested_command_store=(
+            development_command_store if development_command_store.is_dir() else None
+        ),
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),
         app_catalog=catalog,

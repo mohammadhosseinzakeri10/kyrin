@@ -212,6 +212,9 @@ class CommandCoordinator:
                 )
             )
         elif isinstance(interpretation, (IncompleteCommand, UnrecognizedCommand)):
+            # A fresh, unclear utterance supersedes any older confirmation.
+            # Otherwise a later "yes" could authorize a stale app suggestion.
+            self._pending = None
             events.append(
                 ResponseRequest(
                     update.segment_id,

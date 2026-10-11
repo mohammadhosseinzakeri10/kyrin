@@ -10,6 +10,10 @@ inspect windows, or execute actions.
 The short caption beneath the animated character describes the current event.
 The controller localizes it before sending it to the GNOME adapter when a
 supported language is selected.
+The caption grows for longer messages, wraps at a screen-bounded width, and
+shrinks again for short states. The extension keeps the resulting character
+inside the primary monitor instead of replacing the end of a message with an
+ellipsis. The visual transport sends the full caption.
 
 | State | Example caption | Meaning |
 | --- | --- | --- |

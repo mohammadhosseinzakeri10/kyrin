@@ -38,3 +38,36 @@ executed. The first command remained ambiguous despite the hint. Earlier
 startup fragments in that timed run were not treated as test sentences.
 Automatic product activation therefore remains deferred; the current
 experiment does not demonstrate reliable live command recognition.
+
+## Paired two-speaker command-safety replay, 2026-10-10
+
+The later 15 verified clips (eight from the original speaker, seven from a
+second speaker) were replayed on the same installed Whisper `small` GPU model
+with and without the **same fixed four hints for every clip**:
+`مرورگر، تلگرام، واتساپ، کایرین`. The comparison CLI now accepts repeated
+`--vocabulary-hint` values and records them in its report. Verified spoken
+references were used only for scoring, never to choose hints. The paired
+reports are Git-ignored under
+`datasets/stt/results/language-candidates-small-{hints-,}two-speakers-2026-10-10.json`.
+No microphone or desktop action was used for the replay.
+
+| Decoding condition | No hints | Four fixed hints | Interpretation |
+| --- | ---: | ---: | --- |
+| Automatic, correct positive proposals across both speakers | 6/10 | 4/10 | Two previously correct English requests from speaker 2 were missed. |
+| Fixed Persian, correct Persian positive proposals | 1/4 | 2/4 | The gain occurred only on speaker 1; speaker 2 stayed at 0/2. |
+| Fixed English, correct English positive proposals | 6/6 | 4/6 | Persian hints degraded two speaker-2 English requests. |
+| Automatic, unsafe proposals on the five negated requests | 0/5 | 0/5 | Small safety sample; abstention does not prove negation comprehension. |
+
+The fixed-Persian sum of normalized character edits improved from 23 to 14
+over seven Persian clips. In automatic mode, Persian edits improved from 64
+to 51, while English edits worsened from 13 to 22. Character error alone
+would hide the loss of executable English commands. The second speaker's
+Persian `مرورگر را باز کن` remained `مورورگر رو باسکن` with hints and still
+produced no intended action. Its negative counterpart remained poorly
+recognized and produced no action; this is a safe abstention, not evidence of
+correct semantic understanding.
+
+This result argues against applying a Persian hint list globally or treating
+language attribution on very short speech as a reliable switch for hints.
+The existing opt-in contract remains available for controlled experiments;
+KYRIN's live default, model selection, and action policy remain unchanged.

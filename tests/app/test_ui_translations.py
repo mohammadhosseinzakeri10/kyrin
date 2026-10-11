@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from kyrin.app.qt.locale_fa import PERSIAN
 from kyrin.app.qt.translations import (
     ENGLISH,
     TranslationError,
@@ -31,7 +32,7 @@ def test_import_and_select_complete_language_pack(tmp_path: Path) -> None:
     assert ("fr", "Français") in restored.languages()
 
 
-def test_incomplete_pack_does_not_replace_installed_pack(tmp_path: Path) -> None:
+def test_partial_pack_falls_back_to_english_per_string(tmp_path: Path) -> None:
     store = UiTranslations(tmp_path / "ui")
     source = tmp_path / "translation.json"
     source.write_text(
@@ -39,10 +40,68 @@ def test_incomplete_pack_does_not_replace_installed_pack(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    with pytest.raises(TranslationError, match="every UI string"):
-        store.import_pack(source)
+    store.import_pack(source)
+    store.save(UiPreferences("fr"))
 
-    assert store.languages() == (("en", "English"),)
+    assert store.text("dashboard") == "X"
+    assert store.text("actions") == ENGLISH["actions"]
+    assert ("fr", "Français") in store.languages()
+
+
+def test_builtin_persian_is_complete_and_right_to_left(tmp_path: Path) -> None:
+    assert set(PERSIAN) == set(ENGLISH)
+    store = UiTranslations(tmp_path / "ui")
+    store.save(UiPreferences("fa"))
+    restored = UiTranslations(tmp_path / "ui")
+    assert restored.preferences.locale == "fa"
+    assert restored.active_locale == "fa"
+    assert restored.text("dashboard") == "داشبورد"
+    assert ("fa", "فارسی") in restored.languages()
+
+
+def test_system_locale_chooses_installed_language_or_english(tmp_path: Path) -> None:
+    persian = UiTranslations(tmp_path / "fa", system_locale="fa_IR")
+    persian.save(UiPreferences("system"))
+    assert UiTranslations(tmp_path / "fa", system_locale="fa_IR").active_locale == "fa"
+    assert UiTranslations(tmp_path / "fa", system_locale="de_DE").active_locale == "en"
+    assert persian.preferences.locale == "system"
+
+
+def test_system_locale_can_match_a_script_pack(tmp_path: Path) -> None:
+    directory = tmp_path / "ui"
+    source = tmp_path / "zh-Hant.json"
+    source.write_text(
+        json.dumps(
+            {
+                "locale": "zh-Hant",
+                "name": "繁體中文",
+                "strings": {"dashboard": "儀表板"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = UiTranslations(directory, system_locale="zh-Hant-TW")
+    store.import_pack(source)
+    store.save(UiPreferences("system"))
+    assert store.active_locale == "zh-Hant"
+    assert store.text("dashboard") == "儀表板"
+
+
+def test_invalid_placeholders_are_rejected_without_writing(tmp_path: Path) -> None:
+    store = UiTranslations(tmp_path / "ui")
+    source = tmp_path / "bad.json"
+    source.write_text(
+        json.dumps(
+            {
+                "locale": "fr",
+                "name": "Français",
+                "strings": {"command_models_found": "{wrong} modèles trouvés"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(TranslationError, match="placeholders"):
+        store.import_pack(source)
     assert not (tmp_path / "ui" / "languages" / "fr.json").exists()
 
 

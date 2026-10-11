@@ -34,6 +34,26 @@ class SttSelection:
 
 
 @dataclass(frozen=True, slots=True)
+class CommandModelSelection:
+    """One local command model; absence keeps the bounded rule interpreter."""
+
+    backend: str
+    model: str
+    store_path: Path
+    device: DevicePreference = DevicePreference.AUTO
+
+    def __post_init__(self) -> None:
+        if self.backend != "ollama":
+            raise ValueError("command model backend is not installed")
+        if not self.model or any(char.isspace() for char in self.model):
+            raise ValueError("command model name must be nonempty")
+        if not self.store_path.is_absolute():
+            raise ValueError("command model store path must be absolute")
+        if not isinstance(self.device, DevicePreference):
+            raise ValueError("command model device must be auto, cpu, or gpu")
+
+
+@dataclass(frozen=True, slots=True)
 class AllowedApp:
     """An explicit Ubuntu desktop-entry binding, not arbitrary shell text."""
 
@@ -66,6 +86,7 @@ class AppSettings:
     start_at_login: bool = True
     microphone_device_key: str | None = None
     stt: SttSelection | None = None
+    command_model: CommandModelSelection | None = None
     action_execution_enabled: bool = False
     system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
@@ -86,6 +107,10 @@ class AppSettings:
             raise ValueError("microphone_device_key must be nonempty or null")
         if self.stt is not None and not isinstance(self.stt, SttSelection):
             raise ValueError("stt must be a model selection or null")
+        if self.command_model is not None and not isinstance(
+            self.command_model, CommandModelSelection
+        ):
+            raise ValueError("command_model must be a model selection or null")
         if type(self.action_execution_enabled) is not bool:
             raise ValueError("action_execution_enabled must be a boolean")
         if type(self.system_power_enabled) is not bool:

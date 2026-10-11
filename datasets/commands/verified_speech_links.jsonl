@@ -1,8 +1,8 @@
-{"case_id":"whisper-en-02","recording_id":"en-02","spoken_reference":"Open Telegram.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"telegram"}]}}
-{"case_id":"whisper-en-03","recording_id":"en-03","spoken_reference":"Do not open Telegram.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"telegram","polarity":"negated"}]}}
-{"case_id":"whisper-fa-02","recording_id":"fa-02","spoken_reference":"تلگرام را باز کن.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"telegram"}]}}
-{"case_id":"whisper-fa-03","recording_id":"fa-03","spoken_reference":"تلگرام را باز نکن.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"telegram","polarity":"negated"}]}}
-{"case_id":"whisper-safety-en-01","recording_id":"safety-en-01","spoken_reference":"Close Telegram.","expected":{"route":"execute","steps":[{"operation":"close_app_window","target":"telegram"}]}}
-{"case_id":"whisper-safety-en-02","recording_id":"safety-en-02","spoken_reference":"Open browser.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"browser"}]}}
-{"case_id":"whisper-safety-fa-01","recording_id":"safety-fa-01","spoken_reference":"مرورگر را باز کن.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"browser"}]}}
-{"case_id":"whisper-safety-fa-02","recording_id":"safety-fa-02","spoken_reference":"مرورگر را باز نکن.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"browser","polarity":"negated"}]}}
+{"case_id":"whisper-en-02","recording_id":"en-02","speaker_id":"speaker-01","spoken_reference":"Open Telegram.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"telegram"}]}}
+{"case_id":"whisper-en-03","recording_id":"en-03","speaker_id":"speaker-01","spoken_reference":"Do not open Telegram.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"telegram","polarity":"negated"}]}}
+{"case_id":"whisper-fa-02","recording_id":"fa-02","speaker_id":"speaker-01","spoken_reference":"تلگرام را باز کن.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"telegram"}]}}
+{"case_id":"whisper-fa-03","recording_id":"fa-03","speaker_id":"speaker-01","spoken_reference":"تلگرام را باز نکن.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"telegram","polarity":"negated"}]}}
+{"case_id":"whisper-safety-en-01","recording_id":"safety-en-01","speaker_id":"speaker-01","spoken_reference":"Close Telegram.","expected":{"route":"execute","steps":[{"operation":"close_app_window","target":"telegram"}]}}
+{"case_id":"whisper-safety-en-02","recording_id":"safety-en-02","speaker_id":"speaker-01","spoken_reference":"Open browser.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"browser"}]}}
+{"case_id":"whisper-safety-fa-01","recording_id":"safety-fa-01","speaker_id":"speaker-01","spoken_reference":"مرورگر را باز کن.","expected":{"route":"execute","steps":[{"operation":"open_app","target":"browser"}]}}
+{"case_id":"whisper-safety-fa-02","recording_id":"safety-fa-02","speaker_id":"speaker-01","spoken_reference":"مرورگر را باز نکن.","expected":{"route":"no_action","steps":[{"operation":"open_app","target":"browser","polarity":"negated"}]}}

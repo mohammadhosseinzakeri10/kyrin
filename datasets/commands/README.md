@@ -41,3 +41,9 @@ The four additional safety recordings cover closing Telegram, opening the
 browser, a Persian browser request, and its negated form. The owner confirmed
 the wording and intentional repetitions. The selected single-utterance crops
 and transcript report are described in `datasets/stt/README.md`.
+
+Each of the eight verified links now carries the same pseudonymous
+`speaker_id`, `speaker-01`. This records the actual one-speaker coverage
+without publishing a personal identity. Additional consented speakers use
+separate local, ignored link files. See
+`docs/stt/MULTI_SPEAKER_SAFETY_EVALUATION.md`.

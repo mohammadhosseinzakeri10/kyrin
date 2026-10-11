@@ -44,7 +44,7 @@ _APPS = {
 _CHAT_APPS = frozenset({"telegram", "whatsapp"})
 _OPEN_APP_FA = re.compile(r"^(تلگرام|تلیگرام|مرورگر) را باز کن$")
 _OPEN_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(telegram|browser)$")
-_OPEN_NAMED_APP_FA = re.compile(r"^(.+?) را باز کن$")
+_OPEN_NAMED_APP_FA = re.compile(r"^(.+?) (?:را|رو) باز کن$")
 _OPEN_APP_SUGGESTION_FA = re.compile(r"^(.+?)(?: را| رو)? باز کن$")
 _UNCERTAIN_OPEN_FA = re.compile(r"^(.+?) (?:را|رو) (.+)$")
 _OPEN_NAMED_APP_EN = re.compile(r"^(?:open|go to) (?:the )?(.+)$")
@@ -315,8 +315,8 @@ class DemoCommandInterpreter:
                         )
                     )
                 return UnrecognizedCommand()
-            # If the case marker is missing or colloquial, a plausible app
-            # name remains a suggestion even when it matches exactly.
+            # Without an explicit case marker, a plausible app name remains
+            # a suggestion even when it matches exactly.
             suggestion_match = _OPEN_APP_SUGGESTION_FA.fullmatch(phrase)
             if suggestion_match is not None:
                 result = self._app_name_resolver.suggest(suggestion_match[1])

@@ -33,6 +33,7 @@ from kyrin.app.model_library import InstalledModel, ModelLibrary
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.branding import LOGO_PATH
+from kyrin.app.qt.command_model_page import CommandModelPage
 from kyrin.app.qt.dashboard import CosmicDashboard
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.screen_access import ScreenAccess
@@ -170,6 +171,7 @@ class ControlWindow(QWidget):
         whisper_server_available: bool,
         whisper_gpu_server_available: bool = False,
         model_library: ModelLibrary | None = None,
+        suggested_command_store: Path | None = None,
         ui_translations: UiTranslations,
         app_catalog: AppPickerCatalog | None = None,
         screen_access: ScreenAccess | None = None,
@@ -226,9 +228,9 @@ class ControlWindow(QWidget):
         brand_row.addWidget(brand)
         brand_row.addStretch()
         side.addLayout(brand_row)
-        subtitle = QLabel("DESKTOP INTELLIGENCE")
-        subtitle.setObjectName("Subtitle")
-        side.addWidget(subtitle)
+        self.subtitle = QLabel()
+        self.subtitle.setObjectName("Subtitle")
+        side.addWidget(self.subtitle)
         side.addSpacing(34)
         self.pages = QStackedWidget()
         self._nav_buttons: dict[str, QPushButton] = {}
@@ -238,6 +240,7 @@ class ControlWindow(QWidget):
                 "audio",
                 "recognition",
                 "models",
+                "command_models",
                 "actions",
                 "screen",
                 "preferences",
@@ -252,9 +255,9 @@ class ControlWindow(QWidget):
             side.addWidget(button)
             self._nav_buttons[key] = button
         side.addStretch()
-        sidebar_footer = QLabel("KYRIN  /  V1 CONTROL CENTER")
-        sidebar_footer.setWordWrap(True)
-        side.addWidget(sidebar_footer)
+        self.sidebar_footer = QLabel()
+        self.sidebar_footer.setWordWrap(True)
+        side.addWidget(self.sidebar_footer)
         shell.addWidget(sidebar)
 
         content = QWidget()
@@ -285,7 +288,7 @@ class ControlWindow(QWidget):
         self.power_continue_button = QPushButton()
         self.power_continue_button.clicked.connect(self._confirm_power)
         power_buttons.addWidget(self.power_continue_button)
-        self.power_cancel_button = QPushButton("Cancel")
+        self.power_cancel_button = QPushButton()
         self.power_cancel_button.clicked.connect(self._cancel_power)
         power_buttons.addWidget(self.power_cancel_button)
         power_layout.addLayout(power_buttons)
@@ -409,6 +412,13 @@ class ControlWindow(QWidget):
         self.models_page.selected.connect(self._select_library_model)
         self.pages.addWidget(self.models_page)
 
+        self.command_model_page = CommandModelPage(
+            ui_translations,
+            current=settings.command_model if settings is not None else None,
+            suggested_store=suggested_command_store,
+        )
+        self.pages.addWidget(self.command_model_page)
+
         self.actions_page = DesktopActionsPage(app_catalog, settings, ui_translations)
         for action, button in self.actions_page.power_buttons.items():
             button.clicked.connect(
@@ -510,7 +520,7 @@ class ControlWindow(QWidget):
 
     def _translate_ui(self) -> None:
         t = self._translations.text
-        language = self._translations.preferences.locale.split("-", 1)[0]
+        language = self._translations.active_locale.split("-", 1)[0]
         self.setLayoutDirection(
             Qt.LayoutDirection.RightToLeft
             if language in {"ar", "fa", "he", "ur"}
@@ -523,6 +533,9 @@ class ControlWindow(QWidget):
         ):
             label.setLayoutDirection(self.layoutDirection())
         self.setWindowTitle(t("window_title"))
+        self.subtitle.setText(t("branding_subtitle"))
+        self.sidebar_footer.setText(t("branding_footer"))
+        self.power_cancel_button.setText(t("cancel_button"))
         for key, button in self._nav_buttons.items():
             button.setText(t(key))
         for key, label in self._labels.items():
@@ -537,6 +550,7 @@ class ControlWindow(QWidget):
         self.actions_page.translate()
         self.screen_access_page.translate()
         self.models_page.translate()
+        self.command_model_page.translate()
         self.save_startup_button.setText(t("apply_startup"))
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device_combo.setItemText(index, t(key))
@@ -592,6 +606,7 @@ class ControlWindow(QWidget):
             self.feedback_label.setText(str(error))
             return
         self._translate_ui()
+        self._fill_languages()
         self._refresh()
         self.feedback_label.setText(self._translations.text("ui_saved"))
 
@@ -705,7 +720,9 @@ class ControlWindow(QWidget):
             if backend == "whisper" and not path.is_file():
                 raise ValueError(self._translations.text("whisper_missing"))
             if backend == "vosk" and device is DevicePreference.GPU:
-                raise DeviceUnavailableError("Vosk currently supports CPU only")
+                raise DeviceUnavailableError(
+                    self._translations.text("models_vosk_cpu")
+                )
             if backend == "vosk" and self.language_edit.text().strip() == "auto":
                 raise ValueError(self._translations.text("vosk_language_required"))
             if backend == "whisper":
@@ -713,7 +730,9 @@ class ControlWindow(QWidget):
                     device is DevicePreference.GPU
                     and not self._whisper_gpu_server_available
                 ):
-                    raise DeviceUnavailableError("Whisper GPU runtime is not installed")
+                    raise DeviceUnavailableError(
+                        self._translations.text("models_gpu_unavailable")
+                    )
                 if (
                     device is DevicePreference.CPU
                     and not self._whisper_server_available
@@ -728,7 +747,7 @@ class ControlWindow(QWidget):
         if key is not None:
             available = {item.key for item in self._microphones.list_inputs()}
             if key not in available:
-                raise MicrophoneError("selected microphone is not available")
+                raise MicrophoneError(self._translations.text("error_microphone"))
         selected_apps = self.actions_page.selected_apps()
         actions_enabled = self.actions_page.enabled_checkbox.isChecked()
         if (
@@ -741,6 +760,7 @@ class ControlWindow(QWidget):
             self._settings,
             microphone_device_key=key,
             stt=stt,
+            command_model=self.command_model_page.selection(),
             action_execution_enabled=actions_enabled,
             system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
@@ -774,6 +794,7 @@ class ControlWindow(QWidget):
             )
             != self._settings.wake_aliases
             or self.actions_page.has_unsaved_changes(self._settings)
+            or self.command_model_page.has_unsaved_changes(self._settings.command_model)
         )
 
     def _apply(self) -> None:
@@ -897,9 +918,9 @@ class ControlWindow(QWidget):
             if self._power_prompt is not None:
                 self.power_prompt_label.setText(event.text)
                 self.power_continue_button.setText(
-                    "Continue"
+                    t("continue_button")
                     if event.stage is PowerStage.FIRST
-                    else event.phrase or "Confirm"
+                    else event.phrase or t("confirm_button")
                 )
                 self.showNormal()
                 self.raise_()

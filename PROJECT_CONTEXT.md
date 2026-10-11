@@ -2973,6 +2973,20 @@ or desktop action. This is a feasibility result, not approval to infer actions
 from approximate text or evidence of general multilingual accuracy. See
 `docs/stt/CONTEXT_VOCABULARY_HINTS.md`.
 
+## 95. Narrow spoken-Persian command recovery
+
+The live Ubuntu composition now registers `مرورگر` as a spoken alias only
+when the configured browser application is installed and explicitly bound.
+The demonstration interpreter accepts both `را` and colloquial `رو` before
+the explicit `باز کن` operation, but still requires an exact registered app
+name for direct action. An approximate name remains a confirmation question;
+an uncertain verb such as `باسکن` still requests repetition without action.
+A fresh incomplete or unrecognized command clears an older pending app
+confirmation, so a later `بله` cannot authorize that stale suggestion.
+Focused composition, command, and grounding tests pass. This does not repair
+Whisper's transcript itself or establish multilingual speech accuracy; no
+microphone or desktop action was run for this change.
+
 The owner then confirmed two fresh live test utterances, positive
 `مرورگر را باز کن` followed by negative `مرورگر را باز نکن`, during a
 35-second STT-only microphone run with the four-term hint. Their final
@@ -2980,3 +2994,137 @@ transcripts were `مورورگر، بوسکن.` and `مورورگر را باز 
 remained ambiguous; the second retained negation. No audio was stored or
 desktop command executed. Because the hint did not solve the positive live
 case, automatic hint generation/activation in the product remains deferred.
+
+## 91. Direct/live STT path and language-mode comparison
+
+At the owner's request, a no-action WAV replay comparator was added under
+`kyrin.stt.path_comparison` with a CLI at
+`scripts/stt/compare_live_path.py`. It opens a turn-aware STT session directly
+over the full file, then replays the same file through the existing paced
+`LiveSpeechPipeline` and Silero VAD. The audio and reports stay in ignored
+`datasets/stt/` paths. Focused tests cover VAD rejecting audible file data,
+showing that this case is distinguished from a direct STT failure. See
+`docs/stt/LIVE_PATH_COMPARISON.md` for commands, exact outputs, and limitations.
+
+Four speaker-verified safety clips and four additional verified commands were
+replayed on the existing Whisper `small` and `large-v3-turbo-q5_0` GPU models.
+With automatic language detection, `small` attributed 5/8 languages correctly
+and `turbo-q5` 3/8. In the four safety clips, short English `Close Telegram`
+became Arabic-script text on both models; short Persian `مرورگر را باز کن`
+became Greek-script text on `small` and Icelandic-like Latin text on `turbo-q5`.
+The live path had one speech start and pause per clip and no backlog notice.
+Explicit `en` gave correct normalized English text on both models; explicit
+`fa` gave usable but misspelled Persian from `small` and still poor phonetic
+Latin text from `turbo-q5`. No desktop action was run. The corpus is too small
+to select a product default or language-routing policy.
+
+On this workstation, the warmed GPU returned the four safety-clip finals no
+later than about 0.10 seconds (`small`) or 0.24 seconds (`turbo-q5`) after file
+end; several finals arrived before trailing silence ended. Sampled server GPU
+allocation during one Persian replay reached about 1004 and 1040 MiB,
+respectively, excluding the rest of KYRIN. CPU `small` lagged about 10.4–11.4
+seconds after file end. CPU `turbo-q5` hit the current eight-second inference
+request timeout; a separate direct server probe with a longer timeout returned
+an English command after 8.23 seconds of inference. No model, user setting,
+inference timeout, or action policy was changed by this diagnostic.
+
+## 92. Short-command language candidate diagnostic
+
+The follow-up no-action diagnostic `scripts/stt/compare_language_candidates.py`
+replayed the same eight owner-verified WAVs through each installed Whisper
+GPU model in auto, fixed English, and fixed Persian modes. It scored only
+command *proposals* and kept verified labels out of language selection.
+`small` produced 3/5 correct positive proposals with auto and 4/5 under an
+offline hypothetical choice of the higher reported English/Persian
+probability; neither route proposed an unsafe action on the three negatives.
+The still-problematic Persian browser request favored English, and fixed
+Persian still misspelled the app name. On `turbo-q5`, the server omitted
+Persian from its top probability list on four recordings, so a restricted
+winner was unavailable there. No live routing, model selection, user setting,
+microphone access, or desktop action changed. Full method and limitations:
+`docs/stt/LANGUAGE_ROUTING_DIAGNOSTIC.md`.
+
+## 93. Speaker-aware safety evaluation preparation
+
+The owner approved the next evaluation step without changing the live STT or
+action route. The eight existing verified links now identify one pseudonymous
+speaker. A no-action summary tool validates each prior report against those
+verified references, independently recomputes proposal classifications, and
+reports counts by speaker, language, and decoding condition. Its first local
+report confirms that both tested models still have only one speaker; negative
+no-action outcomes remain labeled as abstentions rather than proof that
+negation was understood. The recording utility supports a separate ignored
+path for another consenting speaker without replacing existing recordings or
+silently treating prompts as verified speech. At that point new recordings
+and a second speaker remained pending. See
+`docs/stt/MULTI_SPEAKER_SAFETY_EVALUATION.md`.
+
+The owner then confirmed that a second consenting speaker could read English
+and Persian. Eight prompts were captured locally; seven complete utterances
+were speaker-confirmed and admitted under a separate pseudonymous manifest.
+The intended eighth, the Persian Telegram negation, was excluded: the first
+take may have a cut-off opening, and the retry was spoken by the first
+speaker. The original files remain local and ignored. Both installed Whisper
+GPU models replayed the same 15 verified clips with no desktop action.
+For the second speaker's five positive commands, `small` automatic decoding
+proposed three correct actions and `turbo-q5` proposed two. The two second-
+speaker negatives produced no action proposal, but Persian negation was not
+reliably readable. The hypothetical restricted English/Persian probability
+choice worsened `small` on this speaker to two correct positives among four
+classifiable positives. The simple restricted selector is therefore not
+activated. Exact counts, provenance, and missing-case limitation are in
+`docs/stt/MULTI_SPEAKER_SAFETY_EVALUATION.md`.
+
+## 94. Fixed vocabulary hints across the existing two-speaker corpus
+
+The owner clarified that the second speaker is no longer available; new
+speaker recordings are not a prerequisite for the next technical work. A
+paired no-action replay used the 15 already verified clips and the installed
+Whisper `small` GPU model. The same four Persian vocabulary hints were sent
+to every clip in auto, fixed-English, and fixed-Persian modes; no reference
+label selected a hint. Under automatic decoding, correct positive proposals
+fell from 6/10 without hints to 4/10 with hints. Fixed-Persian decoding
+improved from 1/4 to 2/4 correct Persian positives, but both positives from
+speaker 2 remained missed. Fixed-English decoding fell from 6/6 to 4/6
+correct English positives. No unsafe proposal appeared on the five negatives
+in either auto condition, but unreadable negatives count as abstentions.
+Despite better Persian character scores, the global hint list degraded
+command behavior, so it was not enabled in KYRIN. See
+`docs/stt/CONTEXT_VOCABULARY_HINTS.md`.
+
+## 95. Optional local command-model selection in the Ubuntu app
+
+The owner requested that the locally stored command-understanding models be
+available in the real KYRIN application with Auto, CPU, and GPU choices. A
+versioned optional setting, a Command Understanding page, local Ollama model
+discovery, an isolated loopback Ollama session, and a model-assisted interpreter
+now connect the selected model to final live transcripts. The default remains
+the existing fast-rule interpreter until the owner selects a model. Simple
+commands continue through fast rules; unresolved text may query the model.
+Proposals must pass independent source-operation and target checks, installed
+app resolution, and the existing action gate; model output cannot authorize an
+action by itself. The four ignored local model tags are discovered without
+copying weights. Focused settings, UI, interpreter, and composition tests pass.
+A text-only local CPU smoke test with `qwen3.5:4b` returned `open_app` for
+`Please open Telegram` after a prompt correction and `not_command` for
+`Do not open Telegram`; it did not execute either command. The non-hardware,
+non-socket suite passed 565 tests. The owner has not yet validated the new
+route with the microphone or a desktop action; GPU inference was not verified
+in this turn. English/Persian source checks limit command execution for other
+languages. See `docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md` for setup and
+remaining validation limits.
+
+## 96. Built-in Persian and system interface language
+
+The owner approved completing interface-language selection without changing
+the speech-language setting. The existing Preferences selector now offers
+English, a complete built-in Persian catalog, the operating-system language,
+and imported packs. A system locale selects the best installed language or
+falls back to English. Script and region tags are accepted. Imported packs may
+translate a subset of known keys; missing keys use English, and placeholder
+names are validated before a pack is installed. Visible fixed labels in the
+control-center branding, power buttons, and confirmation controls now use the
+UI catalog. The selected locale drives Qt left-to-right or right-to-left
+layout. UI language preferences remain separate from STT and voice settings.
+See `docs/app/UI_LANGUAGE_SETTINGS.md`. Speech responses and system-action
+prompt wording remain a separate localization concern.

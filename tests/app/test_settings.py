@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from kyrin.app.settings import AllowedApp, AppSettings, SttSelection
+from kyrin.app.settings import (
+    AllowedApp,
+    AppSettings,
+    CommandModelSelection,
+    SttSelection,
+)
 from kyrin.app.settings_store import (
     JsonSettingsStore,
     SettingsError,
@@ -54,8 +59,24 @@ def test_selected_gpu_is_saved_without_claiming_it_is_available(tmp_path: Path) 
     store.save(settings)
 
     assert store.load() == settings
-    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 5
+    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 6
     assert store.path.stat().st_mode & 0o077 == 0
+
+
+def test_command_model_selection_round_trips_and_old_schema_stays_off(
+    tmp_path: Path,
+) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    selection = CommandModelSelection(
+        "ollama", "qwen3.5:4b", tmp_path / "models", DevicePreference.CPU
+    )
+    store.save(AppSettings(command_model=selection))
+    assert store.load().command_model == selection
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 5
+    del document["command_model"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert store.load().command_model is None
 
 
 def test_corrupt_file_is_preserved_and_never_replaced_by_defaults(
@@ -75,12 +96,12 @@ def test_unsupported_version_and_wrong_types_are_rejected(tmp_path: Path) -> Non
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
     document = json.loads(store.path.read_text(encoding="utf-8"))
-    document["schema_version"] = 6
+    document["schema_version"] = 7
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="schema version"):
         store.load()
 
-    document["schema_version"] = 5
+    document["schema_version"] = 6
     document["listening_enabled"] = 1
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="boolean"):
@@ -144,6 +165,7 @@ def test_version_one_settings_migrate_with_chat_permission_off(tmp_path: Path) -
     store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 1
+    del document["command_model"]
     del document["allowed_chat_apps"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
@@ -165,6 +187,7 @@ def test_version_two_settings_migrate_with_no_custom_wake_aliases(
     store.save(AppSettings(wake_aliases=("kayrin",)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 2
+    del document["command_model"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
@@ -181,6 +204,7 @@ def test_legacy_settings_do_not_enable_window_or_close_permissions(
     store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 3
+    del document["command_model"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
     del document["system_power_enabled"]
@@ -197,6 +221,7 @@ def test_version_four_never_enables_power_permission(tmp_path: Path) -> None:
     store.save(AppSettings(system_power_enabled=True))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 4
+    del document["command_model"]
     del document["system_power_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert not store.load().system_power_enabled

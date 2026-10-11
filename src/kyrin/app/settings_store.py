@@ -6,10 +6,15 @@ import tempfile
 from pathlib import Path
 from typing import cast
 
-from kyrin.app.settings import AllowedApp, AppSettings, SttSelection
+from kyrin.app.settings import (
+    AllowedApp,
+    AppSettings,
+    CommandModelSelection,
+    SttSelection,
+)
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class SettingsError(ValueError):
@@ -62,7 +67,7 @@ def _parse_settings(document: object) -> AppSettings:
     ):
         raise SettingsError("unsupported settings schema version")
     version = document["schema_version"]
-    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
         raise SettingsError("unsupported settings schema version")
     fields = {
         "schema_version",
@@ -81,6 +86,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.update({"allowed_window_apps", "allowed_close_apps"})
     if version >= 5:
         fields.add("system_power_enabled")
+    if version >= 6:
+        fields.add("command_model")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -102,6 +109,31 @@ def _parse_settings(document: object) -> AppSettings:
             model_path=Path(_string(selected["model_path"], "stt.model_path")),
             language=_string(selected["language"], "stt.language"),
             device=device,
+        )
+
+    command_model: CommandModelSelection | None = None
+    raw_command_model = root["command_model"] if version >= 6 else None
+    if raw_command_model is not None:
+        selected_command = _object(
+            raw_command_model,
+            {"backend", "model", "store_path", "device"},
+            "command_model",
+        )
+        try:
+            command_device = DevicePreference(
+                _string(selected_command["device"], "command_model.device")
+            )
+        except ValueError as exc:
+            raise SettingsError(
+                "command_model.device must be auto, cpu, or gpu"
+            ) from exc
+        command_model = CommandModelSelection(
+            backend=_string(selected_command["backend"], "command_model.backend"),
+            model=_string(selected_command["model"], "command_model.model"),
+            store_path=Path(
+                _string(selected_command["store_path"], "command_model.store_path")
+            ),
+            device=command_device,
         )
 
     raw_apps = root["allowed_apps"]
@@ -153,6 +185,7 @@ def _parse_settings(document: object) -> AppSettings:
             start_at_login=_boolean(root["start_at_login"], "start_at_login"),
             microphone_device_key=microphone,
             stt=stt,
+            command_model=command_model,
             action_execution_enabled=_boolean(
                 root["action_execution_enabled"], "action_execution_enabled"
             ),
@@ -186,6 +219,16 @@ def _document(settings: AppSettings) -> dict[str, object]:
                 "model_path": str(stt.model_path),
                 "language": stt.language,
                 "device": stt.device.value,
+            }
+        ),
+        "command_model": (
+            None
+            if settings.command_model is None
+            else {
+                "backend": settings.command_model.backend,
+                "model": settings.command_model.model,
+                "store_path": str(settings.command_model.store_path),
+                "device": settings.command_model.device.value,
             }
         ),
         "action_execution_enabled": settings.action_execution_enabled,

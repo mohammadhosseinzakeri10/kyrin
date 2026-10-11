@@ -210,6 +210,41 @@ def test_gpu_request_remains_visible_and_keeps_previous_settings(
         application.processEvents()
 
 
+def test_command_model_and_cpu_choice_are_saved_from_app(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kyrin.app.qt import command_model_page
+
+    store_path = tmp_path / "ollama"
+    store_path.mkdir()
+    monkeypatch.setattr(
+        command_model_page,
+        "installed_ollama_models",
+        lambda path: ("qwen3.5:4b",) if path == store_path else (),
+    )
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = _window(settings, store, _controller([]))
+    try:
+        page = window.command_model_page
+        page.store_path.setText(str(store_path))
+        page.refresh()
+        page.mode.setCurrentIndex(page.mode.findData("ollama"))
+        page.models.setCurrentRow(0)
+        page.device.setCurrentIndex(page.device.findData("cpu"))
+        window.apply_button.click()
+        selected = store.load().command_model
+        assert selected is not None
+        assert selected.store_path == store_path
+        assert selected.model == "qwen3.5:4b"
+        assert selected.device is DevicePreference.CPU
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_whisper_gpu_choice_is_saved_when_gpu_runtime_is_available(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -595,6 +630,43 @@ def test_ui_language_change_preserves_unsaved_speech_fields(
         assert window._nav_buttons["dashboard"].text() == "Tableau de bord"
         assert "Actions désactivées" in window.action_label.text()
         assert window.model_path.text() == "/unsaved/model"
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_builtin_persian_changes_layout_without_changing_speech_language(
+    application: QApplication, tmp_path: Path
+) -> None:
+    translations = UiTranslations(tmp_path / "ui", system_locale="fa_IR")
+    settings = AppSettings()
+    window = ControlWindow(
+        settings,
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=translations,
+    )
+    try:
+        window.ui_language_combo.setCurrentIndex(
+            window.ui_language_combo.findData("system")
+        )
+        window.save_ui_button.click()
+        assert translations.preferences.locale == "system"
+        assert translations.active_locale == "fa"
+        assert window.layoutDirection() is Qt.LayoutDirection.RightToLeft
+        assert window._nav_buttons["dashboard"].text() == "داشبورد"
+        assert window.actions_page.power_buttons[PowerAction.RESTART].text() == (
+            "راه‌اندازی دوباره…"
+        )
+        assert window.language_edit.text() == "en"
+        assert window.ui_language_combo.currentData() == "system"
+        window.ui_language_combo.setCurrentIndex(window.ui_language_combo.findData("en"))
+        window.save_ui_button.click()
+        assert window.layoutDirection() is Qt.LayoutDirection.LeftToRight
     finally:
         window._timer.stop()
         window.deleteLater()
