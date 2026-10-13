@@ -1,24 +1,20 @@
 """English-first desktop shell over the independent application controller."""
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QColor, QPixmap
+from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QComboBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPlainTextEdit,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -32,19 +28,26 @@ from kyrin.app.events import ApplicationEvent, SttDeviceReady
 from kyrin.app.model_library import InstalledModel, ModelLibrary
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
+from kyrin.app.qt.archived_memory_dialog import ArchivedMemoryDialog
+from kyrin.app.qt.audio_page import AudioPage
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.command_model_page import CommandModelPage
-from kyrin.app.qt.dashboard import CosmicDashboard
+from kyrin.app.qt.dashboard_page import DashboardPage
 from kyrin.app.qt.model_library_page import ModelLibraryPage
+from kyrin.app.qt.power_dialog import PowerConfirmationDialog
+from kyrin.app.qt.preferences_page import PreferencesPage
+from kyrin.app.qt.recognition_page import RecognitionPage
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
+from kyrin.app.qt.theme import CONTROL_WINDOW_STYLE
 from kyrin.app.qt.translations import (
     TranslationError,
     UiPreferences,
     UiTranslations,
 )
-from kyrin.app.settings import AppSettings, SttSelection
+from kyrin.app.qt.tts_page import TtsPage
+from kyrin.app.settings import AppSettings, SttSelection, TtsLanguageRoute, TtsSelection
 from kyrin.app.settings_store import SettingsError
 from kyrin.audio.microphone.devices import MicrophoneResolver
 from kyrin.audio.microphone.errors import MicrophoneError
@@ -53,64 +56,14 @@ from kyrin.commands.models import (
     CommandResolution,
     ResponseRequest,
 )
+from kyrin.memory.history import SqliteConversationHistory, default_history_path
 from kyrin.responses.presenter import PresentedResponse
+from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.runtime.latency import SpeechActionLatency
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import PowerAction, PowerPrompt, PowerStage
-
-_STYLE = """
-QWidget#ControlWindow, QWidget#Content { background: #080b18; color: #e9eeff; }
-QFrame#Sidebar { background: #0d1225; border-right: 1px solid #222b48; }
-QLabel { color: #c0cbe9; font-size: 14px; }
-QLabel#Brand { color: #d7c9ff; font-size: 26px; font-weight: 800; letter-spacing: 3px; }
-QLabel#Subtitle { color: #8194bb; font-size: 10px; letter-spacing: 2px; }
-QLabel#Welcome { color: #f6f2ff; font-family: 'Lato'; font-size: 47px;
-                 font-weight: 900; letter-spacing: 2px; }
-QLabel#WelcomeCaption { color: #e4e9ff; font-family: 'Lato'; font-size: 19px;
-                        font-weight: 500; letter-spacing: 1px; }
-QLabel#SceneHint { color: #a9bcef; font-family: 'Lato'; font-size: 13px;
-                   font-weight: 600; letter-spacing: 2px; }
-QLabel#PageTitle { color: #eff1ff; font-size: 28px; font-weight: 700; }
-QLabel#Status { color: #89e8d4; padding: 8px 12px; background: #132437;
-                border: 1px solid #244e5c; border-radius: 10px; }
-QLabel#Feedback { color: #d7dbfa; padding: 12px 15px; background: #161c35;
-                  border: 1px solid #29345a; border-radius: 10px; }
-QLabel#Info { color: #aebae0; margin-top: 18px; }
-QLabel#CosmicDashboard { background: #080c1b; border: 1px solid #283050; }
-QWidget#HeroCopy { background: transparent; }
-QPushButton { background: #27305a; color: #f2f4ff; border: 1px solid #435389;
-              border-radius: 9px; padding: 10px 15px; font-weight: 600; }
-QPushButton:hover { background: #364479; border-color: #847cff; }
-QPushButton:disabled { color: #7883a4; background: #1b2137; border-color: #333b56; }
-QPushButton#NavButton { text-align: left; background: transparent; border: 0;
-                        color: #aab8de; padding: 13px 15px; }
-QPushButton#NavButton:hover { background: #1c2545; }
-QPushButton#NavButton:checked { background: #293666; color: #f7f3ff;
-                                border-left: 3px solid #a389ff; }
-QComboBox, QLineEdit { background: #151d35; color: #f2f4ff;
-                       border: 1px solid #3b496f; border-radius: 7px;
-                       min-height: 34px; padding: 3px 8px; }
-QComboBox QAbstractItemView { background: #18213d; color: #f2f4ff; }
-QTabWidget::pane { background: #111a31; border: 1px solid #3b496f;
-                   border-radius: 8px; }
-QTabBar::tab { background: #1b2746; color: #b9c8eb;
-               border: 1px solid #3b496f; border-bottom: 0;
-               padding: 9px 16px; margin-right: 4px; }
-QTabBar::tab:selected { background: #344b84; color: #ffffff;
-                        border-color: #9275ff; }
-QTabBar::tab:hover:!selected { background: #293960; }
-QCheckBox { color: #e2e9ff; spacing: 10px; padding: 7px 2px; }
-QListWidget { background: #111a31; color: #e7edff;
-              border: 1px solid #3b496f; border-radius: 8px;
-              font-size: 13px; padding: 5px; }
-QListWidget::item { padding: 5px 8px; border-radius: 5px; }
-QListWidget::item:hover { background: #24345a; }
-QListWidget::item:selected { background: #344b84; color: #ffffff; }
-QListWidget::indicator { width: 15px; height: 15px; border-radius: 3px; }
-QListWidget::indicator:unchecked { background: #1b2a49; border: 1px solid #7890bf; }
-QListWidget::indicator:checked { background: #8d73ff; border: 1px solid #d6caff; }
-"""
 
 
 class SettingsStore(Protocol):
@@ -172,6 +125,10 @@ class ControlWindow(QWidget):
         whisper_gpu_server_available: bool = False,
         model_library: ModelLibrary | None = None,
         suggested_command_store: Path | None = None,
+        tts_model_root: Path | None = None,
+        configure_tts: Callable[[TtsSelection, tuple[TtsLanguageRoute, ...]], None]
+        | None = None,
+        preview_tts: Callable[[str, str, TtsSelection], bool] | None = None,
         ui_translations: UiTranslations,
         app_catalog: AppPickerCatalog | None = None,
         screen_access: ScreenAccess | None = None,
@@ -193,12 +150,14 @@ class ControlWindow(QWidget):
         self._last_status_error: Exception | None = None
         self._translations = ui_translations
         self._startup_registration = startup_registration
+        self._configure_tts = configure_tts
         self._labels: dict[str, QLabel] = {}
+        self._action_latency = SpeechActionLatency()
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.setMinimumSize(980, 650)
         self.resize(1200, 760)
         self.setObjectName("ControlWindow")
-        self.setStyleSheet(_STYLE)
+        self.setStyleSheet(CONTROL_WINDOW_STYLE)
 
         shell = QHBoxLayout(self)
         shell.setContentsMargins(0, 0, 0, 0)
@@ -241,6 +200,7 @@ class ControlWindow(QWidget):
                 "recognition",
                 "models",
                 "command_models",
+                "tts",
                 "actions",
                 "screen",
                 "preferences",
@@ -277,130 +237,39 @@ class ControlWindow(QWidget):
         self.feedback_label.setWordWrap(True)
         root.addWidget(self.feedback_label)
         self._power_prompt: PowerPrompt | None = None
-        self.power_panel = QFrame()
-        self.power_panel.setObjectName("Feedback")
-        power_layout = QVBoxLayout(self.power_panel)
-        self.power_prompt_label = QLabel()
-        self.power_prompt_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.power_prompt_label.setWordWrap(True)
-        power_layout.addWidget(self.power_prompt_label)
-        power_buttons = QHBoxLayout()
-        self.power_continue_button = QPushButton()
-        self.power_continue_button.clicked.connect(self._confirm_power)
-        power_buttons.addWidget(self.power_continue_button)
-        self.power_cancel_button = QPushButton()
-        self.power_cancel_button.clicked.connect(self._cancel_power)
-        power_buttons.addWidget(self.power_cancel_button)
-        power_layout.addLayout(power_buttons)
-        self.power_panel.hide()
-        root.addWidget(self.power_panel)
+        self.power_dialog = PowerConfirmationDialog(
+            self._controller.respond_to_system_action,
+            lambda request_id: self._controller.respond_to_system_action(
+                request_id, "cancel"
+            ),
+        )
         shell.addWidget(content, 1)
 
-        dashboard_page = QWidget()
-        dashboard_layout = QVBoxLayout(dashboard_page)
-        dashboard_layout.setContentsMargins(0, 0, 0, 0)
-        self.cosmic_dashboard = CosmicDashboard()
-        self.cosmic_dashboard.setObjectName("CosmicDashboard")
-        self.cosmic_dashboard.setMinimumSize(600, 440)
-        self.cosmic_dashboard.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        hero_layout = QHBoxLayout(self.cosmic_dashboard)
-        hero_layout.setContentsMargins(0, 0, 0, 0)
-        hero_layout.addStretch(6)
-        hero_copy = QWidget(self.cosmic_dashboard)
-        hero_copy.setObjectName("HeroCopy")
-        hero_copy_layout = QVBoxLayout(hero_copy)
-        hero_copy_layout.setContentsMargins(0, 36, 52, 36)
-        hero_copy_layout.addStretch()
-        self.welcome_label = self._label("welcome")
-        self.welcome_label.setObjectName("Welcome")
-        self.welcome_label.setWordWrap(True)
-        self.welcome_label.setAlignment(Qt.AlignmentFlag.AlignLeading)
-        shadow = QGraphicsDropShadowEffect(self.welcome_label)
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 3)
-        shadow.setColor(QColor(1, 3, 13, 230))
-        self.welcome_label.setGraphicsEffect(shadow)
-        hero_copy_layout.addWidget(self.welcome_label)
-        self.welcome_caption_label = self._label("welcome_caption")
-        self.welcome_caption_label.setObjectName("WelcomeCaption")
-        self.welcome_caption_label.setWordWrap(True)
-        hero_copy_layout.addWidget(self.welcome_caption_label)
-        hero_copy_layout.addSpacing(18)
-        self.scene_hint_label = self._label("scene_hint")
-        self.scene_hint_label.setObjectName("SceneHint")
-        self.scene_hint_label.setWordWrap(True)
-        hero_copy_layout.addWidget(self.scene_hint_label)
-        hero_copy_layout.addStretch()
-        hero_layout.addWidget(hero_copy, 5)
-        dashboard_layout.addWidget(self.cosmic_dashboard, 1)
-        self.pages.addWidget(dashboard_page)
+        self.dashboard_page = DashboardPage(self._label)
+        self.cosmic_dashboard = self.dashboard_page.cosmic_dashboard
+        self.welcome_label = self.dashboard_page.welcome_label
+        self.welcome_caption_label = self.dashboard_page.welcome_caption_label
+        self.scene_hint_label = self.dashboard_page.scene_hint_label
+        self.pages.addWidget(self.dashboard_page)
 
-        audio_page, audio_layout = self._page("audio_heading", "audio_caption")
-        audio_form = QFormLayout()
-        self.microphone_combo = QComboBox()
-        self.microphone_combo.setAccessibleName("Input microphone")
-        audio_form.addRow(self._label("microphone"), self.microphone_combo)
-        audio_layout.addLayout(audio_form)
-        audio_layout.addStretch()
-        self.pages.addWidget(audio_page)
+        self.audio_page = AudioPage(self._label)
+        self.microphone_combo = self.audio_page.microphone_combo
+        self.pages.addWidget(self.audio_page)
 
-        speech_page, speech_layout = self._page(
-            "recognition_heading", "recognition_caption"
-        )
-        speech_form = QFormLayout()
-        self.backend_combo = QComboBox()
-        self.backend_combo.addItem("Vosk", "vosk")
-        self.backend_combo.addItem("Whisper", "whisper")
-        self.backend_combo.setAccessibleName("Speech recognition engine")
-        speech_form.addRow(self._label("backend"), self.backend_combo)
-
-        model_row = QHBoxLayout()
-        self.model_path = QLineEdit()
-        self.model_path.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.model_path.setAccessibleName("Speech model path")
-        model_row.addWidget(self.model_path)
-        browse = QPushButton()
-        self.browse_button = browse
-        browse.clicked.connect(self._browse_model)
-        model_row.addWidget(browse)
-        speech_form.addRow(self._label("model"), model_row)
-
-        self.language_edit = QLineEdit("en")
-        self.language_edit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.language_edit.setAccessibleName("Speech language code")
-        speech_form.addRow(self._label("speech_language"), self.language_edit)
-        self.wake_aliases_edit = QLineEdit()
-        self.wake_aliases_edit.setAccessibleName("KYRIN wake word alternatives")
-        speech_form.addRow(self._label("wake_aliases"), self.wake_aliases_edit)
-        self.device_combo = QComboBox()
-        self.device_combo.addItem("", DevicePreference.AUTO.value)
-        self.device_combo.addItem("", DevicePreference.CPU.value)
-        self.device_combo.addItem("", DevicePreference.GPU.value)
-        self.device_combo.setAccessibleName("Speech processing device")
-        speech_form.addRow(self._label("device"), self.device_combo)
-        speech_layout.addLayout(speech_form)
-        speech_layout.addWidget(self._label("speech_language_help"))
-        self.active_device_label = QLabel()
-        self.active_device_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.active_device_label.setObjectName("Info")
-        speech_layout.addWidget(self.active_device_label)
-        self.action_label = QLabel()
-        self.action_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.action_label.setObjectName("Info")
-        speech_layout.addWidget(self.action_label)
-        self.diagnostics_heading = QLabel()
-        self.diagnostics_heading.setObjectName("Info")
-        speech_layout.addWidget(self.diagnostics_heading)
-        self.diagnostics_output = QPlainTextEdit()
-        self.diagnostics_output.setReadOnly(True)
-        self.diagnostics_output.setMaximumBlockCount(40)
-        self.diagnostics_output.setAccessibleName("Speech command diagnostics")
-        speech_layout.addWidget(self.diagnostics_output)
-        self.clear_diagnostics_button = QPushButton()
-        self.clear_diagnostics_button.clicked.connect(self.diagnostics_output.clear)
-        speech_layout.addWidget(self.clear_diagnostics_button)
-        speech_layout.addStretch()
-        self.pages.addWidget(speech_page)
+        self.recognition_page = RecognitionPage(self._label)
+        self.backend_combo = self.recognition_page.backend_combo
+        self.model_path = self.recognition_page.model_path
+        self.browse_button = self.recognition_page.browse_button
+        self.browse_button.clicked.connect(self._browse_model)
+        self.language_edit = self.recognition_page.language_edit
+        self.wake_aliases_edit = self.recognition_page.wake_aliases_edit
+        self.device_combo = self.recognition_page.device_combo
+        self.active_device_label = self.recognition_page.active_device_label
+        self.action_label = self.recognition_page.action_label
+        self.diagnostics_heading = self.recognition_page.diagnostics_heading
+        self.diagnostics_output = self.recognition_page.diagnostics_output
+        self.clear_diagnostics_button = self.recognition_page.clear_diagnostics_button
+        self.pages.addWidget(self.recognition_page)
 
         self.models_page = ModelLibraryPage(
             model_library,
@@ -419,11 +288,23 @@ class ControlWindow(QWidget):
         )
         self.pages.addWidget(self.command_model_page)
 
+        self.tts_page = TtsPage(
+            ui_translations,
+            settings.tts if settings is not None else TtsSelection(),
+            model_root=tts_model_root or Path.home() / ".local/share/kyrin/models/tts",
+            routes=settings.tts_languages if settings is not None else (),
+            preview=preview_tts,
+        )
+        self.pages.addWidget(self.tts_page)
+
         self.actions_page = DesktopActionsPage(app_catalog, settings, ui_translations)
         for action, button in self.actions_page.power_buttons.items():
             button.clicked.connect(
                 lambda checked=False, selected=action: self._start_power(selected)
             )
+        self.actions_page.power_preview_button.clicked.connect(
+            self._preview_power
+        )
         self.pages.addWidget(self.actions_page)
 
         self.screen_access_page = ScreenAccessPage(
@@ -431,31 +312,22 @@ class ControlWindow(QWidget):
         )
         self.pages.addWidget(self.screen_access_page)
 
-        preferences_page, preferences_layout = self._page(
-            "preferences_heading", "preferences_caption"
-        )
-        preferences_form = QFormLayout()
-        self.ui_language_combo = QComboBox()
+        self.preferences_page = PreferencesPage(self._label)
+        self.ui_language_combo = self.preferences_page.ui_language_combo
         self._fill_languages()
-        preferences_form.addRow(
-            self._label("interface_language"), self.ui_language_combo
-        )
-        self.import_language_button = QPushButton()
+        self.import_language_button = self.preferences_page.import_language_button
         self.import_language_button.clicked.connect(self._import_language)
-        preferences_form.addRow("", self.import_language_button)
-        preferences_layout.addLayout(preferences_form)
-        preferences_layout.addWidget(self._label("language_help"))
-        self.save_ui_button = QPushButton()
+        self.save_ui_button = self.preferences_page.save_ui_button
         self.save_ui_button.clicked.connect(self._save_ui_preferences)
-        preferences_layout.addWidget(self.save_ui_button)
-        preferences_layout.addSpacing(24)
-        self.startup_checkbox = QCheckBox()
-        preferences_layout.addWidget(self.startup_checkbox)
-        self.save_startup_button = QPushButton()
+        self.startup_checkbox = self.preferences_page.startup_checkbox
+        self.save_startup_button = self.preferences_page.save_startup_button
         self.save_startup_button.clicked.connect(self._save_startup)
-        preferences_layout.addWidget(self.save_startup_button)
-        preferences_layout.addStretch()
-        self.pages.addWidget(preferences_page)
+        self.clear_memory_button = self.preferences_page.clear_memory_button
+        self.clear_memory_button.clicked.connect(self._clear_conversation_memory)
+        self.review_memory_button = self.preferences_page.review_memory_button
+        self.review_memory_button.clicked.connect(self._review_conversation_memory)
+        self._memory_dialog: ArchivedMemoryDialog | None = None
+        self.pages.addWidget(self.preferences_page)
 
         buttons = QHBoxLayout()
         self.apply_button = QPushButton()
@@ -493,17 +365,6 @@ class ControlWindow(QWidget):
         self._labels[key] = label
         return label
 
-    def _page(self, heading: str, caption: str) -> tuple[QWidget, QVBoxLayout]:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 25, 20, 20)
-        title = self._label(heading)
-        title.setObjectName("PageTitle")
-        layout.addWidget(title)
-        layout.addWidget(self._label(caption))
-        layout.addSpacing(24)
-        return page, layout
-
     def _select_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
         for button_index, button in enumerate(self._nav_buttons.values()):
@@ -535,7 +396,7 @@ class ControlWindow(QWidget):
         self.setWindowTitle(t("window_title"))
         self.subtitle.setText(t("branding_subtitle"))
         self.sidebar_footer.setText(t("branding_footer"))
-        self.power_cancel_button.setText(t("cancel_button"))
+        self.power_dialog.cancel_button.setText(t("cancel_button"))
         for key, button in self._nav_buttons.items():
             button.setText(t(key))
         for key, label in self._labels.items():
@@ -551,7 +412,10 @@ class ControlWindow(QWidget):
         self.screen_access_page.translate()
         self.models_page.translate()
         self.command_model_page.translate()
+        self.tts_page.translate()
         self.save_startup_button.setText(t("apply_startup"))
+        self.clear_memory_button.setText(t("conversation_memory_clear"))
+        self.review_memory_button.setText(t("conversation_memory_review"))
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device_combo.setItemText(index, t(key))
         if self.microphone_combo.count():
@@ -632,6 +496,40 @@ class ControlWindow(QWidget):
             return
         self._settings = candidate
         self.feedback_label.setText(self._translations.text("startup_saved"))
+
+    def _clear_conversation_memory(self) -> None:
+        t = self._translations.text
+        if QMessageBox.question(
+            self,
+            t("conversation_memory_clear_title"),
+            t("conversation_memory_clear_question"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            history = SqliteConversationHistory(default_history_path())
+            try:
+                history.clear()
+            finally:
+                history.close()
+        except (OSError, ValueError, sqlite3.Error):
+            self.feedback_label.setText(t("conversation_memory_unavailable"))
+            return
+        self.feedback_label.setText(t("conversation_memory_cleared"))
+
+    def _review_conversation_memory(self) -> None:
+        try:
+            dialog = ArchivedMemoryDialog(
+                default_history_path(), self._translations.text, self
+            )
+        except (OSError, ValueError, sqlite3.Error):
+            self.feedback_label.setText(
+                self._translations.text("conversation_memory_unavailable")
+            )
+            return
+        self._memory_dialog = dialog
+        dialog.open()
 
     def start_initial_session(self) -> None:
         if self._settings is not None:
@@ -720,9 +618,7 @@ class ControlWindow(QWidget):
             if backend == "whisper" and not path.is_file():
                 raise ValueError(self._translations.text("whisper_missing"))
             if backend == "vosk" and device is DevicePreference.GPU:
-                raise DeviceUnavailableError(
-                    self._translations.text("models_vosk_cpu")
-                )
+                raise DeviceUnavailableError(self._translations.text("models_vosk_cpu"))
             if backend == "vosk" and self.language_edit.text().strip() == "auto":
                 raise ValueError(self._translations.text("vosk_language_required"))
             if backend == "whisper":
@@ -761,6 +657,8 @@ class ControlWindow(QWidget):
             microphone_device_key=key,
             stt=stt,
             command_model=self.command_model_page.selection(),
+            tts=self.tts_page.selection(),
+            tts_languages=self.tts_page.language_routes(),
             action_execution_enabled=actions_enabled,
             system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
@@ -795,6 +693,9 @@ class ControlWindow(QWidget):
             != self._settings.wake_aliases
             or self.actions_page.has_unsaved_changes(self._settings)
             or self.command_model_page.has_unsaved_changes(self._settings.command_model)
+            or self.tts_page.has_unsaved_changes(
+                self._settings.tts, self._settings.tts_languages
+            )
         )
 
     def _apply(self) -> None:
@@ -821,6 +722,8 @@ class ControlWindow(QWidget):
             self._show_error(error)
             return
         self._settings = candidate
+        if self._configure_tts is not None:
+            self._configure_tts(candidate.tts, candidate.tts_languages)
         self.models_page.set_current_selection(candidate.stt)
         self._update_action_label()
         self.feedback_label.setText(self._translations.text("saved"))
@@ -910,27 +813,38 @@ class ControlWindow(QWidget):
 
     def _on_event(self, event: ApplicationEvent) -> None:
         t = self._translations.text
+        latency = self._action_latency.observe(event)
+        if latency is not None:
+            speech = (
+                f"{latency.speech_to_result_ms:.0f} ms"
+                if latency.speech_to_result_ms is not None
+                else "—"
+            )
+            self.diagnostics_output.appendPlainText(
+                f"{t('diagnostics_latency')}: {speech} "
+                f"({t('diagnostics_final_to_result')}: "
+                f"{latency.final_to_result_ms:.0f} ms)"
+            )
         if isinstance(event, PowerPrompt):
             self._power_prompt = (
-                event if event.stage in (PowerStage.FIRST, PowerStage.SECOND) else None
+                event
+                if event.stage
+                in (PowerStage.CHECKING, PowerStage.FIRST, PowerStage.SECOND)
+                else None
             )
-            self.power_panel.setVisible(self._power_prompt is not None)
             if self._power_prompt is not None:
-                self.power_prompt_label.setText(event.text)
-                self.power_continue_button.setText(
-                    t("continue_button")
-                    if event.stage is PowerStage.FIRST
-                    else event.phrase or t("confirm_button")
-                )
-                self.showNormal()
-                self.raise_()
-                self.activateWindow()
+                self.power_dialog.present(event, continue_label=t("continue_button"))
+            else:
+                self.power_dialog.dismiss()
             self.feedback_label.setText(event.text)
         elif isinstance(event, SttDeviceReady):
             self._active_stt_device = event.device
             self._update_active_device_label()
         elif isinstance(event, PresentedResponse):
             self.feedback_label.setText(event.text)
+        elif isinstance(event, SpeechSynthesisError):
+            self.feedback_label.setText(str(event))
+            self.power_dialog.show_voice_error()
         elif (
             isinstance(event, TranscriptUpdate)
             and event.status is TranscriptStatus.FINAL
@@ -975,23 +889,17 @@ class ControlWindow(QWidget):
     def _start_power(self, action: PowerAction) -> None:
         self._controller.request_system_action(action)
 
-    def _confirm_power(self) -> None:
-        prompt = self._power_prompt
-        if prompt is not None:
-            self._controller.respond_to_system_action(
-                prompt.request_id,
-                "continue" if prompt.stage is PowerStage.FIRST else prompt.phrase or "",
+    def _preview_power(self) -> None:
+        if not self._controller.preview_system_action(PowerAction.POWER_OFF):
+            self.feedback_label.setText(
+                self._translations.text("power_safe_preview_busy")
             )
-
-    def _cancel_power(self) -> None:
-        prompt = self._power_prompt
-        if prompt is not None:
-            self._controller.respond_to_system_action(prompt.request_id, "cancel")
 
     def _quit(self) -> None:
         if self._pending_settings is not None:
             self._pending_settings = None
         self._quitting = True
+        self.power_dialog.dismiss()
         self._controller.request_stop()
         self._refresh()
 

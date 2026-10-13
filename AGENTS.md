@@ -143,3 +143,17 @@ When appropriate:
 7. Test and debug together.
 
 Do not optimize solely for speed at the expense of the user's understanding.
+
+## 14. Local Development Storage
+
+On the owner's current Ubuntu machine, place all newly downloaded KYRIN model
+weights, optional runtimes, tools, and project-specific download caches on the
+AI-Projects drive under `/mnt/ai_projects/KYRIN/`. Use the Git-ignored
+`local-data/` directory for installed application data and `models/local/` for
+development models. Do not direct KYRIN downloads into the home filesystem.
+When giving installation commands, set project-specific pip/Hugging Face cache
+paths on this drive as needed. Standard XDG application paths may be symlinks
+to the drive; keep required desktop launchers and GNOME integration in their
+operating-system locations. See `docs/app/LOCAL_DATA_STORAGE.md`.
+
+This is a machine-specific storage policy, not a cross-platform runtime path.

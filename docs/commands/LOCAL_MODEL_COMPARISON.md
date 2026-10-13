@@ -7,11 +7,11 @@ from inside the application. No microphone, desktop image, chat content, or
 external inference API is used. The four candidate tags selected by the
 owner are `qwen3.5:4b`, `qwen3.5:9b`, `gemma4:e4b`, and `gemma4:12b`.
 
-On the development workstation, the verified model store is
-`models/local/command-understanding/ollama/`. Start its isolated server as
-shown in `models/README.md` before running the script. The ordinary Ollama
-server on port 11434 retains other machine models, but these four tags now
-live only in the project store on port 11435.
+On the development workstation, the verified models are in separate stores
+under `models/local/by-model/command-understanding/ollama/`. Start an isolated
+server for one model as shown in `models/README.md` before running the script;
+switch `OLLAMA_MODELS` to the next model's folder for the next comparison. The
+ordinary Ollama server on port 11434 retains other machine models.
 
 The benchmark uses the same source text, known app names, prompt, JSON schema,
 generation settings, and `datasets/commands/semantic_cases.jsonl` for every

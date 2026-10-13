@@ -30,6 +30,7 @@ from kyrin.stt.transcript import TranscriptUpdate
 
 class VisualStatus(StrEnum):
     READY = "ready"
+    CONVERSATION = "conversation"
     LISTENING = "listening"
     PROCESSING = "processing"
     QUESTION = "question"
@@ -50,6 +51,7 @@ class VisualPresentation:
 _CAPTIONS = {
     "en": {
         VisualStatus.READY: "Ready to listen…",
+        VisualStatus.CONVERSATION: "Responding…",
         VisualStatus.LISTENING: "Listening…",
         VisualStatus.PROCESSING: "Understanding speech…",
         VisualStatus.QUESTION: "Please clarify…",
@@ -60,6 +62,7 @@ _CAPTIONS = {
     },
     "fa": {
         VisualStatus.READY: "آمادهٔ شنیدن…",
+        VisualStatus.CONVERSATION: "در حال پاسخ‌دادن…",
         VisualStatus.LISTENING: "در حال گوش‌دادن…",
         VisualStatus.PROCESSING: "در حال بررسی گفتار…",
         VisualStatus.QUESTION: "لطفاً توضیح دهید…",
@@ -138,6 +141,16 @@ class VisualStatusController:
     def on_command_event(self, event: CommandEvent) -> None:
         if (
             isinstance(event, ResponseRequest)
+            and event.kind is ResponseKind.CONVERSATION
+        ):
+            self._set(
+                VisualStatus.CONVERSATION,
+                caption=self._presenter.present(event).text,
+                language=event.language,
+                unless_executing=True,
+            )
+        elif (
+            isinstance(event, ResponseRequest)
             and event.kind is ResponseKind.READY_FOR_COMMAND
         ):
             self._set(
@@ -170,11 +183,17 @@ class VisualStatusController:
                 if language == "fa"
                 else f"Opening {request.intent.target}…"
             )
-        else:
+        elif request.intent.kind is CommandKind.OPEN_CHAT:
             caption = (
                 f"در حال بازکردن چت {request.intent.target}…"
                 if language == "fa"
                 else f"Opening {request.intent.target}'s chat…"
+            )
+        else:
+            caption = (
+                f"در حال انجام فرمان روی {request.intent.target}…"
+                if language == "fa"
+                else f"Working with {request.intent.target}…"
             )
         self._set(
             VisualStatus.EXECUTING,
@@ -200,6 +219,23 @@ class VisualStatusController:
                 caption=self._presenter.present(output).text,
                 language=output.language,
                 unless_executing=True,
+            )
+            return
+        if (
+            output.intent.kind in (
+                CommandKind.SHOW_APP_WINDOWS, CommandKind.SHOW_ALL_WINDOWS,
+            )
+            and output.outcome is ActionOutcome.LAUNCH_ACCEPTED
+        ):
+            self._set(
+                VisualStatus.QUESTION,
+                caption=(
+                    "شمارهٔ پنجره را بگویید یا روی آن کلیک کنید."
+                    if _caption_language(output.language) == "fa"
+                    else "Say a window number or click its preview."
+                ),
+                language=output.language,
+                executing=False,
             )
             return
         status = {

@@ -1,5 +1,7 @@
 """Build one Ubuntu live session from explicit settings and replaceable adapters."""
 
+import logging
+import sqlite3
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
@@ -11,11 +13,14 @@ from kyrin.actions.models import (
     ActionDecision,
     ActionFeedback,
     ActionNotice,
+    ActionOutcome,
     ActionRequest,
     ActionResult,
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
+from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
+from kyrin.actions.platforms.ptyxis import PtyxisActionExecutor
 from kyrin.actions.platforms.telegram import (
     ChatVerifier,
     TelegramSavedMessagesExecutor,
@@ -55,6 +60,8 @@ from kyrin.desktop.app_activation import ExistingAppActivator
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.desktop.window_control import AppWindowController
+from kyrin.desktop.window_presence import AppWindowPresence
+from kyrin.memory.history import SqliteConversationHistory, default_history_path
 from kyrin.responses.models import SystemNotice, SystemNoticeKind
 from kyrin.responses.presenter import PresentedResponse, ResponsePresenter
 from kyrin.responses.speech import (
@@ -80,7 +87,9 @@ EventSink = Callable[[ApplicationEvent], None]
 ObserverFactory = Callable[[Mapping[str, str], XdgDesktopAppCatalog], ActiveAppObserver]
 ActivatorFactory = Callable[[Mapping[str, str]], ExistingAppActivator]
 WindowControllerFactory = Callable[[Mapping[str, str]], AppWindowController]
+WindowPresenceFactory = Callable[[Mapping[str, str]], AppWindowPresence]
 CommandServerFactory = Callable[[CommandModelSelection], AbstractContextManager[str]]
+_LOGGER = logging.getLogger(__name__)
 
 
 def _command_server(selection: CommandModelSelection) -> AbstractContextManager[str]:
@@ -186,10 +195,12 @@ class UbuntuSessionFactory:
         observer_factory: ObserverFactory | None = None,
         activator_factory: ActivatorFactory | None = None,
         window_controller_factory: WindowControllerFactory | None = None,
+        window_presence_factory: WindowPresenceFactory | None = None,
         chat_verifier: ChatVerifier | None = None,
         focused_window: WindowIdentityReader | None = None,
         visual_publish: Callable[[VisualPresentation], None] | None = None,
         synthesizer: SpeechSynthesizer | None = None,
+        response_speaker: ResponseSpeaker | None = None,
         power_backend_factory: Callable[[], PowerBackend] = GnomePowerBackend,
         system_power: SystemPowerFlow | None = None,
         command_server_factory: CommandServerFactory = _command_server,
@@ -204,10 +215,12 @@ class UbuntuSessionFactory:
         self._observer_factory = observer_factory
         self._activator_factory = activator_factory
         self._window_controller_factory = window_controller_factory
+        self._window_presence_factory = window_presence_factory
         self._chat_verifier = chat_verifier
         self._focused_window = focused_window
         self._visual_publish = visual_publish
         self._synthesizer = synthesizer
+        self._response_speaker = response_speaker
         self._power_backend_factory = power_backend_factory
         self._system_power = system_power
         self._command_server_factory = command_server_factory
@@ -241,7 +254,12 @@ class UbuntuSessionFactory:
                 aliases={
                     app_id: names
                     for app_id, names in {
-                        "telegram": ("تلگرام", "تلیگرام"),
+                        "telegram": (
+                            "تلگرام",
+                            "تلیگرام",
+                            "تيليغرام",
+                            "ٹیلیگرام",
+                        ),
                         "browser": ("مرورگر",),
                     }.items()
                     if app_id in platform_ids.values()
@@ -250,7 +268,26 @@ class UbuntuSessionFactory:
             if platform_ids
             else None
         )
-        rules = DemoCommandInterpreter(spoken_names, wake_aliases=settings.wake_aliases)
+        desktop_ids = {
+            app_id: desktop_id for desktop_id, app_id in platform_ids.items()
+        }
+        window_presence = (
+            self._window_presence_factory(desktop_ids)
+            if self._window_presence_factory is not None
+            else None
+        )
+        terminal_app_id = platform_ids.get("org.gnome.Ptyxis.desktop")
+        rules = DemoCommandInterpreter(
+            spoken_names,
+            wake_aliases=settings.wake_aliases,
+            browser_candidates=(
+                spoken_names.browser_candidates() if spoken_names else ()
+            ),
+            allowed_window_apps=frozenset(settings.allowed_window_apps),
+            allowed_close_apps=frozenset(settings.allowed_close_apps),
+            window_presence=window_presence,
+            terminal_app_id=terminal_app_id,
+        )
         chat_enabled = (
             settings.action_execution_enabled
             and "telegram" in settings.allowed_chat_apps
@@ -261,6 +298,31 @@ class UbuntuSessionFactory:
         )
         window_controls_available = self._window_controller_factory is not None
         supported_kinds = {CommandKind.OPEN_APP}
+        if terminal_app_id is not None:
+            supported_kinds.update(
+                {
+                    CommandKind.NEW_APP_WINDOW,
+                    CommandKind.NEW_APP_TAB,
+                    CommandKind.APP_PREFERENCES,
+                }
+            )
+            if window_presence is not None:
+                supported_kinds.update(
+                    {
+                        CommandKind.SHOW_APP_WINDOWS,
+                        CommandKind.SELECT_APP_WINDOW,
+                        CommandKind.CLOSE_SHOWN_WINDOW,
+                        CommandKind.HIDE_APP_WINDOWS,
+                    }
+                )
+        if window_presence is not None and settings.allowed_window_apps:
+            supported_kinds.update({
+                CommandKind.SHOW_ALL_WINDOWS,
+                CommandKind.SELECT_APP_WINDOW,
+                CommandKind.CLOSE_SHOWN_WINDOW,
+                CommandKind.HIDE_APP_WINDOWS,
+                CommandKind.SELECT_OPEN_APP_WINDOW,
+            })
         if chat_enabled:
             supported_kinds.add(CommandKind.OPEN_CHAT)
         if window_controls_available:
@@ -299,9 +361,10 @@ class UbuntuSessionFactory:
         self._microphones.resolve(settings.microphone_device_key)
         engine = opener(selection)
         safe_to_close_engine = True
-        speaker: ResponseSpeaker | None = None
+        speaker: ResponseSpeaker | None = self._response_speaker
         power_flow: SystemPowerFlow | None = None
         command_server: AbstractContextManager[str] | None = None
+        history: SqliteConversationHistory | None = None
         try:
             if (
                 selection.device is DevicePreference.GPU
@@ -335,8 +398,30 @@ class UbuntuSessionFactory:
                     supported_chat_apps=frozenset({"telegram"})
                     if "telegram" in settings.allowed_chat_apps
                     else frozenset(),
+                    action_review=rules.review_model_action,
                 )
-            coordinator = CommandCoordinator(interpreter)
+            try:
+                history = SqliteConversationHistory(default_history_path())
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                _LOGGER.warning("Conversation history is unavailable: %s", exc)
+            recent_utterances: Callable[[], tuple[str, ...]] | None = None
+            if history is not None:
+                history_store = history
+
+                def read_recent_utterances() -> tuple[str, ...]:
+                    try:
+                        return tuple(
+                            turn.text[:240] for turn in history_store.recent(limit=6)
+                        )
+                    except (OSError, sqlite3.Error) as exc:
+                        _LOGGER.warning("Conversation history is unavailable: %s", exc)
+                        return ()
+
+                recent_utterances = read_recent_utterances
+            coordinator = CommandCoordinator(
+                interpreter,
+                recent_utterances=recent_utterances,
+            )
             detector = self._detector_factory()
             presenter = ResponsePresenter(selection.language)
             visual = (
@@ -346,7 +431,7 @@ class UbuntuSessionFactory:
                 if self._visual_publish is not None
                 else None
             )
-            if self._synthesizer is not None:
+            if speaker is None and self._synthesizer is not None:
                 speaker = ResponseSpeaker(self._synthesizer, on_error=self._on_event)
 
             def show_response(response: PresentedResponse) -> None:
@@ -370,7 +455,14 @@ class UbuntuSessionFactory:
                     detector,
                     engine,
                     options=SpeechToTextOptions(
-                        device=selection.device, language_hint=selection.language
+                        device=selection.device,
+                        language_hint=selection.language,
+                        vocabulary_hints=(
+                            spoken_names.vocabulary_hints()
+                            if spoken_names is not None
+                            and engine.capabilities.supports_vocabulary_hints
+                            else ()
+                        ),
                     ),
                     on_compute_device=lambda device: self._on_event(
                         SttDeviceReady(device)
@@ -395,6 +487,14 @@ class UbuntuSessionFactory:
                 if visual is not None:
                     visual.on_action_output(output)
                 self._on_event(output)
+                if (
+                    isinstance(output, ActionFeedback)
+                    and output.intent.kind in (
+                        CommandKind.SHOW_APP_WINDOWS, CommandKind.SHOW_ALL_WINDOWS
+                    )
+                    and output.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                ):
+                    return
                 if isinstance(output, (ActionNotice, ActionFeedback)):
                     show_response(presenter.present(output))
 
@@ -437,7 +537,7 @@ class UbuntuSessionFactory:
                 and settings.system_power_enabled
             )
             power_flow.set_voice_ready(lambda: speaker is None or not speaker.is_active)
-            if self._system_power is not None:
+            if self._system_power is not None and self._response_speaker is None:
                 power_flow.set_announcement(
                     lambda prompt: show_response(
                         PresentedResponse(
@@ -453,15 +553,32 @@ class UbuntuSessionFactory:
             executor: ActionExecutor | None = None
             if settings.action_execution_enabled:
                 executor = self._executor_factory(installed)
+                if terminal_app_id is not None:
+                    executor = PtyxisActionExecutor(
+                        executor,
+                        terminal_app_id,
+                        installed[terminal_app_id],
+                        window_presence,
+                    )
+                if window_presence is not None and settings.allowed_window_apps:
+                    executor = OpenWindowPickerExecutor(
+                        executor,
+                        {
+                            app_id: desktop_ids[app_id]
+                            for app_id in settings.allowed_window_apps
+                            if app_id in desktop_ids
+                        },
+                        {
+                            app_id: desktop_ids[app_id]
+                            for app_id in settings.allowed_close_apps
+                            if app_id in desktop_ids
+                            and app_id in settings.allowed_window_apps
+                        },
+                    )
                 if observer is not None:
                     executor = ObservedAppExecutor(executor, observer)
                     if self._activator_factory is not None:
-                        activator = self._activator_factory(
-                            {
-                                app_id: desktop_id
-                                for desktop_id, app_id in platform_ids.items()
-                            }
-                        )
+                        activator = self._activator_factory(desktop_ids)
                         executor = ActivateOrLaunchExecutor(
                             executor, activator, observer
                         )
@@ -475,12 +592,7 @@ class UbuntuSessionFactory:
                         verifier=self._chat_verifier,
                     )
                 if self._window_controller_factory is not None:
-                    controller = self._window_controller_factory(
-                        {
-                            app_id: desktop_id
-                            for desktop_id, app_id in platform_ids.items()
-                        }
-                    )
+                    controller = self._window_controller_factory(desktop_ids)
                     executor = WindowControlExecutor(executor, controller)
                 if visual is not None:
                     executor = _VisualActionExecutor(executor, visual)
@@ -496,6 +608,7 @@ class UbuntuSessionFactory:
                 on_action_output=show_action,
                 on_session_end=show_session_end,
                 system_power=power_flow,
+                history=history,
             )
             yield runtime
         except AudioCaptureStopError:
@@ -504,13 +617,16 @@ class UbuntuSessionFactory:
             safe_to_close_engine = False
             raise
         finally:
+            if history is not None:
+                history.close()
             if command_server is not None:
                 command_server.__exit__(None, None, None)
             if self._system_power is not None and power_flow is not None:
                 power_flow.cancel()
-                power_flow.set_announcement(None)
+                if self._response_speaker is None:
+                    power_flow.set_announcement(None)
             try:
-                if speaker is not None:
+                if speaker is not None and speaker is not self._response_speaker:
                     speaker.close()
             finally:
                 if safe_to_close_engine:

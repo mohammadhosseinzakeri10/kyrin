@@ -46,7 +46,7 @@ from kyrin.stt.backends.whisper import WhisperEngine
 
 engine = WhisperEngine(
     "build/tools/whisper.cpp-v1.9.4/build-cpu/bin/whisper-server",
-    "models/local/whisper.cpp/ggml-small.bin",
+    "models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin",
     language="en",
     threads=4,
 )
@@ -68,7 +68,7 @@ prints transcripts and dry-run decisions, never executes a desktop command:
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/audio/check_live_speech.py \
   --mode commands --stt-backend whisper --language en \
-  --model-path models/local/whisper.cpp/ggml-small.bin \
+  --model-path models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin \
   --whisper-server build/tools/whisper.cpp-v1.9.4/build-cpu/bin/whisper-server \
   --seconds 20
 ```

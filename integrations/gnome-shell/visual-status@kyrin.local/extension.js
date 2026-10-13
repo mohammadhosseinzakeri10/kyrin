@@ -25,6 +25,7 @@ const INTERFACE_XML = `<node>
 
 const STATES = {
     ready: ['Ready to listen…', 'KYRIN is ready for speech'],
+    conversation: ['Responding…', 'KYRIN is responding to the user'],
     listening: ['Listening…', 'KYRIN is listening'],
     processing: ['Understanding speech…', 'KYRIN is processing speech'],
     question: ['Please clarify…', 'KYRIN needs an answer'],
@@ -90,7 +91,13 @@ export default class KyrinVisualStatusExtension extends Extension {
             reactive: true,
             style_class: 'kyrin-status-content',
         });
-        this._content.add_child(this._mascot);
+        this._mascotRow = new St.Widget({
+            layout_manager: new Clutter.FixedLayout(),
+            width: 112,
+            height: 112,
+        });
+        this._mascotRow.add_child(this._mascot);
+        this._content.add_child(this._mascotRow);
         this._content.add_child(this._caption);
         this._closeButton = new St.Button({
             label: '×',
@@ -224,6 +231,9 @@ export default class KyrinVisualStatusExtension extends Extension {
         const maxWidth = Math.max(112, Math.min(360, monitor.width - 24));
         // Leave room for the caption's CSS padding and border.
         this._caption.width = Math.min(maxWidth, Math.max(112, Math.ceil(textWidth) + 14));
+        this._mascotRow.width = this._caption.width;
+        this._mascot.set_position(
+            Math.floor((this._mascotRow.width - this._mascot.width) / 2), 0);
     }
 
     _keepOnMonitor() {
@@ -297,6 +307,7 @@ export default class KyrinVisualStatusExtension extends Extension {
         this._actor?.destroy();
         this._actor = null;
         this._content = null;
+        this._mascotRow = null;
         this._mascot = null;
         this._statusSymbol = null;
         this._caption = null;

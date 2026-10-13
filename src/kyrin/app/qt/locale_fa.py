@@ -7,6 +7,31 @@ PERSIAN: dict[str, str] = {
     "recognition": "تشخیص گفتار",
     "models": "کتابخانهٔ مدل‌ها",
     "command_models": "فهم فرمان",
+    "tts": "خروجی گفتار",
+    "tts_heading": "خروجی گفتار",
+    "tts_caption": (
+        "یک صدای آفلاینِ نصب‌شده انتخاب کنید. KYRIN مدل صوتی دانلود نمی‌کند. "
+        "مدل سازگارِ استخراج‌شده را در پوشهٔ محلی TTS بگذارید "
+        "یا مسیر آن را انتخاب کنید؛ موتور آن خودکار شناسایی می‌شود. "
+        "می‌توانید تنظیمات فعلی را پیش از ذخیره‌کردن آزمایش کنید."
+    ),
+    "tts_engine": "موتور",
+    "tts_installed": "مدل‌های محلی موجود",
+    "tts_select_installed": "انتخاب مدل محلی…",
+    "tts_refresh": "بازخوانی",
+    "tts_system": "صدای سیستم (Speech Dispatcher)",
+    "tts_folder": "پوشهٔ مدل محلی",
+    "tts_voice": "صدا",
+    "tts_speed": "سرعت گفتار",
+    "tts_device": "پردازش صدا با",
+    "tts_add_language": "افزودن صدای زبان…",
+    "tts_remove_language": "حذف زبان انتخاب‌شده",
+    "tts_language_code": "کد زبان (مانند fa، de، fr)",
+    "tts_sample_text": "متن آزمایشی به همین زبان",
+    "tts_select_folder": "پوشهٔ مدل صوتی استخراج‌شده را انتخاب کنید",
+    "tts_preview": "آزمودن تنظیمات فعلی صدا",
+    "tts_preview_started": "نمونه‌ای کوتاه با تنظیمات فعلی پخش می‌شود…",
+    "tts_preview_unavailable": "آزمون صدا در دسترس نیست.",
     "command_models_heading": "فهم فرمان",
     "command_models_caption": (
         "برای فرمان‌هایی که قواعد سریع حل نمی‌کنند، یک مدل محلی انتخاب کنید. "
@@ -165,6 +190,36 @@ PERSIAN: dict[str, str] = {
     "startup_unavailable": "راه‌انداز نصب‌شدهٔ KYRIN در دسترس نیست.",
     "import_language": "افزودن بستهٔ زبان…",
     "language_help": "می‌توان بدون تغییر کد، بسته‌های زبان دیگر را اینجا افزود.",
+    "conversation_memory_heading": "حافظهٔ گفت‌وگو",
+    "conversation_memory_caption": (
+        "کایرین تاریخچهٔ فعال و محدودی از متن نهایی گفتار را "
+        "روی همین دستگاه نگه می‌دارد. "
+        "صدا ذخیره نمی‌شود و گفتار قبلی مجوز اجرای فرمان تازه نیست."
+    ),
+    "conversation_memory_clear": "پاک‌کردن حافظهٔ فعال گفت‌وگو…",
+    "conversation_memory_review": "مرور متن‌های بایگانی‌شدهٔ گفتار…",
+    "conversation_memory_review_title": "حافظهٔ بایگانی‌شدهٔ گفت‌وگو",
+    "conversation_memory_archive_count": "متن‌های بایگانی‌شده: {count}",
+    "conversation_memory_select": "برای خواندن، یک متن را انتخاب کنید.",
+    "conversation_memory_older": "بارگذاری قدیمی‌ترها",
+    "conversation_memory_restore": "بازگرداندن متن انتخاب‌شده…",
+    "conversation_memory_close": "بستن",
+    "conversation_memory_restore_title": "این متن بازگردانده شود؟",
+    "conversation_memory_restore_question": (
+        "این متن دوباره در زمینهٔ گفت‌وگو در دسترس باشد؟ "
+        "این متن به‌تنهایی مجوز اجرای هیچ کاری نیست."
+    ),
+    "conversation_memory_clear_title": "حافظهٔ فعال گفت‌وگو پاک شود؟",
+    "conversation_memory_clear_question": (
+        "متن‌های فعال گفتار حذف شوند؟ متن‌های بایگانی‌شده حفظ می‌شوند. "
+        "این کار بازگشت‌پذیر نیست."
+    ),
+    "conversation_memory_cleared": "حافظهٔ فعال گفت‌وگو پاک شد.",
+    "conversation_memory_unavailable": "پاک‌کردن حافظهٔ گفت‌وگو ممکن نشد.",
+    "power_safe_preview": "آزمون امن تأیید خاموشی (بدون خاموش‌کردن)…",
+    "power_safe_preview_busy": "پیش‌نمایش تأیید در حال اجراست یا در دسترس نیست.",
+    "diagnostics_latency": "از آغاز گفتار تا نتیجهٔ فرمان",
+    "diagnostics_final_to_result": "از متن نهایی تا نتیجه",
     "language_added": "بستهٔ زبان افزوده شد.",
     "ui_saved": "تنظیم زبان رابط ذخیره شد.",
     "state_stopped": "متوقف",

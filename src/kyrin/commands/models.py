@@ -16,6 +16,15 @@ class CommandKind(StrEnum):
     UNMAXIMIZE_APP = "unmaximize_app"
     FULLSCREEN_APP = "fullscreen_app"
     UNFULLSCREEN_APP = "unfullscreen_app"
+    NEW_APP_WINDOW = "new_app_window"
+    NEW_APP_TAB = "new_app_tab"
+    APP_PREFERENCES = "app_preferences"
+    SHOW_ALL_WINDOWS = "show_all_windows"
+    SHOW_APP_WINDOWS = "show_app_windows"
+    SELECT_APP_WINDOW = "select_app_window"
+    CLOSE_SHOWN_WINDOW = "close_shown_window"
+    HIDE_APP_WINDOWS = "hide_app_windows"
+    SELECT_OPEN_APP_WINDOW = "select_open_app_window"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +32,7 @@ class CommandIntent:
     kind: CommandKind
     target: str
     app: str | None = None
+    window_index: int | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -33,6 +43,13 @@ class CommandIntent:
             self.app is None or not self.app.strip()
         ):
             raise ValueError("open_chat requires a verified or explicit app")
+        if self.kind in (CommandKind.SELECT_APP_WINDOW, CommandKind.CLOSE_SHOWN_WINDOW):
+            if type(self.window_index) is not int or self.window_index < 1:
+                raise ValueError(
+                    "numbered window action requires a positive window number"
+                )
+        elif self.window_index is not None:
+            raise ValueError("only numbered window actions may carry a window number")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +76,8 @@ class CommandContext:
 
     last_referenced_app: str | None = None
     observed_active_app: str | None = None
+    is_final_transcript: bool = True
+    recent_utterances: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +94,42 @@ class PendingAppClarification:
 
     candidates: tuple[SpokenAppCandidate, ...]
     confirmation: bool
+    operation: CommandKind | None = CommandKind.OPEN_APP
+
+
+@dataclass(frozen=True, slots=True)
+class PendingOperationClarification:
+    """An app was named, but the requested operation is still unknown."""
+
+    app_candidate: SpokenAppCandidate
+    options: tuple[CommandKind, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PendingWindowSelection:
+    """A numbered picker already requested for one registered application."""
+
+    app_candidate: SpokenAppCandidate
+    count: int
+    all_apps: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PendingActionConfirmation:
+    """A potentially disruptive menu choice awaits a distinct yes/no answer."""
+
+    app_candidate: SpokenAppCandidate
+    operation: CommandKind
+
+
+@dataclass(frozen=True, slots=True)
+class PendingNumberedCloseConfirmation:
+    """A selected picker tile awaits a separate yes/no before closing."""
+
+    app_candidate: SpokenAppCandidate
+    window_index: int
+    count: int
+    all_apps: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +142,13 @@ class PendingIntentClarification:
 
 
 PendingCommandClarification = (
-    PendingClarification | PendingAppClarification | PendingIntentClarification
+    PendingClarification
+    | PendingAppClarification
+    | PendingIntentClarification
+    | PendingOperationClarification
+    | PendingActionConfirmation
+    | PendingNumberedCloseConfirmation
+    | PendingWindowSelection
 )
 
 
@@ -102,7 +163,12 @@ class ResponseKind(StrEnum):
     CHOOSE_APP = "choose_app"
     CONFIRM_APP = "confirm_app"
     CHOOSE_APP_OR_CHAT = "choose_app_or_chat"
+    CHOOSE_OPERATION = "choose_operation"
+    CHOOSE_WINDOW = "choose_window"
+    CONFIRM_ACTION = "confirm_action"
+    CONFIRM_NUMBERED_CLOSE = "confirm_numbered_close"
     REPEAT_COMMAND = "repeat_command"
+    CONVERSATION = "conversation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,8 +210,23 @@ class ResponseRequest:
     target: str | None = None
     app_candidates: tuple[str, ...] = ()
     language: str | None = None
+    message: str | None = None
+    operation_candidates: tuple[CommandKind, ...] = ()
+    window_count: int = 0
+    window_index: int = 0
 
     def __post_init__(self) -> None:
+        if self.kind is ResponseKind.CONVERSATION:
+            if (
+                self.message is None
+                or not self.message.strip()
+                or len(self.message) > 300
+                or self.target is not None
+                or self.app_candidates
+            ):
+                raise ValueError("conversation requires only a short message")
+        elif self.message is not None:
+            raise ValueError("only conversation may carry a message")
         if self.kind is ResponseKind.REPEAT_COMMAND and (
             self.target is not None or self.app_candidates
         ):
@@ -164,6 +245,18 @@ class ResponseRequest:
             raise ValueError("app-or-chat clarification requires an app name")
         if self.kind is ResponseKind.CHOOSE_APP and len(self.app_candidates) < 2:
             raise ValueError("app choice requires at least two candidates")
+        if self.kind is ResponseKind.CHOOSE_OPERATION and (
+            self.target is None or not self.operation_candidates
+        ):
+            raise ValueError("operation choice requires a target and options")
+        if self.kind is ResponseKind.CONFIRM_ACTION and (
+            self.target is None or len(self.operation_candidates) != 1
+        ):
+            raise ValueError("action confirmation requires one operation")
+        if self.kind is ResponseKind.CONFIRM_NUMBERED_CLOSE and (
+            self.window_index < 1 or self.target is None
+        ):
+            raise ValueError("numbered close confirmation requires a window number")
 
 
 CommandEvent = (

@@ -45,7 +45,7 @@ The generated WAV files, STT JSON, and decision JSON remain in Git-ignored
 ```bash
 .venv/bin/python scripts/stt/evaluate_offline_stt.py \
   --manifest datasets/stt/results/vosk-en-lgraph-five-verified-manifest.csv \
-  --model-path models/local/vosk-model-en-us-0.22-lgraph \
+  --model-path models/local/by-model/stt/vosk/vosk-model-en-us-0.22-lgraph \
   --model-language en --device cpu \
   > datasets/stt/results/vosk-en-lgraph-five-verified-command-replay.json
 

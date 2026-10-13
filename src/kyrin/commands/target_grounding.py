@@ -36,7 +36,8 @@ class TargetGrounding:
 
 _EN_ACTION = re.compile(
     r"^(?:exit fullscreen|leave fullscreen|unfullscreen|unmaximize|"
-    r"maximize|minimize|fullscreen|restore|bring back|show|close|open|go to)\s+"
+    r"maximize|minimize|fullscreen|restore|bring back|show|"
+    r"close|exit|quit|open|go to)\s+"
 )
 _EN_CHAT_POSSESSIVE = re.compile(
     r"^(?P<name>.+?)'s (?:chat|conversation)(?: in (?P<app>.+))?$"

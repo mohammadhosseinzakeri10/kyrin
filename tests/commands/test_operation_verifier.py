@@ -32,13 +32,21 @@ def proposed(*operations: RequestedOperation) -> UnderstandingResult:
     [
         ("Open Telegram.", "en", (RequestedOperation.OPEN_APP,)),
         ("Kairin, please close Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),
+        ("Exit Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),
+        ("Quit Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),
+        ("Kyrene, please open Telegram", "en", (RequestedOperation.OPEN_APP,)),
         ("Minimize Telegram", "en", (RequestedOperation.MINIMIZE_APP,)),
+        ("Hide Telegram", "en", (RequestedOperation.MINIMIZE_APP,)),
+        ("Launch Telegram", "en", (RequestedOperation.OPEN_APP,)),
+        ("Switch to Telegram", "en", (RequestedOperation.OPEN_APP,)),
         (
             "Open Telegram and open Ali's chat",
             "en",
             (RequestedOperation.OPEN_APP, RequestedOperation.OPEN_CHAT),
         ),
         ("تلگرام را باز کن", "fa", (RequestedOperation.OPEN_APP,)),
+        ("تلگرام را اجرا کن", "fa", (RequestedOperation.OPEN_APP,)),
+        ("تلگرام را پنهان کن", "fa", (RequestedOperation.MINIMIZE_APP,)),
         ("تلیگرام را باز کن", "fa", (RequestedOperation.OPEN_APP,)),
         ("چت علی را باز کن", "fa", (RequestedOperation.OPEN_CHAT,)),
         (

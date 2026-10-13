@@ -13,7 +13,10 @@ supported language is selected.
 The caption grows for longer messages, wraps at a screen-bounded width, and
 shrinks again for short states. The extension keeps the resulting character
 inside the primary monitor instead of replacing the end of a message with an
-ellipsis. The visual transport sends the full caption.
+ellipsis. The mascot sits in a row that tracks the caption width; its
+horizontal position is recalculated whenever the caption grows or shrinks.
+This keeps it centered over the status bar. The visual transport sends the
+full caption.
 
 | State | Example caption | Meaning |
 | --- | --- | --- |

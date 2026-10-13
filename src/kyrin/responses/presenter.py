@@ -21,7 +21,28 @@ _TEXT: dict[str, dict[str, str]] = {
         "choose_app_or_chat": (
             "منظورتان برنامهٔ {target} است یا یک چت؟ لطفاً بگویید «برنامه» یا «چت»."
         ),
-        "choose_app": "منظورتان کدام برنامه است: {options}؟",
+        "choose_app": "کدام برنامه را می‌خواهید؟ {options} شماره یا نام را بگویید.",
+        "choose_operation": (
+            "برای {target} چه کنم؟ {options} شماره را بگویید یا «خیر» بگویید."
+        ),
+        "choose_operation_open": (
+            "برای {target} چه کنم؟ {options} برای بازکردن یا جلوآوردن «بله»، "
+            "برای لغو «خیر»، یا شمارهٔ گزینه را بگویید."
+        ),
+        "choose_operation_only_open": (
+            "برنامهٔ {target} را باز کنم؟ «بله» یا «خیر» بگویید."
+        ),
+        "choose_window": (
+            "فقط پنجره‌های {target} نمایش داده شده‌اند. "
+            "شمارهٔ پنجرهٔ موردنظر را بگویید یا روی آن کلیک کنید."
+        ),
+        "choose_open_window": (
+            "پنجره‌های برنامه‌هایی که برای کنترل آن‌ها اجازه داده‌اید نمایش داده شدند. "
+            "شماره را بگویید، روی پیش‌نمایش کلیک کنید، یا نام برنامه را بگویید. "
+            "اگر چند پنجره از یک برنامه باز است، شمارهٔ پنجره را بگویید."
+        ),
+        "confirm_action": "آیا واقعاً می‌خواهید {target} را ببندم؟ بله یا خیر؟",
+        "confirm_numbered_close": "پنجرهٔ شمارهٔ {number} را ببندم؟ بله یا خیر؟",
         "choose_app_duplicate": (
             "چند برنامه با نام {target} پیدا شد. لطفاً نام متفاوتی بگویید."
         ),
@@ -46,6 +67,9 @@ _TEXT: dict[str, dict[str, str]] = {
         "unavailable": "این پنجره از تغییر درخواستی پشتیبانی نمی‌کند.",
         "window_unverified": (
             "نتیجهٔ تغییر پنجره را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید."
+        ),
+        "window_state_changed": (
+            "فهرست پنجره‌ها تغییر کرده است. لطفاً دوباره پنجره‌ها را نمایش دهید."
         ),
         "dependency_unverified": (
             "فعال‌بودن برنامهٔ موردنظر تأیید نشد؛ برای جلوگیری از رفتن به چت "
@@ -89,7 +113,26 @@ _TEXT: dict[str, dict[str, str]] = {
         "choose_app_or_chat": (
             "Do you mean the {target} app or a chat? Please say app or chat."
         ),
-        "choose_app": "Which app did you mean: {options}?",
+        "choose_app": "Which app do you mean? {options} Say its number or name.",
+        "choose_operation": (
+            "What should I do with {target}? {options} Say a number or no."
+        ),
+        "choose_operation_open": (
+            "What should I do with {target}? {options} Say yes to open or "
+            "bring it forward, no to cancel, or choose an option number."
+        ),
+        "choose_operation_only_open": "Open {target}? Say yes or no.",
+        "choose_window": (
+            "Only {target} windows are shown. "
+            "Say a window number or click its preview."
+        ),
+        "choose_open_window": (
+            "Windows of apps you've allowed to be controlled are shown. "
+            "Say a number, click a preview, or say an app name. "
+            "For multiple windows of the same app, choose a number."
+        ),
+        "confirm_action": "Do you really want me to close {target}? Yes or no?",
+        "confirm_numbered_close": "Close window number {number}? Yes or no?",
         "choose_app_duplicate": (
             "Multiple apps are named {target}. Please use a different name."
         ),
@@ -117,6 +160,9 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "window_unverified": (
             "I couldn't verify the window change. Please check the screen."
+        ),
+        "window_state_changed": (
+            "The window list changed. Please show the Terminal windows again."
         ),
         "dependency_unverified": (
             "I couldn't verify that the intended app is active, so I stopped "
@@ -181,7 +227,12 @@ class ResponsePresenter:
         language = _supported_language(event.language) or self.language
         messages = _TEXT[language]
         if isinstance(event, ResponseRequest):
-            text = self._command_text(event, messages, language)
+            text = (
+                event.message
+                if event.kind is ResponseKind.CONVERSATION
+                else self._command_text(event, messages, language)
+            )
+            assert text is not None
             stream_id, segment_id = event.stream_id, event.segment_id
         elif isinstance(event, ActionNotice):
             text = (
@@ -220,12 +271,22 @@ class ResponsePresenter:
                 "multiple_windows",
                 "unavailable",
                 "window_unverified",
+                "window_state_changed",
             }:
                 text = messages[event.error_code]
             else:
                 text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id
-        return PresentedResponse(stream_id, segment_id, text, event.channel, language)
+        response_language = (
+            event.language
+            if isinstance(event, ResponseRequest)
+            and event.kind is ResponseKind.CONVERSATION
+            and event.language is not None
+            else language
+        )
+        return PresentedResponse(
+            stream_id, segment_id, text, event.channel, response_language
+        )
 
     def _command_text(
         self, event: ResponseRequest, messages: dict[str, str], language: str
@@ -241,10 +302,57 @@ class ResponsePresenter:
                     target=event.app_candidates[0]
                 )
             return messages[event.kind.value].format(
-                options="، ".join(event.app_candidates)
-                if language == "fa"
-                else ", ".join(event.app_candidates)
+                options=("؛ " if language == "fa" else "; ").join(
+                    f"{index}. {name}"
+                    for index, name in enumerate(event.app_candidates, start=1)
+                ) + "."
             )
+        if event.kind is ResponseKind.CHOOSE_OPERATION:
+            labels = {
+                "en": {
+                    CommandKind.OPEN_APP: "Open or bring forward",
+                    CommandKind.MINIMIZE_APP: "Minimize",
+                    CommandKind.CLOSE_APP_WINDOW: "Close",
+                    CommandKind.UNMAXIMIZE_APP: "Restore normal size",
+                    CommandKind.NEW_APP_WINDOW: "New window",
+                    CommandKind.NEW_APP_TAB: "New tab",
+                    CommandKind.APP_PREFERENCES: "Preferences",
+                    CommandKind.SHOW_ALL_WINDOWS: "Show all open windows",
+                    CommandKind.SHOW_APP_WINDOWS: "Choose a Terminal window",
+                },
+                "fa": {
+                    CommandKind.OPEN_APP: "بازکردن یا جلوآوردن",
+                    CommandKind.MINIMIZE_APP: "کوچک‌کردن",
+                    CommandKind.CLOSE_APP_WINDOW: "بستن",
+                    CommandKind.UNMAXIMIZE_APP: "برگرداندن اندازهٔ عادی",
+                    CommandKind.NEW_APP_WINDOW: "پنجرهٔ تازه",
+                    CommandKind.NEW_APP_TAB: "تب تازه",
+                    CommandKind.APP_PREFERENCES: "تنظیمات",
+                    CommandKind.SHOW_ALL_WINDOWS: "نمایش همهٔ پنجره‌های باز",
+                    CommandKind.SHOW_APP_WINDOWS: "انتخاب پنجرهٔ ترمینال",
+                },
+            }[language]
+            options = ("؛ " if language == "fa" else "; ").join(
+                f"{index}. {labels[kind]}"
+                for index, kind in enumerate(event.operation_candidates, start=1)
+            )
+            if event.operation_candidates == (CommandKind.OPEN_APP,):
+                template = messages["choose_operation_only_open"]
+            elif CommandKind.OPEN_APP in event.operation_candidates:
+                template = messages["choose_operation_open"]
+            else:
+                template = messages["choose_operation"]
+            return template.format(
+                target=event.target, options=options
+            )
+        if event.kind is ResponseKind.CONFIRM_ACTION:
+            return messages["confirm_action"].format(target=event.target)
+        if event.kind is ResponseKind.CONFIRM_NUMBERED_CLOSE:
+            return messages["confirm_numbered_close"].format(number=event.window_index)
+        if event.kind is ResponseKind.CHOOSE_WINDOW:
+            if event.target == "open applications":
+                return messages["choose_open_window"]
+            return messages["choose_window"].format(target=event.target)
         if len(event.app_candidates) != 2:
             return messages[event.kind.value]
         first, second = event.app_candidates

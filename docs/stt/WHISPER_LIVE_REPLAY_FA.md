@@ -23,7 +23,7 @@
 PYTHONPATH=src .venv/bin/python scripts/stt/benchmark_whisper_replay.py \
   --wav datasets/stt/recordings/fa-03.wav \
   --server build/tools/whisper.cpp-v1.9.4/build-cpu/bin/whisper-server \
-  --model models/local/whisper.cpp/ggml-small.bin \
+  --model models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin \
   --language fa --threads 4 --step-seconds 2 \
   --reference 'تلگرام را باز نکن.'
 ```

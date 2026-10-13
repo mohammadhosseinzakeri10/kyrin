@@ -14,7 +14,7 @@ import pytest
 PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
@@ -34,10 +34,17 @@ from kyrin.commands.models import (
     ResponseChannel,
 )
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 from kyrin.responses.presenter import PresentedResponse
+from kyrin.responses.speech import SpeechSynthesisError
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
-from kyrin.system_power.flow import PowerAction, PowerStage, SystemPowerFlow
+from kyrin.system_power.flow import (
+    PowerAction,
+    PowerPrompt,
+    PowerStage,
+    SystemPowerFlow,
+)
 
 
 class FakeMicrophones:
@@ -123,6 +130,71 @@ def _window(
     )
 
 
+def test_preferences_can_clear_local_text_history(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    path = tmp_path / "memory" / "conversation.sqlite3"
+    history = SqliteConversationHistory(path)
+    history.append(ConversationTurn("Hello KYRIN", "en", datetime.now(UTC), "s", 0, 0))
+    history.archive_active()
+    history.append(ConversationTurn("New turn", "en", datetime.now(UTC), "s", 0, 1))
+    history.close()
+    monkeypatch.setattr("kyrin.app.qt.window.default_history_path", lambda: path)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes
+    )
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    window = _window(AppSettings(), store, _controller([]))
+    try:
+        window.clear_memory_button.click()
+        reopened = SqliteConversationHistory(path)
+        assert reopened.recent() == ()
+        assert reopened.archived_count() == 1
+        reopened.close()
+    finally:
+        window.close()
+
+
+def test_preferences_review_and_restore_selected_archived_turn(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    path = tmp_path / "memory" / "conversation.sqlite3"
+    history = SqliteConversationHistory(path)
+    history.append(
+        ConversationTurn("private example", "en", datetime.now(UTC), "s", 0, 0)
+    )
+    history.archive_active()
+    history.close()
+    monkeypatch.setattr("kyrin.app.qt.window.default_history_path", lambda: path)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes
+    )
+    window = _window(
+        AppSettings(), JsonSettingsStore(tmp_path / "settings.json"), _controller([])
+    )
+    try:
+        window.review_memory_button.click()
+        dialog = window._memory_dialog
+        assert dialog is not None
+        assert dialog.turn_list.count() == 1
+        dialog.turn_list.setCurrentRow(0)
+        assert dialog.preview.toPlainText() == "private example"
+        dialog.restore_button.click()
+        assert dialog.turn_list.count() == 0
+        reopened = SqliteConversationHistory(path)
+        assert reopened.archived_count() == 0
+        assert [turn.text for turn in reopened.recent()] == ["private example"]
+        reopened.close()
+    finally:
+        if window._memory_dialog is not None:
+            window._memory_dialog.close()
+        window.close()
+
+
 def test_power_buttons_work_without_microphone_session(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -146,6 +218,8 @@ def test_power_buttons_work_without_microphone_session(
     events = EventBridge()
     backend = FakePowerBackend()
     flow = SystemPowerFlow(backend, events.publish, enabled=True)
+    announcements: list[PowerPrompt] = []
+    flow.set_announcement(announcements.append)
     controller = ApplicationController(lambda _: nullcontext(FakeSession()), flow)
     window = ControlWindow(
         settings,
@@ -166,7 +240,11 @@ def test_power_buttons_work_without_microphone_session(
             ),
         )
         assert backend.requests == []
-        window.power_continue_button.click()
+        assert window.power_dialog.isVisible()
+        assert not window.isVisible()
+        window._on_event(SpeechSynthesisError("speaker unavailable"))
+        assert window.power_dialog.voice_warning.isVisible()
+        window.power_dialog.confirm_button.click()
         _pump_until(
             application,
             lambda: (
@@ -174,12 +252,58 @@ def test_power_buttons_work_without_microphone_session(
                 and window._power_prompt.stage is PowerStage.SECOND
             ),
         )
-        assert "Power off this computer" in window.power_continue_button.text()
-        window.power_cancel_button.click()
+        assert "Power off" in window.power_dialog.confirm_button.text()
+        assert not window.power_dialog.voice_warning.isVisible()
+        window.power_dialog.cancel_button.click()
         _pump_until(application, lambda: window._power_prompt is None)
         assert backend.requests == []
+        assert not window.power_dialog.isVisible()
+        window.actions_page.power_buttons[PowerAction.POWER_OFF].click()
+        _pump_until(
+            application,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.FIRST
+            ),
+        )
+        window.power_dialog.close()
+        _pump_until(application, lambda: window._power_prompt is None)
+        assert backend.requests == []
+
+        # Final speech takes the same visible two-stage path. The backend is a
+        # fake and cannot issue an operating-system power request.
+        assert flow.on_final_speech("Power off")
+        _pump_until(
+            application,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.FIRST
+            ),
+        )
+        assert window.power_dialog.isVisible()
+        assert flow.on_final_speech("Yes")
+        _pump_until(
+            application,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.SECOND
+            ),
+        )
+        assert backend.requests == []
+        assert flow.on_final_speech("Power off")
+        _pump_until(
+            application,
+            lambda: (
+                backend.requests == [PowerAction.POWER_OFF]
+                and window._power_prompt is None
+            ),
+        )
+        assert not window.power_dialog.isVisible()
+        assert any(prompt.stage is PowerStage.FIRST for prompt in announcements)
+        assert any(prompt.stage is PowerStage.SECOND for prompt in announcements)
     finally:
         window._timer.stop()
+        window.power_dialog.dismiss()
         window.deleteLater()
         application.processEvents()
 
@@ -533,6 +657,57 @@ def test_close_minimizes_without_stopping_listening(
         application.processEvents()
 
 
+def test_power_preview_button_never_calls_real_backend(
+    application: QApplication, tmp_path: Path
+) -> None:
+    class Backend:
+        def __init__(self) -> None:
+            self.requests: list[PowerAction] = []
+
+        def work_warning(self, action: PowerAction) -> str:
+            return "No blockers detected."
+
+        def request(self, action: PowerAction) -> None:
+            self.requests.append(action)
+
+    real = Backend()
+    preview = Backend()
+    events = EventBridge()
+    flow = SystemPowerFlow(real, events.publish, enabled=False, preview_backend=preview)
+    window = ControlWindow(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        ApplicationController(lambda _: nullcontext(FakeSession()), flow),
+        FakeMicrophones(),
+        events,
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    try:
+        window.actions_page.power_preview_button.click()
+        _pump_until(
+            application,
+            lambda: window._power_prompt is not None
+            and window._power_prompt.stage is PowerStage.FIRST,
+        )
+        assert "SAFE PREVIEW" in window.power_dialog.action_label.text()
+        assert flow.on_final_speech("Yes")
+        _pump_until(
+            application,
+            lambda: window._power_prompt is not None
+            and window._power_prompt.stage is PowerStage.SECOND,
+        )
+        assert flow.on_final_speech("Power off")
+        _pump_until(application, lambda: preview.requests == [PowerAction.POWER_OFF])
+        assert real.requests == []
+    finally:
+        window.power_dialog.dismiss()
+        window.close()
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_worker_response_reaches_window_on_gui_event_loop(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -664,7 +839,9 @@ def test_builtin_persian_changes_layout_without_changing_speech_language(
         )
         assert window.language_edit.text() == "en"
         assert window.ui_language_combo.currentData() == "system"
-        window.ui_language_combo.setCurrentIndex(window.ui_language_combo.findData("en"))
+        window.ui_language_combo.setCurrentIndex(
+            window.ui_language_combo.findData("en")
+        )
         window.save_ui_button.click()
         assert window.layoutDirection() is Qt.LayoutDirection.LeftToRight
     finally:

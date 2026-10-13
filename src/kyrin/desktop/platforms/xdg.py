@@ -34,7 +34,8 @@ def _read_app(path: Path, platform_id: str) -> tuple[InstalledApp, bool] | None:
     menu_visible = entry.get("NoDisplay", "false").lower() != "true" and bool(
         entry.get("Exec", "").strip()
     )
-    return InstalledApp(platform_id, name), menu_visible
+    categories = tuple(item for item in entry.get("Categories", "").split(";") if item)
+    return InstalledApp(platform_id, name, categories), menu_visible
 
 
 class XdgDesktopAppCatalog:

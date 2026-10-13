@@ -32,20 +32,29 @@ from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.single_instance import SingleInstanceError, SingleInstanceGuard
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
+from kyrin.app.settings import TtsSelection
 from kyrin.app.settings_store import (
     JsonSettingsStore,
     SettingsError,
     linux_settings_path,
 )
 from kyrin.audio.microphone.devices import PortAudioMicrophoneResolver
+from kyrin.commands.models import ResponseChannel
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.platforms.gnome import GnomeShellActiveAppObserver
 from kyrin.desktop.platforms.gnome_activation import GnomeExistingAppActivator
 from kyrin.desktop.platforms.gnome_window_control import GnomeAppWindowController
+from kyrin.desktop.platforms.gnome_window_presence import GnomeAppWindowPresence
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.responses.gnome_status import GnomeVisualStatusSink
-from kyrin.system_power.flow import SystemPowerFlow
+from kyrin.responses.presenter import PresentedResponse
+from kyrin.responses.speech import (
+    ResponseSpeaker,
+    SpeechSynthesisError,
+)
+from kyrin.system_power.flow import InertPowerBackend, PowerPrompt, SystemPowerFlow
 from kyrin.system_power.gnome import GnomePowerBackend
+from kyrin.tts.runtime import ConfiguredSpeechSynthesizer
 from kyrin.vision.ocr.contracts import OcrOptions
 
 
@@ -74,6 +83,11 @@ def _activate_window(window: ControlWindow) -> None:
     window.showNormal()
     window.raise_()
     window.activateWindow()
+
+
+def _tts_model_root(development_root: Path, installed_root: Path) -> Path:
+    """Use the organized source-checkout catalog, retaining packaged fallback."""
+    return development_root if development_root.is_dir() else installed_root
 
 
 def _gnome_observer(
@@ -127,7 +141,10 @@ def main() -> int:
     model_library = ModelLibrary(linux_model_library_path())
     development_command_store = (
         Path(__file__).resolve().parents[4]
-        / "models/local/command-understanding/ollama"
+        / "models/local/by-model/command-understanding/ollama"
+    )
+    development_tts_root = (
+        Path(__file__).resolve().parents[4] / "models/local/by-model/tts"
     )
     try:
         model_library.cleanup_incomplete_imports()
@@ -135,6 +152,12 @@ def main() -> int:
         print(f"KYRIN model library: {error}", file=sys.stderr)
     microphones = PortAudioMicrophoneResolver()
     events = EventBridge()
+    synthesizer = ConfiguredSpeechSynthesizer(
+        settings.tts if settings is not None else TtsSelection(),
+        settings.tts_languages if settings is not None else (),
+    )
+    speaker = ResponseSpeaker(synthesizer, on_error=events.publish)
+    app.aboutToQuit.connect(speaker.close)
     power_flow = SystemPowerFlow(
         GnomePowerBackend(),
         events.publish,
@@ -143,7 +166,37 @@ def main() -> int:
             and settings.action_execution_enabled
             and settings.system_power_enabled
         ),
+        preview_backend=InertPowerBackend(),
     )
+    power_flow.set_voice_ready(lambda: not speaker.is_active)
+
+    def announce_power(prompt: PowerPrompt) -> None:
+        response = PresentedResponse(
+            None,
+            None,
+            prompt.speech_text or prompt.text,
+            ResponseChannel.TEXT_AND_VOICE,
+            "en",
+        )
+        if not speaker.submit(response):
+            events.publish(SpeechSynthesisError("Voice output is busy"))
+
+    power_flow.set_announcement(announce_power)
+
+    def preview_tts(text: str, language: str, selection: TtsSelection) -> bool:
+        return speaker.submit(
+            PresentedResponse(
+                None,
+                None,
+                text,
+                ResponseChannel.TEXT_AND_VOICE,
+                language,
+            ),
+            speak=lambda spoken, spoken_language: synthesizer.speak_preview(
+                spoken, spoken_language, selection
+            ),
+        )
+
     catalog = XdgDesktopAppCatalog()
     active_identity = GnomeShellActiveAppObserver({})
 
@@ -175,6 +228,13 @@ def main() -> int:
     window_controller_factory = (
         GnomeAppWindowController if GnomeAppWindowController.available() else None
     )
+    # The Shell extension can load after KYRIN starts at login. A GNOME
+    # session keeps the adapter and its read calls fail safely until ready.
+    window_presence_factory = (
+        GnomeAppWindowPresence
+        if "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
+        else None
+    )
     factory = UbuntuSessionFactory(
         stt_openers=standard_stt_openers(
             whisper_server_path=server, whisper_gpu_server_path=gpu_server
@@ -183,11 +243,13 @@ def main() -> int:
         microphones=microphones,
         catalog=catalog,
         window_controller_factory=window_controller_factory,
+        window_presence_factory=window_presence_factory,
         observer_factory=observer_factory,
         activator_factory=activator_factory,
         chat_verifier=chat_verifier,
         focused_window=focused_window,
         system_power=power_flow,
+        response_speaker=speaker,
         visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
     controller = ApplicationController(factory, power_flow)
@@ -203,6 +265,11 @@ def main() -> int:
         suggested_command_store=(
             development_command_store if development_command_store.is_dir() else None
         ),
+        tts_model_root=_tts_model_root(
+            development_tts_root, linux_model_library_path().parent / "tts"
+        ),
+        configure_tts=synthesizer.configure,
+        preview_tts=preview_tts,
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),
         app_catalog=catalog,

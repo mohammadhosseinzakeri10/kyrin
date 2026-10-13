@@ -14,6 +14,7 @@ from kyrin.commands.models import (
 @dataclass(frozen=True, slots=True)
 class ReadyCommand:
     intent: CommandIntent
+    follow_up: PendingCommandClarification | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,13 @@ class WakeOnly:
     """An address without an action; acknowledge without executing anything."""
 
 
+@dataclass(frozen=True, slots=True)
+class ConversationalReply:
+    """A model reply to the user, with no permission to execute an action."""
+
+    text: str
+
+
 Interpretation = (
     ReadyCommand
     | ReadyPlan
@@ -60,6 +68,7 @@ Interpretation = (
     | UnrecognizedCommand
     | NotACommand
     | WakeOnly
+    | ConversationalReply
 )
 
 

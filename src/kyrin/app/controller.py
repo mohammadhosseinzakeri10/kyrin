@@ -160,6 +160,13 @@ class ApplicationController:
             else False
         )
 
+    def preview_system_action(self, action: PowerAction) -> bool:
+        return (
+            self._system_power.start_preview(action)
+            if self._system_power is not None
+            else False
+        )
+
     def wait_until_stopped(self, timeout_s: float | None = None) -> bool:
         """Allow an application shutdown path to wait for complete cleanup."""
         if timeout_s is not None and timeout_s < 0:

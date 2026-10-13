@@ -89,3 +89,17 @@ def test_menu_picker_shows_only_visible_launchable_entries(tmp_path: Path) -> No
 
     assert catalog.list_menu_apps() == (InstalledApp("telegram.desktop", "Telegram"),)
     assert len(catalog.list_apps()) == 3
+
+
+def test_browser_category_comes_from_registered_desktop_entry(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    _entry(
+        root,
+        "chrome.desktop",
+        name="Google Chrome",
+        extra="Categories=Network;WebBrowser;\n",
+    )
+
+    assert XdgDesktopAppCatalog((root,)).find_app("chrome.desktop") == InstalledApp(
+        "chrome.desktop", "Google Chrome", ("Network", "WebBrowser")
+    )

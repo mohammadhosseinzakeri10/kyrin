@@ -8,6 +8,8 @@ from threading import Lock, Thread
 from time import monotonic
 from typing import Protocol
 
+from kyrin.commands.wake_names import DEFAULT_WAKE_NAMES
+
 
 class PowerAction(StrEnum):
     POWER_OFF = "power_off"
@@ -28,10 +30,10 @@ class PowerStage(StrEnum):
 
 
 _PHRASES = {
-    PowerAction.POWER_OFF: "Power off this computer",
-    PowerAction.RESTART: "Restart this computer",
-    PowerAction.LOG_OUT: "Log out of this session",
-    PowerAction.SUSPEND: "Suspend this computer",
+    PowerAction.POWER_OFF: "Power off",
+    PowerAction.RESTART: "Restart computer",
+    PowerAction.LOG_OUT: "Log out",
+    PowerAction.SUSPEND: "Suspend computer",
 }
 _REQUESTS = {
     "power off": PowerAction.POWER_OFF,
@@ -71,7 +73,8 @@ def _normalize(text: str) -> str:
 def recognized_power_request(text: str) -> PowerAction | None:
     """Recognize an explicit request; model proposals cannot supply this proof."""
     normalized = _normalize(text)
-    for prefix in ("kyrin ", "kairin ", "kyreen ", "کایرین "):
+    for name in DEFAULT_WAKE_NAMES:
+        prefix = f"{name} "
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix) :]
             break
@@ -90,12 +93,24 @@ class PowerPrompt:
     text: str
     spoken: bool = False
     phrase: str | None = None
+    speech_text: str | None = None
+    preview: bool = False
 
 
 class PowerBackend(Protocol):
     def work_warning(self, action: PowerAction) -> str: ...
 
     def request(self, action: PowerAction) -> None: ...
+
+
+class InertPowerBackend:
+    """Exercise confirmations without sending any operating-system request."""
+
+    def work_warning(self, action: PowerAction) -> str:
+        return "Safe preview: no operating-system request will be sent."
+
+    def request(self, action: PowerAction) -> None:
+        return
 
 
 class SystemPowerFlow:
@@ -108,10 +123,13 @@ class SystemPowerFlow:
         *,
         enabled: bool,
         voice_ready: Callable[[], bool] = lambda: True,
+        preview_backend: PowerBackend | None = None,
         timeout_s: float = 45.0,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self._backend = backend
+        self._preview_backend = preview_backend
+        self._request_backend: PowerBackend = backend
         self._publish = publish
         self._announcement: Callable[[PowerPrompt], None] | None = None
         self._enabled = enabled
@@ -173,9 +191,17 @@ class SystemPowerFlow:
             announcement(prompt)
 
     def start(self, action: PowerAction) -> bool:
+        return self._start(action, preview=False)
+
+    def start_preview(self, action: PowerAction) -> bool:
+        if self._preview_backend is None:
+            return False
+        return self._start(action, preview=True)
+
+    def _start(self, action: PowerAction, *, preview: bool) -> bool:
         with self._lock:
             enabled = self._enabled
-        if not enabled:
+        if not enabled and not preview:
             self._emit(
                 PowerPrompt(
                     0,
@@ -186,29 +212,50 @@ class SystemPowerFlow:
             )
             return False
         with self._lock:
-            if not self._enabled or self._pending is not None or self._inflight:
+            if (
+                (not self._enabled and not preview)
+                or self._pending is not None
+                or self._inflight
+            ):
                 return False
             self._next_id += 1
             request_id = self._next_id
+            self._request_backend = (
+                self._preview_backend
+                if preview and self._preview_backend
+                else self._backend
+            )
             self._pending = PowerPrompt(
                 request_id,
                 action,
                 PowerStage.CHECKING,
-                "Checking whether the session reports unfinished work…",
+                (
+                    "Safe preview: checking the confirmation flow…"
+                    if preview
+                    else "Checking whether the session reports unfinished work…"
+                ),
+                preview=preview,
             )
             self._deadline = self._clock() + self._timeout_s
             prompt = self._pending
         self._emit(prompt)
-        Thread(target=self._check, args=(request_id, action), daemon=True).start()
+        Thread(
+            target=self._check,
+            args=(request_id, action, self._request_backend, preview),
+            daemon=True,
+        ).start()
         return True
 
-    def _check(self, request_id: int, action: PowerAction) -> None:
+    def _check(
+        self, request_id: int, action: PowerAction, backend: PowerBackend, preview: bool
+    ) -> None:
         try:
-            warning = self._backend.work_warning(action)
+            warning = backend.work_warning(action)
         except Exception:
             warning = "Could not inspect session blockers."
         text = (
-            f"{warning} KYRIN cannot verify unsaved files in every app. "
+            f"{_PHRASES[action]} requested. {warning} "
+            "KYRIN cannot verify unsaved files in every app. "
             "Save your work. Say Yes or click Continue to proceed."
         )
         with self._lock:
@@ -218,12 +265,25 @@ class SystemPowerFlow:
                 or self._pending.stage is not PowerStage.CHECKING
             ):
                 return
-            prompt = PowerPrompt(request_id, action, PowerStage.FIRST, text, True)
+            prompt = PowerPrompt(
+                request_id,
+                action,
+                PowerStage.FIRST,
+                text,
+                True,
+                speech_text=(
+                    f"{_PHRASES[action]} requested. {warning} Save your work. "
+                    "Say Yes or choose Continue to proceed."
+                ),
+                preview=preview,
+            )
             self._pending = prompt
+            self._deadline = self._clock() + self._timeout_s
         self._emit(prompt)
 
     def respond(self, request_id: int, answer: str, *, spoken: bool = False) -> bool:
         answer = _normalize(answer)
+        reminder_only = False
         with self._lock:
             pending = self._pending
             if pending is None or pending.request_id != request_id:
@@ -243,32 +303,62 @@ class SystemPowerFlow:
                     f"Final confirmation: say exactly '{phrase}' or click the "
                     "matching button. You can still cancel."
                 )
+                self._deadline = self._clock() + self._timeout_s
             elif pending.stage is PowerStage.SECOND and answer == _normalize(
                 _PHRASES[pending.action]
             ):
                 stage = PowerStage.SUBMITTING
                 text = "Sending the request to the operating system…"
             else:
-                return True  # Other speech cannot escape into ordinary commands.
-            prompt = PowerPrompt(
-                request_id,
-                pending.action,
-                stage,
-                text,
-                stage in (PowerStage.SECOND, PowerStage.CANCELLED, PowerStage.EXPIRED),
-                _PHRASES[pending.action] if stage is PowerStage.SECOND else None,
-            )
-            self._pending = prompt if stage is PowerStage.SECOND else None
-            if stage is PowerStage.SUBMITTING:
-                self._inflight = True
+                # Keep the same request and deadline. Unclear speech never
+                # becomes a confirmation or a new power action.
+                phrase = _PHRASES[pending.action]
+                text = "I could not confirm that. " + (
+                    "Say Yes or choose Continue."
+                    if pending.stage is PowerStage.FIRST
+                    else f"Say '{phrase}' or choose its button."
+                )
+                reminder = PowerPrompt(
+                    request_id,
+                    pending.action,
+                    pending.stage,
+                    text,
+                    spoken,
+                    phrase if pending.stage is PowerStage.SECOND else None,
+                    preview=pending.preview,
+                )
+                self._pending = reminder
+                prompt = reminder
+                stage = pending.stage
+                # A reminder is displayed and may be spoken, but cannot reach
+                # the submitting branch below.
+                reminder_only = True
+            if not reminder_only:
+                prompt = PowerPrompt(
+                    request_id,
+                    pending.action,
+                    stage,
+                    text,
+                    stage
+                    in (PowerStage.SECOND, PowerStage.CANCELLED, PowerStage.EXPIRED),
+                    _PHRASES[pending.action] if stage is PowerStage.SECOND else None,
+                    preview=pending.preview,
+                )
+                self._pending = prompt if stage is PowerStage.SECOND else None
+                if stage is PowerStage.SUBMITTING:
+                    self._inflight = True
         self._emit(prompt)
         if stage is PowerStage.SUBMITTING:
-            Thread(target=self._execute, args=(prompt,), daemon=True).start()
+            Thread(
+                target=self._execute,
+                args=(prompt, self._request_backend),
+                daemon=True,
+            ).start()
         return True
 
-    def _execute(self, prompt: PowerPrompt) -> None:
+    def _execute(self, prompt: PowerPrompt, backend: PowerBackend) -> None:
         try:
-            self._backend.request(prompt.action)
+            backend.request(prompt.action)
         except Exception:
             final = PowerPrompt(
                 prompt.request_id,
@@ -277,14 +367,20 @@ class SystemPowerFlow:
                 "The operating system did not accept the request. "
                 "No forced action was attempted.",
                 True,
+                preview=prompt.preview,
             )
         else:
             final = PowerPrompt(
                 prompt.request_id,
                 prompt.action,
                 PowerStage.FINISHED,
-                "Request sent. Review any operating-system or application "
-                "warning before proceeding.",
+                (
+                    "Safe preview complete. No operating-system request was sent."
+                    if prompt.preview
+                    else "Request sent. Review any operating-system or application "
+                    "warning before proceeding."
+                ),
+                preview=prompt.preview,
             )
         with self._lock:
             self._inflight = False

@@ -1,20 +1,44 @@
 # Local model assets
 
+On the current development machine, installed STT/OCR models and optional TTS
+runtimes are stored on the same AI-Projects drive under
+`/mnt/ai_projects/KYRIN/local-data/kyrin/`. The standard user-data path is a
+symlink to that directory; see [local data storage](../docs/app/LOCAL_DATA_STORAGE.md).
+On this source checkout, TTS packages selected by the application now live in
+the organized `models/local/by-model/tts/` catalog. Installed STT and OCR data
+remain under `local-data/kyrin/models/`.
+
+## Per-model development catalog
+
+The development catalog at `models/local/by-model/` separates four Ollama
+command models, four STT models, three TTS models, and English Tesseract data by
+function, engine, and full model name. Its local `README.md` lists the tree.
+Each Ollama model has its own complete store. Files shared by the original
+combined store are independent physical copies in the corresponding model
+directories. KYRIN now discovers all four command models from this catalog
+and starts Ollama against only the selected model's store.
+
+The application's imported STT library remains in `local-data/kyrin/models/`.
+Installed STT folders include their engine and model names before a stable
+unique suffix. The named TTS catalog is both the source-checkout model library
+and the Voice Output page's discovery root, avoiding duplicate TTS weights.
+Downloaded weights and local runtimes are excluded from Git.
+
 ## Local command-understanding candidates
 
-The four owner-selected Ollama models were moved from the machine's default
-Ollama store into this repository's **Git-ignored** development store on
-2026-10-09:
+The four owner-selected Ollama models were first imported into a combined
+development store on 2026-10-09. They now live in separate Git-ignored stores:
 
 ```text
-models/local/command-understanding/ollama/
-  blobs/       # content-addressed model weights and supporting assets
-  manifests/   # names/tags and references to the required blobs
+models/local/by-model/command-understanding/ollama/
+  qwen3.5-4b/{blobs,manifests}/
+  qwen3.5-9b/{blobs,manifests}/
+  gemma4-e4b/{blobs,manifests}/
+  gemma4-12b/{blobs,manifests}/
 ```
 
-Both directories are necessary. Ollama manages the names and shared files;
-do not move individual blob files manually. The store contains precisely the
-four complete tags below, with no unreferenced or partial blobs after import:
+Each model's `blobs/` and `manifests/` must stay together. Each store contains
+one complete tag:
 
 | Tag | Ollama model ID | Listed size |
 | --- | --- | ---: |
@@ -27,11 +51,11 @@ The transfer copied each referenced blob and verified its SHA-256 before
 registering a model. All four appeared in `ollama list` on a separate server
 pointed at the project store and answered a text-only smoke request. Their
 four tags were then removed through `ollama rm` from the default system
-store. The other default-store models were left in place. To inspect or use
-these project copies after a reboot, start a **separate** local server:
+store. The other default-store models were left in place. To inspect one model
+outside KYRIN, start a **separate** local server pointed at that model's folder:
 
 ```bash
-OLLAMA_MODELS=/mnt/ai_projects/KYRIN/models/local/command-understanding/ollama \
+OLLAMA_MODELS=/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/qwen3.5-4b \
   OLLAMA_HOST=127.0.0.1:11435 OLLAMA_NO_CLOUD=1 ollama serve
 ```
 
@@ -42,9 +66,9 @@ OLLAMA_HOST=127.0.0.1:11435 ollama list
 OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.5:4b
 ```
 
-These are evaluation assets. The KYRIN app's model library and live command
-runtime do not yet discover or use them. The dry-run comparison tool and its
-limitations are described in
+KYRIN's Command Understanding page discovers all four names from their parent
+directory; selecting a name uses only its own store. The dry-run comparison
+tool and its limitations are described in
 [`LOCAL_MODEL_COMPARISON.md`](../docs/commands/LOCAL_MODEL_COMPARISON.md).
 
 This directory keeps development model assets in a predictable place. Model
@@ -54,7 +78,7 @@ and may have separate distribution terms.
 Current local Persian Vosk model:
 
 ```text
-models/local/vosk-model-small-fa-0.42/
+models/local/by-model/stt/vosk/vosk-model-small-fa-0.42/
 ```
 
 The original ZIP is retained at:
@@ -71,8 +95,8 @@ From the repository root, check that the model can be loaded with:
 
 ```bash
 .venv/bin/python scripts/stt/evaluate_offline_stt.py \
-  --manifest models/local/vosk-model-small-fa-0.42/test/corpus.csv \
-  --model-path models/local/vosk-model-small-fa-0.42 \
+  --manifest models/local/by-model/stt/vosk/vosk-model-small-fa-0.42/test/corpus.csv \
+  --model-path models/local/by-model/stt/vosk/vosk-model-small-fa-0.42 \
   --model-language fa
 ```
 
@@ -93,8 +117,8 @@ live-STT development step. These remain local assets, not a packaged default:
 
 | Model | Stable local path | Bytes | SHA-1 from the upstream model list |
 | --- | --- | ---: | --- |
-| small | `models/local/whisper.cpp/ggml-small.bin` | 487,601,967 | `55356645c2b361a969dfd0ef2c5a50d530afd8d5` |
-| large-v3-turbo-q5_0 | `models/local/whisper.cpp/ggml-large-v3-turbo-q5_0.bin` | 574,041,195 | `e050f7970618a659205450ad97eb95a18d69c9ee` |
+| small | `models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin` | 487,601,967 | `55356645c2b361a969dfd0ef2c5a50d530afd8d5` |
+| large-v3-turbo-q5_0 | `models/local/by-model/stt/whisper.cpp/ggml-large-v3-turbo-q5_0/ggml-large-v3-turbo-q5_0.bin` | 574,041,195 | `e050f7970618a659205450ad97eb95a18d69c9ee` |
 
 Both downloaded files matched the listed SHA-1. Their locally recorded SHA-256
 values are, respectively:
@@ -132,7 +156,7 @@ validation. It is installed **locally for development and evaluation**, not
 bundled in an application package or selected automatically by the runtime.
 
 ```text
-models/local/vosk-model-en-us-0.22-lgraph/
+models/local/by-model/stt/vosk/vosk-model-en-us-0.22-lgraph/
 models/archive/vosk-model-en-us-0.22-lgraph.zip
 ```
 

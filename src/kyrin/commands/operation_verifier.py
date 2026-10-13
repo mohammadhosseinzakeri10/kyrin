@@ -17,6 +17,7 @@ from kyrin.commands.understanding import (
     UnderstandingResult,
     UnderstandingStatus,
 )
+from kyrin.commands.wake_names import DEFAULT_WAKE_NAMES
 
 
 class OperationVerificationStatus(StrEnum):
@@ -47,7 +48,8 @@ class OperationEvidenceExtractor(Protocol):
 
 _EN_ACTION = re.compile(
     r"^(?:exit fullscreen|leave fullscreen|unfullscreen|unmaximize|"
-    r"maximize|minimize|fullscreen|restore|bring back|show|close|open|go to)\b"
+    r"maximize|minimize|hide|fullscreen|restore|bring back|show|"
+    r"close|exit|quit|open|go to|launch|start|switch to)\b"
 )
 _EN_FORBIDDEN = re.compile(
     r"\b(?:restart|reboot|shut down|shutdown|power off|log out|logout|"
@@ -55,7 +57,9 @@ _EN_FORBIDDEN = re.compile(
 )
 _EN_NEGATION = re.compile(r"\b(?:not|never|no|don't|dont|cannot|can't)\b")
 _EN_SPLIT = re.compile(r"\s*(?:[;,]|\b(?:and|then)\b)\s*")
-_EN_WAKE = re.compile(r"^(?:kyrin|kairin|kyreen|kyrie|kairi)\s*,?\s*")
+_EN_WAKE = re.compile(
+    r"^(?:" + "|".join(re.escape(name) for name in DEFAULT_WAKE_NAMES) + r")\b\s*,?\s*"
+)
 _EN_OPERATION = {
     "exit fullscreen": RequestedOperation.UNFULLSCREEN_APP,
     "leave fullscreen": RequestedOperation.UNFULLSCREEN_APP,
@@ -63,13 +67,19 @@ _EN_OPERATION = {
     "unmaximize": RequestedOperation.UNMAXIMIZE_APP,
     "maximize": RequestedOperation.MAXIMIZE_APP,
     "minimize": RequestedOperation.MINIMIZE_APP,
+    "hide": RequestedOperation.MINIMIZE_APP,
     "fullscreen": RequestedOperation.FULLSCREEN_APP,
     "restore": RequestedOperation.RESTORE_APP,
     "bring back": RequestedOperation.RESTORE_APP,
     "show": RequestedOperation.RESTORE_APP,
     "close": RequestedOperation.CLOSE_APP_WINDOW,
+    "exit": RequestedOperation.CLOSE_APP_WINDOW,
+    "quit": RequestedOperation.CLOSE_APP_WINDOW,
     "open": RequestedOperation.OPEN_APP,
     "go to": RequestedOperation.OPEN_APP,
+    "launch": RequestedOperation.OPEN_APP,
+    "start": RequestedOperation.OPEN_APP,
+    "switch to": RequestedOperation.OPEN_APP,
 }
 
 _FA_FORBIDDEN = re.compile(
@@ -91,9 +101,12 @@ _FA_ACTIONS = (
     (re.compile(r"بزرگ\s+کن(?:ید)?$"), RequestedOperation.MAXIMIZE_APP),
     (re.compile(r"کوچک\s+کن(?:ید)?$"), RequestedOperation.MINIMIZE_APP),
     (re.compile(r"دوباره\s+نشان\s+بده(?:ید)?$"), RequestedOperation.RESTORE_APP),
+    (re.compile(r"نشان\s+بده(?:ید)?$"), RequestedOperation.RESTORE_APP),
     (re.compile(r"برگردان(?:ید)?$"), RequestedOperation.RESTORE_APP),
+    (re.compile(r"پنهان\s+کن(?:ید)?$"), RequestedOperation.MINIMIZE_APP),
     (re.compile(r"ببند(?:ید)?$"), RequestedOperation.CLOSE_APP_WINDOW),
     (re.compile(r"باز\s+کن(?:ید)?$"), RequestedOperation.OPEN_APP),
+    (re.compile(r"اجرا\s+کن(?:ید)?$"), RequestedOperation.OPEN_APP),
 )
 _EN_CHAT = re.compile(r"\b(?:chat|conversation)\b")
 _FA_CHAT = re.compile(r"(?:چت|گفتگو|گفت\s*و\s*گو)")
@@ -130,7 +143,7 @@ class RuleBasedOperationEvidence:
         clauses: list[str] = []
         for clause in _EN_SPLIT.split(text):
             clause = clause.strip(" .!?\t")
-            clause = re.sub(r"^please\s+", "", clause)
+            clause = re.sub(r"^(?:please|kindly)\s+", "", clause)
             if not clause:
                 return OperationEvidence(reason="incomplete_clause")
             match = _EN_ACTION.match(clause)

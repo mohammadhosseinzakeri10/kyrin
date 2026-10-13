@@ -81,6 +81,8 @@ class DesktopActionsPage(QWidget):
             self.power_buttons[action] = button
             power_row.addWidget(button)
         layout.addLayout(power_row)
+        self.power_preview_button = QPushButton()
+        layout.addWidget(self.power_preview_button)
 
         if settings is not None:
             self.enabled_checkbox.setChecked(settings.action_execution_enabled)
@@ -124,6 +126,7 @@ class DesktopActionsPage(QWidget):
             self.window_control_checkbox.setEnabled(False)
             self.close_window_checkbox.setEnabled(False)
             self.system_power_checkbox.setEnabled(False)
+            self.power_preview_button.setEnabled(False)
         self.translate()
         self._update_chat_permission_availability()
 
@@ -180,6 +183,7 @@ class DesktopActionsPage(QWidget):
         self.window_control_checkbox.setText(text("allow_window_controls"))
         self.close_window_checkbox.setText(text("allow_window_close"))
         self.system_power_checkbox.setText(text("allow_system_power"))
+        self.power_preview_button.setText(text("power_safe_preview"))
         self.search.setPlaceholderText(text("actions_search"))
         self.select_visible_button.setText(text("actions_select_visible"))
         self.clear_visible_button.setText(text("actions_clear_visible"))

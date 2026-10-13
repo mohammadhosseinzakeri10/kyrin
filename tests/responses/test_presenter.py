@@ -98,6 +98,32 @@ def test_repeat_request_uses_english_fallback_for_unsupported_language() -> None
     assert response.text == "I didn't understand. Please repeat the command."
 
 
+def test_numbered_close_question_is_localized() -> None:
+    question = ResponseRequest(
+        1, ResponseKind.CONFIRM_NUMBERED_CLOSE, ResponseChannel.TEXT_AND_VOICE,
+        target="desktop", window_index=2,
+    )
+    assert ResponsePresenter("en").present(question).text == (
+        "Close window number 2? Yes or no?"
+    )
+    assert ResponsePresenter("fa").present(question).text == (
+        "پنجرهٔ شمارهٔ 2 را ببندم؟ بله یا خیر؟"
+    )
+
+
+def test_conversational_reply_preserves_its_text_and_language() -> None:
+    event = ResponseRequest(
+        4,
+        ResponseKind.CONVERSATION,
+        ResponseChannel.TEXT_ONLY,
+        language="de",
+        message="Hallo!",
+    )
+    assert ResponsePresenter("en").present(event) == PresentedResponse(
+        0, 4, "Hallo!", ResponseChannel.TEXT_ONLY, "de"
+    )
+
+
 def test_event_language_overrides_session_language_with_safe_fallback() -> None:
     presenter = ResponsePresenter("fa")
     english = ResponseRequest(

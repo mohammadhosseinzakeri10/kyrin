@@ -13,6 +13,7 @@ from kyrin.commands.models import CommandContext
 
 
 class RequestedOperation(StrEnum):
+    SHOW_ALL_WINDOWS = "show_all_windows"
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
     RESTORE_APP = "restore_app"
@@ -40,7 +41,14 @@ class UnderstandingStatus(StrEnum):
     AMBIGUOUS = "ambiguous"
     INCOMPLETE = "incomplete"
     NOT_COMMAND = "not_command"
+    RESPOND = "respond"
     UNSUPPORTED = "unsupported"
+
+
+class ConfirmationDecision(StrEnum):
+    YES = "yes"
+    NO = "no"
+    UNCLEAR = "unclear"
 
 
 class UncertaintyKind(StrEnum):
@@ -82,15 +90,16 @@ class MeaningStep:
     polarity: Polarity = Polarity.AFFIRMATIVE
 
     def __post_init__(self) -> None:
-        system_operation = self.operation in {
+        targetless_operation = self.operation in {
+            RequestedOperation.SHOW_ALL_WINDOWS,
             RequestedOperation.POWER_OFF_SYSTEM,
             RequestedOperation.RESTART_SYSTEM,
             RequestedOperation.LOG_OUT_SYSTEM,
             RequestedOperation.SUSPEND_SYSTEM,
         }
-        if system_operation and (self.target_phrase is not None or self.app_phrase):
-            raise ValueError("system operations have no application target")
-        if not system_operation and (
+        if targetless_operation and (self.target_phrase is not None or self.app_phrase):
+            raise ValueError("targetless operations have no application target")
+        if not targetless_operation and (
             self.target_phrase is None or not self.target_phrase.strip()
         ):
             raise ValueError("application and chat operations require a target")
@@ -127,6 +136,7 @@ class UnderstandingResult:
     status: UnderstandingStatus
     candidates: tuple[ProposedMeaning, ...] = ()
     uncertainties: frozenset[UncertaintyKind] = frozenset()
+    reply: str | None = None
 
     def __post_init__(self) -> None:
         if self.status is UnderstandingStatus.READY:
@@ -148,6 +158,16 @@ class UnderstandingResult:
                 raise ValueError("ambiguous results require an uncertainty reason")
         elif self.candidates:
             raise ValueError("non-command results cannot propose actions")
+        if self.status is UnderstandingStatus.RESPOND:
+            if (
+                self.reply is None
+                or not self.reply.strip()
+                or len(self.reply) > 300
+                or self.uncertainties
+            ):
+                raise ValueError("a conversational response needs short reply text")
+        elif self.reply is not None:
+            raise ValueError("only a conversational response may carry reply text")
 
 
 class CommandUnderstandingEngine(Protocol):
@@ -156,3 +176,7 @@ class CommandUnderstandingEngine(Protocol):
     def understand(
         self, utterance: UnderstandingInput, *, context: CommandContext
     ) -> UnderstandingResult: ...
+
+    def classify_confirmation(
+        self, utterance: UnderstandingInput, *, question: str
+    ) -> ConfirmationDecision: ...

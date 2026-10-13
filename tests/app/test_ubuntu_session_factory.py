@@ -23,7 +23,7 @@ from kyrin.app.settings import (
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
-from kyrin.commands.models import CommandKind
+from kyrin.commands.models import CommandKind, ResponseKind, ResponseRequest
 from kyrin.commands.understanding import (
     MeaningStep,
     ProposedMeaning,
@@ -33,12 +33,22 @@ from kyrin.commands.understanding import (
 )
 from kyrin.desktop.app_activation import ActivationAttempt
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from kyrin.desktop.window_presence import WindowPresence
+from kyrin.memory.history import SqliteConversationHistory
 from kyrin.responses.visual_status import VisualPresentation, VisualStatus
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+
+
+@pytest.fixture(autouse=True)
+def isolate_conversation_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fake live sessions must never write into the user's XDG data store."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
 
 
 class FakeMicrophones:
@@ -193,6 +203,16 @@ def test_dry_run_allows_only_configured_app_without_executing(
     assert executor.requests == []
     requests = [event for event in events if isinstance(event, ActionRequest)]
     assert [item.intent.target for item in requests] == ["telegram"]
+    history_path = ubuntu.default_history_path()
+    assert history_path == tmp_path / "xdg-data/kyrin/memory/conversation.sqlite3"
+    history = SqliteConversationHistory(history_path)
+    try:
+        assert [turn.text for turn in history.recent()] == [
+            "Open Telegram",
+            "Open Browser",
+        ]
+    finally:
+        history.close()
 
 
 def test_selected_command_model_reaches_live_transcript_without_executing(
@@ -230,9 +250,7 @@ def test_selected_command_model_reaches_live_transcript_without_executing(
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", PoliteSpeechController)
     monkeypatch.setattr(ubuntu, "OllamaCommandEngine", FakeCommandModel)
-    monkeypatch.setattr(
-        ubuntu, "installed_ollama_models", lambda path: ("qwen3.5:4b",)
-    )
+    monkeypatch.setattr(ubuntu, "installed_ollama_models", lambda path: ("qwen3.5:4b",))
     events: list[ubuntu.ApplicationEvent] = []
     executor = RecordingExecutor()
     factory = ubuntu.UbuntuSessionFactory(
@@ -256,6 +274,59 @@ def test_selected_command_model_reaches_live_transcript_without_executing(
         event.intent.target for event in events if isinstance(event, ActionRequest)
     ] == ["telegram"]
     assert executor.requests == []
+
+
+def test_registered_long_app_names_reach_stt_only_if_backend_supports_hints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kyrin.stt.device import SpeechToTextOptions
+
+    class CaptureSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            self.factory()
+            yield TranscriptUpdate(0, "", TranscriptStatus.FINAL, "en")
+
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    (directory / "code.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=true\n",
+        encoding="utf-8",
+    )
+    seen: list[SpeechToTextOptions] = []
+
+    def pipeline(*args: object, **kwargs: object) -> object:
+        options = kwargs["options"]
+        assert isinstance(options, SpeechToTextOptions)
+        seen.append(options)
+        return object()
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", CaptureSpeechController)
+    monkeypatch.setattr(ubuntu, "LiveSpeechPipeline", pipeline)
+    settings = _settings(
+        tmp_path,
+        allowed_apps=(AllowedApp("visual-studio-code", "code.desktop"),),
+    )
+    for supported in (True, False):
+        engine = FakeEngine()
+        engine.capabilities = SpeechToTextCapabilities(
+            frozenset({ComputeDevice.CPU}),
+            frozenset({"en"}),
+            True,
+            False,
+            supports_vocabulary_hints=supported,
+        )
+        factory = ubuntu.UbuntuSessionFactory(
+            stt_openers={"fake": lambda selection, current=engine: current},
+            on_event=lambda event: None,
+            microphones=FakeMicrophones(),
+            source_factory=lambda config: object(),
+            catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+            detector_factory=lambda: object(),
+        )
+        with factory(settings) as runtime:
+            runtime.run()
+    assert seen[0].vocabulary_hints == ("Visual Studio Code", "VS Code")
+    assert seen[1].vocabulary_hints == ()
 
 
 def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
@@ -289,6 +360,106 @@ def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
     with factory(_settings(tmp_path)) as runtime:
         runtime.run()
     assert not any(isinstance(event, ActionRequest) for event in events)
+
+
+def test_ubuntu_session_asks_which_permitted_browser_before_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BrowserSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Open browser", TranscriptStatus.FINAL, "en")
+            yield TranscriptUpdate(1, "Firefox", TranscriptStatus.FINAL, "en")
+
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    for desktop_id, name in (
+        ("chrome.desktop", "Google Chrome"),
+        ("firefox.desktop", "Firefox"),
+        ("private.desktop", "Private Browser"),
+    ):
+        (directory / desktop_id).write_text(
+            "[Desktop Entry]\nType=Application\n"
+            f"Name={name}\nExec=true\nCategories=Network;WebBrowser;\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", BrowserSpeechController)
+    events: list[ubuntu.ApplicationEvent] = []
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+    )
+    settings = _settings(
+        tmp_path,
+        allowed_apps=(
+            AllowedApp("google-chrome", "chrome.desktop"),
+            AllowedApp("firefox", "firefox.desktop"),
+        ),
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+
+    assert [
+        event.intent.target for event in events if isinstance(event, ActionRequest)
+    ] == ["firefox"]
+    assert any(
+        isinstance(event, ResponseRequest)
+        and event.kind is ResponseKind.CHOOSE_APP
+        and event.app_candidates == ("Firefox", "Google Chrome")
+        for event in events
+    )
+
+
+def test_ubuntu_terminal_menu_reaches_authorized_dry_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class TerminalSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Open Terminal", TranscriptStatus.FINAL, "en")
+            yield TranscriptUpdate(1, "number two", TranscriptStatus.FINAL, "en")
+
+    class Presence:
+        def observe(self, app_id: str) -> WindowPresence:
+            assert app_id == "terminal"
+            return WindowPresence.OPEN
+
+        def count(self, app_id: str) -> int:
+            assert app_id == "terminal"
+            return 1
+
+    applications = tmp_path / "data/applications"
+    applications.mkdir(parents=True)
+    (applications / "org.gnome.Ptyxis.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Terminal\nExec=ptyxis\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", TerminalSpeechController)
+    events: list[ubuntu.ApplicationEvent] = []
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+        detector_factory=lambda: object(),
+        window_presence_factory=lambda mapping: Presence(),
+    )
+    settings = _settings(
+        tmp_path,
+        allowed_apps=(AllowedApp("terminal", "org.gnome.Ptyxis.desktop"),),
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+    assert any(
+        isinstance(event, ResponseRequest)
+        and event.kind is ResponseKind.CHOOSE_OPERATION
+        for event in events
+    )
+    assert [
+        event.intent.kind for event in events if isinstance(event, ActionRequest)
+    ] == [CommandKind.NEW_APP_WINDOW]
 
 
 def test_enabled_actions_use_only_exact_registered_allowlist(

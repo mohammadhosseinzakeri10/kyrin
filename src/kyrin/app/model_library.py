@@ -19,6 +19,7 @@ _DEVICES = {
     "whisper": frozenset({ComputeDevice.CPU, ComputeDevice.GPU}),
 }
 _VOSK_NAMED_LANGUAGE = re.compile(r"^vosk-model(?:-small)?-([a-z]{2})(?:-|$)")
+_UNSAFE_FOLDER_CHARACTER = re.compile(r"[^a-z0-9._-]+")
 
 
 class ModelLibraryError(ValueError):
@@ -49,6 +50,13 @@ def vosk_language_hint(source: Path) -> str | None:
     """Suggest the language encoded in an official-style Vosk folder name."""
     match = _VOSK_NAMED_LANGUAGE.match(source.name.lower())
     return match.group(1) if match else None
+
+
+def _model_directory_name(backend: str, name: str) -> str:
+    """Keep imported packages recognizable without losing unique IDs."""
+    readable = _UNSAFE_FOLDER_CHARACTER.sub("-", name.lower()).strip("._-")
+    prefix = "" if readable.startswith(f"{backend}-") else f"{backend}-"
+    return f"{prefix}{readable[:48] or 'model'}-{uuid4().hex}"
 
 
 def _validate_source(source: Path, backend: str) -> None:
@@ -214,7 +222,7 @@ class ModelLibrary:
                 json.dumps(document, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
-            destination = self.root / uuid4().hex
+            destination = self.root / _model_directory_name(backend, name)
             temporary.rename(destination)
             temporary = None
             return InstalledModel(

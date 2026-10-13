@@ -126,10 +126,14 @@ class ActionGate:
                 CommandKind.RESTORE_APP,
                 CommandKind.MINIMIZE_APP,
                 CommandKind.CLOSE_APP_WINDOW,
+                CommandKind.CLOSE_SHOWN_WINDOW,
                 CommandKind.MAXIMIZE_APP,
                 CommandKind.UNMAXIMIZE_APP,
                 CommandKind.FULLSCREEN_APP,
                 CommandKind.UNFULLSCREEN_APP,
+                CommandKind.NEW_APP_WINDOW,
+                CommandKind.NEW_APP_TAB,
+                CommandKind.APP_PREFERENCES,
             )
             and result.outcome is not ActionOutcome.FAILED
         ):
@@ -157,8 +161,33 @@ class ActionGate:
         return len(self._awaiting_confirmation) + len(self._outstanding)
 
     def _allowed(self, intent: CommandIntent) -> bool:
-        if intent.kind is CommandKind.OPEN_APP:
+        if intent.kind in (
+            CommandKind.OPEN_APP,
+            CommandKind.NEW_APP_WINDOW,
+            CommandKind.NEW_APP_TAB,
+            CommandKind.APP_PREFERENCES,
+        ):
             return intent.target in self.policy.allowed_apps
+        if intent.kind in (
+            CommandKind.SHOW_ALL_WINDOWS,
+            CommandKind.SHOW_APP_WINDOWS,
+            CommandKind.SELECT_APP_WINDOW,
+            CommandKind.HIDE_APP_WINDOWS,
+        ):
+            if intent.target == "desktop":
+                return bool(self.policy.allowed_window_apps)
+            return intent.target in self.policy.allowed_window_apps
+        if intent.kind is CommandKind.SELECT_OPEN_APP_WINDOW:
+            return intent.target in self.policy.allowed_window_apps
+        if intent.kind is CommandKind.CLOSE_SHOWN_WINDOW:
+            if intent.target == "desktop":
+                return bool(
+                    self.policy.allowed_window_apps & self.policy.allowed_close_apps
+                )
+            return (
+                intent.target in self.policy.allowed_window_apps
+                and intent.target in self.policy.allowed_close_apps
+            )
         if intent.kind in (
             CommandKind.RESTORE_APP,
             CommandKind.MINIMIZE_APP,

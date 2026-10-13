@@ -41,13 +41,29 @@ similarity cutoff and near-score margin are provisional; they must be measured
 against confirmed speech examples before product use. No STT confidence value
 is assumed. This layer cannot recover a severely misheard name reliably.
 
+English `close`, `exit`, and `quit` requests currently use the bounded close-window
+operation. A close request with an approximate app name asks for the app name
+and then separately confirms the close action; an approximate name never closes
+a window by itself. This operation closes an application window, not necessarily
+the entire process. Apps that stay in the system tray, including some V2RayN
+setups, may require a future explicit quit adapter and its own verification.
+
+An exact registered app name alone opens an operation menu. The user can say a
+number, say `yes` to open or bring the app forward, or say `no` to cancel. If
+opening is the only available operation, the question is simply whether to
+open the app. Clear aliases such as `launch`, `start`, `switch to`, `hide`, and
+`bring ... to front` use the existing open, minimize, and restore actions.
+"Make Telegram smaller" is ambiguous between minimizing it and returning a
+maximized window to normal size, so it offers those two choices instead of
+acting. A name or a targetless size request must not authorize a window action.
+
 For the microphone diagnostic, pass `--mode commands`, a `--spoken-app-binding`
 for each permitted desktop ID, and optional `--spoken-app-alias` phrases. For
 example:
 
 ```bash
 .venv/bin/python scripts/audio/check_live_speech.py --mode commands \
-  --model-path models/local/vosk-model-en-us-0.22-lgraph --language en \
+  --model-path models/local/by-model/stt/vosk/vosk-model-en-us-0.22-lgraph --language en \
   --spoken-app-binding org.example.WhatsApp.desktop=whatsapp \
   --spoken-app-alias "whatsapp=what's up"
 ```

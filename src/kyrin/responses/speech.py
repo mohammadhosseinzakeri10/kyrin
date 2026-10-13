@@ -25,32 +25,50 @@ class SpeechSynthesizer(Protocol):
 class SpeechDispatcherSynthesizer:
     """Use Ubuntu's local eSpeak NG module through Speech Dispatcher."""
 
-    def __init__(self, executable: str | None = None, *, timeout_s: float = 15) -> None:
+    def __init__(
+        self,
+        executable: str | None = None,
+        *,
+        timeout_s: float = 15,
+        rate: int = 0,
+        voice_type: str = "default",
+    ) -> None:
         resolved = executable or shutil.which("spd-say")
         if resolved is None:
             raise SpeechSynthesisError("spd-say is not installed")
         self._executable = resolved
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        if not -100 <= rate <= 100:
+            raise ValueError("rate must be between -100 and 100")
+        if voice_type not in {"default", "male1", "male2", "female1", "female2"}:
+            raise ValueError("unsupported Speech Dispatcher voice type")
         self._timeout_s = timeout_s
+        self._rate = rate
+        self._voice_type = voice_type
 
     def speak(self, text: str, language: str) -> None:
         if not text.strip():
             return
         primary = language.replace("_", "-").split("-", maxsplit=1)[0].casefold()
         try:
+            arguments = [
+                self._executable,
+                "--wait",
+                "--output-module",
+                "espeak-ng",
+                "--application-name",
+                "KYRIN",
+                "--rate",
+                str(self._rate),
+                "--language",
+                primary,
+            ]
+            if self._voice_type != "default":
+                arguments.extend(("--voice-type", self._voice_type))
+            arguments.append(text)
             result = subprocess.run(
-                [
-                    self._executable,
-                    "--wait",
-                    "--output-module",
-                    "espeak-ng",
-                    "--application-name",
-                    "KYRIN",
-                    "--language",
-                    primary,
-                    text,
-                ],
+                arguments,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout_s,
@@ -80,7 +98,9 @@ class ResponseSpeaker:
         self._synthesizer = synthesizer
         self._on_error = on_error
         self._tail_s = tail_s
-        self._queue: Queue[PresentedResponse] = Queue(maxsize=max_pending)
+        self._queue: Queue[
+            tuple[PresentedResponse, Callable[[str, str], None] | None]
+        ] = Queue(maxsize=max_pending)
         self._active = Event()
         self._idle = Event()
         self._idle.set()
@@ -95,7 +115,12 @@ class ResponseSpeaker:
     def is_active(self) -> bool:
         return self._active.is_set()
 
-    def submit(self, response: PresentedResponse) -> bool:
+    def submit(
+        self,
+        response: PresentedResponse,
+        *,
+        speak: Callable[[str, str], None] | None = None,
+    ) -> bool:
         """Queue voice without blocking capture; text is displayed by the caller."""
         if response.channel is ResponseChannel.TEXT_ONLY:
             return True
@@ -105,7 +130,7 @@ class ResponseSpeaker:
             self._active.set()
             self._idle.clear()
             try:
-                self._queue.put_nowait(response)
+                self._queue.put_nowait((response, speak))
             except Full:
                 return False
         return True
@@ -113,11 +138,11 @@ class ResponseSpeaker:
     def _run(self) -> None:
         while not self._closed.is_set() or not self._queue.empty():
             try:
-                response = self._queue.get(timeout=0.05)
+                response, speak = self._queue.get(timeout=0.05)
             except Empty:
                 continue
             try:
-                self._synthesizer.speak(response.text, response.language)
+                (speak or self._synthesizer.speak)(response.text, response.language)
             except SpeechSynthesisError as exc:
                 self._on_error(exc)
             finally:

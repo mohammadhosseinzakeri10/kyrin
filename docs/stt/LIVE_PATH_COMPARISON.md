@@ -15,7 +15,7 @@ Example with an existing local model and one verified case:
 .venv/bin/python scripts/stt/compare_live_path.py \
   --manifest datasets/stt/manifest.safety.csv \
   --backend whisper \
-  --model-path models/local/whisper.cpp/ggml-small.bin \
+  --model-path models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin \
   --whisper-server build/tools/whisper.cpp-v1.9.4/build-gpu/bin/whisper-server \
   --language auto --device gpu --case-id safety-fa-01 \
   --output datasets/stt/results/live-path-comparison.json

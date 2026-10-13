@@ -10,6 +10,44 @@ For an explicitly allowed `OPEN_APP` action, `GnomeExistingAppActivator` can ask
 
 ## Existing-window commands
 
+### Open-window picker
+
+On GNOME, requests to see all currently open desktop windows open a numbered
+preview of **currently open windows of applications selected for window
+control in KYRIN Actions**. It does not expose windows outside that permission
+list. Clear English/Persian wording is handled by a small concept-slot fast
+path: a display request, a collective scope, and desktop windows or running
+apps. This does not compare complete sentences. Other phrasings can be
+proposed by the selected local command-understanding model as the targetless
+`show_all_windows` operation. The model proposal still passes the permission
+gate, and explicit negation or references to installed apps, browser tabs, or
+files cannot trigger the picker. Unqualified “pages” stays ambiguous because
+it could mean browser pages rather than desktop windows. Without a selected
+command model, wording beyond the reviewed fast path may need rephrasing.
+The user can click a preview, say its number, or say an exact registered
+application name. A name works only when one window of that application was
+shown; multiple windows require a number. “Cancel” or Escape closes the
+preview. This uses the existing per-app window-control permission, and
+`OpenWindowPickerExecutor` sends only those registered desktop IDs to GNOME.
+The command layer never reads a title or screenshot. GNOME Shell holds a
+temporary window-ID snapshot in memory and checks the same window still
+belongs to the same app before activating it. While the picker is visible,
+“close number two”, “exit 2”, “quit two”, or the Persian equivalent asks for a
+separate yes/no confirmation. The number can be a digit or a spoken word, and
+“number” is optional. Plain “two” still activates the window. Closing requires
+both window-control and close permission for the selected application. GNOME
+rechecks the saved window identity and sends a normal close request; it never
+forces a process to quit. An app may ask separately about unsaved work. The
+list is limited to the first 99 windows, ordered by application
+name and stable window sequence. The existing Terminal-only picker remains
+available for the Terminal menu and accepts the same numbered close request.
+
+The preview itself may reveal on-screen content. GNOME's live clone is not
+saved to disk. An action reply of `requested` means activation was requested,
+not that the foreground result was verified. A user-session test is still
+needed after the updated extension has loaded; deterministic GJS and Python
+tests alone cannot establish live visual behavior.
+
 `RESTORE_APP`, `MINIMIZE_APP`, `MAXIMIZE_APP`, `UNMAXIMIZE_APP`, `FULLSCREEN_APP`, `UNFULLSCREEN_APP`, and `CLOSE_APP_WINDOW` have separate settings permissions from `OPEN_APP`. Existing settings migrate with both new permissions disabled. The GNOME extension accepts only an exact registered desktop ID. When an app has multiple windows, it targets the focused window only if that window belongs to the named app; otherwise it asks the user to focus the desired window and repeat the command. This rule also applies to raising an existing app with `OPEN_APP`. Restore never launches a missing app. Unmaximize means returning to normal size and also exits fullscreen if needed. Close sends a normal window close request and never kills a process; the app may keep running in its tray or ask about unsaved work. Full application quit is a separate future action.
 
 `GnomeAppWindowController` receives an opaque window token and checks the state of that exact window before returning success. A sent request alone is not a confirmed result. The extension returns only state flags and the token, never a window title or content. On an unsupported session or when the updated extension has not loaded yet, the window commands are unavailable. This GNOME-specific adapter sits behind `AppWindowController`, so other platforms can implement the same contract without changing command understanding. The control center exposes separate opt-in checkboxes for non-closing window controls and close, scoped to the selected applications.
@@ -51,7 +89,8 @@ Use `scripts/desktop/check_active_app.py` to discover the desktop ID on the targ
 Build the test package with GNOME's own tool, then install and enable it for the current user:
 
 ```bash
-gnome-extensions pack --out-dir /tmp integrations/gnome-shell/active-app@kyrin.local
+gnome-extensions pack --extra-source windowPicker.js --out-dir /tmp \
+  integrations/gnome-shell/active-app@kyrin.local
 gnome-extensions install /tmp/active-app@kyrin.local.shell-extension.zip
 gnome-extensions enable active-app@kyrin.local
 ```

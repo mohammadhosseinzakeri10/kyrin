@@ -15,13 +15,28 @@ needs its own verified recognition path before voice power control is enabled.
 `SystemPowerFlow` owns one pending request with a 45-second deadline. Only a
 final transcript can start or advance it. A pending request consumes unrelated
 speech instead of passing it to ordinary command interpretation. The first
-answer is an exact `Yes` or the Continue button. The second is the exact,
-action-specific phrase shown in the UI or its matching button. Either method
-may be used at either stage. Cancel, timeout, microphone-session shutdown, and
-permission revocation clear the pending request. Stale button events use the
-request ID and cannot confirm a newer request. KYRIN's own speech playback is
-excluded from microphone input by `PlaybackGuardInput`; the flow also rejects
-spoken confirmation while the configured response speaker is active.
+answer is an exact `Yes` or the Continue button. The second is a short,
+action-specific phrase shown in the UI or its matching button: `Power off`,
+`Restart computer`, `Log out`, or `Suspend computer`. `Okay` and a second `Yes`
+cannot confirm the final step. Unclear speech keeps the same request and
+deadline and asks for repetition. It cannot switch to another power action.
+Either voice or click may be used at either stage. Cancel, timeout,
+microphone-session shutdown, and permission revocation clear the pending
+request. Stale button events use the request ID and cannot confirm a newer
+request. KYRIN's own speech playback is excluded from microphone input by
+`PlaybackGuardInput`; the flow also rejects spoken confirmation while the
+configured response speaker is active.
+
+The Qt application shows a separate, non-modal confirmation window over the
+desktop. It appears while checking the session warning, then displays both
+confirmation stages. The main settings window is not brought forward. Closing
+the confirmation window cancels the request. Spoken announcements use the
+existing offline Speech Dispatcher adapter at a slower rate, through the
+replaceable `SpeechSynthesizer` contract. One speaker is shared with the
+listening session so microphone input is suppressed during playback. If the
+local speech service is unavailable, text and buttons remain available and a
+voice-output error is shown in the confirmation window. This first product voice is not the previously
+preferred Kitten voice; that voice remains future work.
 
 Before the first answer, the GNOME adapter queries `IsInhibited(1)` for logout,
 shutdown, and reboot, or `IsInhibited(4)` for suspend. A reported inhibitor is
@@ -35,13 +50,41 @@ After both confirmations, the adapter calls GNOME's normal session methods:
 suppresses native dialogs. A successful D-Bus call means the request was sent,
 not that the machine shut down or a blocker was cleared. A GNOME dialog or an
 application warning may still require the user to act. The control center
-stays open while the session exists. Execution is on a background thread, and
+continues running while the session exists. Execution is on a background thread, and
 unit tests replace the adapter so no test changes machine power state.
 
-Product validation still needs a deliberate, supervised live check on the
-owner's desktop. Automated tests cover policy, timeout, mixed voice/click
-confirmation, stale IDs, echo guard, UI buttons without a microphone session,
-and the exact non-forced GNOME calls. The current desktop composition has no
-configured TTS synthesizer; prompts are visible as text, and spoken prompt
-playback is available only when a synthesizer is injected. Spoken **input**
-remains available whenever the microphone/STT session is running.
+The owner confirmed a safe live preview on GNOME/Wayland: the top-level
+window appeared over the current application, and text and audio worked at
+both confirmation stages. The preview used a fake backend and could not send
+any system-power request. Audio was initially inaudible because the system's
+default output was a digital sink; selecting the TSCO Bluetooth headset made
+Speech Dispatcher audible. Product playback follows the operating system's
+selected output. A supervised end-to-end check inside the installed KYRIN
+application, including spoken input, has not yet been performed. Automated
+tests cover policy, timeout, mixed voice/click
+confirmation, rejected ambiguous replies, stale IDs, echo guard, the separate
+Qt window without a microphone session, and the exact non-forced GNOME calls.
+Spoken **input** remains
+available whenever the microphone/STT session is running; click confirmation
+also works when listening is off.
+
+# Safe live preview, 2026-10-13
+
+The owner completed a live microphone preview with the actual confirmation
+dialog and spoken prompts. The observed sequence was `Power off` → `Yes` →
+`Power off`; both dialog stages appeared and both spoken prompts were audible.
+The preview used an inert backend whose `request()` only recorded
+`SAFE_BACKEND_ONLY: power_off`. It did not call GNOME, logind, or any operating
+system power API. A focused Qt integration test also exercises the same
+spoken-stage sequence with a fake backend. This validates the interaction
+path, not an actual shutdown or unsaved-work detection by every application.
+
+The installed control center now has **Desktop Actions → Test power
+confirmation safely (no shutdown)…**. It starts the same two-stage flow with
+an inert backend. The dialogue is marked `SAFE PREVIEW`, and its final status
+explicitly says no operating-system request was sent. A running listening
+session can answer both stages by voice; clicking remains available. The
+normal power buttons continue to use the GNOME backend and their separate
+permission. The built-in preview is covered by automated backend-routing
+tests; a supervised microphone check of this exact new button remains to be
+recorded.

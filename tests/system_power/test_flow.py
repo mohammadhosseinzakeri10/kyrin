@@ -71,13 +71,37 @@ def test_voice_and_click_share_two_step_flow() -> None:
     assert backend.actions == []
     assert flow.on_final_speech("Yes")
     second = _wait_for(events, PowerStage.SECOND)
-    assert second.phrase == "Power off this computer"
+    assert second.phrase == "Power off"
     assert not flow.respond(first.request_id + 1, second.phrase)
     assert flow.on_final_speech("Restart this computer")
     assert backend.actions == []
     assert flow.respond(second.request_id, second.phrase)
     assert backend.done.wait(2)
     assert backend.actions == [PowerAction.POWER_OFF]
+
+
+def test_safe_preview_uses_only_inert_backend_even_when_real_actions_disabled() -> None:
+    real_backend = FakeBackend()
+    preview_backend = FakeBackend()
+    events: list[PowerPrompt] = []
+    flow = SystemPowerFlow(
+        real_backend,
+        events.append,
+        enabled=False,
+        preview_backend=preview_backend,
+    )
+    assert flow.start_preview(PowerAction.POWER_OFF)
+    first = _wait_for(events, PowerStage.FIRST)
+    assert first.preview
+    assert flow.on_final_speech("Yes")
+    second = _wait_for(events, PowerStage.SECOND)
+    assert second.preview
+    assert flow.on_final_speech("Power off")
+    assert preview_backend.done.wait(2)
+    assert real_backend.actions == []
+    assert preview_backend.actions == [PowerAction.POWER_OFF]
+    finished = _wait_for(events, PowerStage.FINISHED)
+    assert "No operating-system request" in finished.text
 
 
 def test_click_first_and_spoken_second_with_voice_guard() -> None:
@@ -98,6 +122,50 @@ def test_click_first_and_spoken_second_with_voice_guard() -> None:
     assert flow.on_final_speech(second.phrase)
     assert backend.done.wait(2)
     assert backend.actions == [PowerAction.RESTART]
+
+
+def test_unclear_final_voice_never_confirms_or_changes_the_action() -> None:
+    backend = FakeBackend()
+    events: list[PowerPrompt] = []
+    flow = SystemPowerFlow(backend, events.append, enabled=True)
+    assert flow.on_final_speech("Power off")
+    first = _wait_for(events, PowerStage.FIRST)
+    assert first.spoken and "Power off" in first.speech_text
+    assert flow.on_final_speech("Yes")
+    second = _wait_for(events, PowerStage.SECOND)
+    assert second.phrase == "Power off"
+
+    for unclear in ("Okay", "Restart computer", "Yes", "Power"):
+        assert flow.on_final_speech(unclear)
+        assert events[-1].stage is PowerStage.SECOND
+        assert events[-1].request_id == second.request_id
+        assert backend.actions == []
+    assert flow.on_final_speech("Power off")
+    assert backend.done.wait(2)
+    assert backend.actions == [PowerAction.POWER_OFF]
+
+
+def test_each_short_challenge_only_confirms_its_own_action() -> None:
+    phrases = {
+        PowerAction.POWER_OFF: "Power off",
+        PowerAction.RESTART: "Restart computer",
+        PowerAction.LOG_OUT: "Log out",
+        PowerAction.SUSPEND: "Suspend computer",
+    }
+    for action, phrase in phrases.items():
+        backend = FakeBackend()
+        events: list[PowerPrompt] = []
+        flow = SystemPowerFlow(backend, events.append, enabled=True)
+        assert flow.start(action)
+        first = _wait_for(events, PowerStage.FIRST)
+        assert flow.respond(first.request_id, "continue")
+        second = _wait_for(events, PowerStage.SECOND)
+        assert second.phrase == phrase
+        assert flow.on_final_speech("Okay")
+        assert backend.actions == []
+        assert flow.on_final_speech(phrase)
+        assert backend.done.wait(2)
+        assert backend.actions == [action]
 
 
 def test_permission_cancel_and_expiry_never_execute() -> None:

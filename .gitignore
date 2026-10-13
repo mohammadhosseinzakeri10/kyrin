@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Machine-local KYRIN models, optional runtimes, and download tools.
+/local-data/

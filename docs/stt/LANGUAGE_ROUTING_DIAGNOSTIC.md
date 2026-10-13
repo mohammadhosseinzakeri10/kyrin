@@ -21,7 +21,7 @@ Example using the eight currently linked recordings:
   --manifest datasets/stt/results/benchmark-extra-manifest-2026-10-10.csv \
   --verified-links datasets/commands/verified_speech_links.jsonl \
   --server build/tools/whisper.cpp-v1.9.4/build-gpu/bin/whisper-server \
-  --model models/local/whisper.cpp/ggml-small.bin --device gpu \
+  --model models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin --device gpu \
   --output datasets/stt/results/language-candidates-small-2026-10-10.json
 ```
 

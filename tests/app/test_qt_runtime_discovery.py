@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from kyrin.app.qt.main import _whisper_server_path  # noqa: E402
+from kyrin.app.qt.main import _tts_model_root, _whisper_server_path  # noqa: E402
 
 
 def test_installed_runtime_is_found_without_path_entry(
@@ -44,3 +44,14 @@ def test_invalid_explicit_path_does_not_select_another_runtime(
         )
         is None
     )
+
+
+def test_tts_model_root_prefers_organized_catalog_with_installed_fallback(
+    tmp_path: Path,
+) -> None:
+    development = tmp_path / "models" / "local" / "by-model" / "tts"
+    installed = tmp_path / "local-data" / "kyrin" / "models" / "tts"
+    installed.mkdir(parents=True)
+    assert _tts_model_root(development, installed) == installed
+    development.mkdir(parents=True)
+    assert _tts_model_root(development, installed) == development

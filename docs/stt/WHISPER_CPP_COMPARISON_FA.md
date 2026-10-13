@@ -12,7 +12,7 @@
 ## محل ابزار و مدل‌ها
 
 - کد `whisper.cpp`، برچسب `v1.9.4` و شناسهٔ `927cfce34f31707e17f2bff35c349632fb9e2c3a`، در `build/tools/whisper.cpp-v1.9.4/`؛ فایل اجرایی CPU در `build/tools/whisper.cpp-v1.9.4/build-cpu/bin/whisper-cli`.
-- وزن‌ها در `models/local/whisper.cpp/ggml-small.bin` و `models/local/whisper.cpp/ggml-large-v3-turbo-q5_0.bin`.
+- وزن‌ها در `models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin` و `models/local/by-model/stt/whisper.cpp/ggml-large-v3-turbo-q5_0/ggml-large-v3-turbo-q5_0.bin`.
 - اندازه و هش هر فایل در `models/README.md` ثبت شده است. پوشه‌های وزن و ساخت در گیت نادیده گرفته می‌شوند.
 - گزارش‌های کاملِ محلی در `datasets/stt/results/whisper-small/summary.json`، `datasets/stt/results/whisper-turbo-q5/summary.json` و `datasets/stt/results/vosk-small-fa-0.42-common-16k.json` هستند؛ این پوشه نیز خارج از گیت است.
 
@@ -28,7 +28,7 @@
 ffmpeg -i datasets/stt/recordings/fa-01.wav -ar 16000 -ac 1 -c:a pcm_s16le datasets/stt/results/whisper-small/input/fa-01.wav
 
 build/tools/whisper.cpp-v1.9.4/build-cpu/bin/whisper-cli \
-  --model models/local/whisper.cpp/ggml-small.bin \
+  --model models/local/by-model/stt/whisper.cpp/ggml-small/ggml-small.bin \
   --file datasets/stt/results/whisper-small/input/fa-01.wav \
   --language fa --no-gpu --threads 4 --no-timestamps \
   --output-json --output-file datasets/stt/results/whisper-small/fa-01

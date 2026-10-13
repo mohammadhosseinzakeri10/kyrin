@@ -1,8 +1,11 @@
 # Ubuntu application lifecycle and settings design
 
 Status: settings, lifecycle controller, Ubuntu session factory, optional Qt
-control window, single-instance activation, and user-scoped XDG launcher and
-login startup registration are implemented. Portable packaging remains planned.
+control window, single-instance activation, user-scoped XDG launcher, login
+startup registration, and local TTS selection are implemented. Portable
+packaging remains planned. The historical milestones below may describe earlier
+TTS limitations; current behavior is in
+[TTS_MODEL_MANAGEMENT.md](../responses/TTS_MODEL_MANAGEMENT.md).
 
 ## Goal and current boundary
 

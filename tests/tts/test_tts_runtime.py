@@ -1,0 +1,393 @@
+"""Deterministic checks for local TTS selection and playback routing."""
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from kyrin.app.settings import TtsLanguageRoute, TtsSelection
+from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.stt.device import DevicePreference
+from kyrin.tts.runtime import (
+    ConfiguredSpeechSynthesizer,
+    inspect_tts_model,
+    kitten_model_file,
+    register_tts_adapter,
+    validate_tts_selection,
+)
+
+
+def _kitten_folder(folder: Path) -> Path:
+    folder.mkdir()
+    for filename in ("model.int8.onnx", "voices.bin", "tokens.txt"):
+        (folder / filename).write_bytes(b"model fixture")
+    (folder / "espeak-ng-data").mkdir()
+    return folder
+
+
+def test_kitten_package_requires_all_local_files(tmp_path: Path) -> None:
+    folder = _kitten_folder(tmp_path / "kitten-voice")
+    assert kitten_model_file(folder).name == "model.int8.onnx"
+    (folder / "voices.bin").unlink()
+    with pytest.raises(ValueError, match="voices.bin"):
+        kitten_model_file(folder)
+
+
+def test_preview_passes_draft_speed_without_changing_saved_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synthesizer = ConfiguredSpeechSynthesizer(TtsSelection())
+    selected = TtsSelection("qwen3tts", tmp_path, "0", 1.35)
+    calls: list[tuple[str, TtsSelection, str]] = []
+    monkeypatch.setattr(
+        synthesizer,
+        "_speak_model",
+        lambda text, choice, language: calls.append((text, choice, language)),
+    )
+    synthesizer.speak_preview("Hello", "en-US", selected)
+    assert calls == [("Hello", selected, "en-us")]
+    assert synthesizer._selection == TtsSelection()
+
+
+def test_gpu_choice_is_rejected_when_cuda_runtime_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _kitten_folder(tmp_path / "voice")
+    monkeypatch.setattr("kyrin.tts.runtime.isolated_runtime_python", lambda _: None)
+    monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
+    providers = SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"]
+    )
+    monkeypatch.setattr("kyrin.tts.runtime.import_module", lambda _: providers)
+    with pytest.raises(ValueError, match="GPU runtime is unavailable"):
+        validate_tts_selection(
+            TtsSelection("kitten", folder, "0", 1.0, DevicePreference.GPU)
+        )
+
+
+def test_preview_reports_missing_gpu_runtime_instead_of_generic_playback_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _kitten_folder(tmp_path / "voice")
+    monkeypatch.setattr("kyrin.tts.runtime.isolated_runtime_python", lambda _: None)
+    monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
+    providers = SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"]
+    )
+    monkeypatch.setattr("kyrin.tts.runtime.import_module", lambda _: providers)
+    synthesizer = ConfiguredSpeechSynthesizer(TtsSelection())
+    selection = TtsSelection("kitten", folder, "0", 1.0, DevicePreference.GPU)
+
+    with pytest.raises(SpeechSynthesisError, match="GPU runtime is unavailable"):
+        synthesizer.speak_preview("Hello", "en", selection)
+
+
+def test_kokoro_gpu_uses_isolated_sherpa_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kyrin.tts import runtime as tts_runtime
+
+    folder = tmp_path / "kokoro-test"
+    _kitten_folder(folder)
+    (folder / "lexicon-us-en.txt").write_bytes(b"fixture")
+    runtime_python = tmp_path / "sherpa-gpu/bin/python"
+    calls: list[tuple[object, ...]] = []
+
+    class FakeWorker:
+        def __init__(
+            self, python: Path, family: str, path: Path, provider: str
+        ) -> None:
+            calls.append((python, family, path, provider))
+
+        def generate(
+            self, text: str, voice: str, speed: float, language: str
+        ) -> tuple[list[float], int]:
+            calls.append((text, voice, speed, language))
+            return [0.2], 24000
+
+    monkeypatch.setattr(tts_runtime.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(
+        tts_runtime, "isolated_runtime_python", lambda _: runtime_python
+    )
+    monkeypatch.setattr(
+        tts_runtime,
+        "probe_isolated_runtime",
+        lambda python, family, device: calls.append((python, family, device)),
+    )
+    monkeypatch.setattr(tts_runtime, "IsolatedTtsWorker", FakeWorker)
+    selection = TtsSelection("kokoro", folder, "3", 1.0, DevicePreference.GPU)
+    validate_tts_selection(selection)
+    adapter = next(
+        item for item in tts_runtime.available_tts_adapters() if item.key == "kokoro"
+    )
+    provider = adapter.provider(selection)
+    assert provider == "gpu"
+    loaded = adapter.load(inspect_tts_model(folder), folder, provider)
+    assert adapter.generate(loaded, "Hello", "3", 1.0, "en") == ([0.2], 24000)
+    assert calls == [
+        (runtime_python, "kokoro", "gpu"),
+        (runtime_python, "kokoro", folder, "gpu"),
+        ("Hello", "3", 1.0, "en"),
+    ]
+
+
+def test_kitten_uses_selected_voice_speed_and_cached_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = _kitten_folder(tmp_path / "voice")
+    generated: list[tuple[str, int, float]] = []
+    played: list[tuple[object, int, bool]] = []
+    created: list[object] = []
+
+    class FakeTts:
+        def __init__(self, config: object) -> None:
+            created.append(config)
+
+        def generate(self, *, text: str, sid: int, speed: float) -> object:
+            generated.append((text, sid, speed))
+            return SimpleNamespace(samples=[1, 2], sample_rate=24000)
+
+    fake_sherpa = SimpleNamespace(
+        OfflineTtsKittenModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineTtsModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineTtsConfig=lambda **kwargs: SimpleNamespace(
+            **kwargs, validate=lambda: True
+        ),
+        OfflineTts=FakeTts,
+    )
+    fake_playback = SimpleNamespace(
+        play=lambda samples, rate, *, blocking: played.append((samples, rate, blocking))
+    )
+    monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
+    monkeypatch.setattr(
+        "kyrin.tts.runtime.import_module",
+        lambda name: fake_sherpa if name == "sherpa_onnx" else fake_playback,
+    )
+    synthesizer = ConfiguredSpeechSynthesizer(
+        TtsSelection("kitten", folder, "2", 1.15, DevicePreference.CPU)
+    )
+    synthesizer.speak("Hello", "en")
+    synthesizer.speak("Again", "en-US")
+
+    assert generated == [("Hello", 2, 1.15), ("Again", 2, 1.15)]
+    assert played == [([1, 2], 24000, True)] * 2
+    assert len(created) == 1
+
+
+def test_persian_vits_route_loads_local_piper_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "vits-piper-fa_IR-gyro-medium"
+    folder.mkdir()
+    for name in ("fa_IR-gyro-medium.onnx", "tokens.txt"):
+        (folder / name).write_bytes(b"fixture")
+    (folder / "espeak-ng-data").mkdir()
+    assert inspect_tts_model(folder).family == "vits"
+    configured: list[object] = []
+    generated: list[tuple[str, int, float]] = []
+
+    class FakeTts:
+        num_speakers = 1
+
+        def __init__(self, config: object) -> None:
+            configured.append(config)
+
+        def generate(self, *, text: str, sid: int, speed: float) -> object:
+            generated.append((text, sid, speed))
+            return SimpleNamespace(samples=[0.1], sample_rate=22050)
+
+    fake_sherpa = SimpleNamespace(
+        OfflineTtsVitsModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineTtsModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineTtsConfig=lambda **kwargs: SimpleNamespace(
+            **kwargs, validate=lambda: True
+        ),
+        OfflineTts=FakeTts,
+    )
+    fake_playback = SimpleNamespace(play=lambda *args, **kwargs: None)
+    monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
+    monkeypatch.setattr(
+        "kyrin.tts.runtime.import_module",
+        lambda name: fake_sherpa if name == "sherpa_onnx" else fake_playback,
+    )
+    synthesizer = ConfiguredSpeechSynthesizer(
+        TtsSelection(),
+        (
+            TtsLanguageRoute(
+                "fa", TtsSelection("vits", folder, "0", 1.1, DevicePreference.CPU)
+            ),
+        ),
+    )
+    synthesizer.speak("سلام کایرین", "fa-IR")
+    assert generated == [("سلام کایرین", 0, 1.1)]
+    assert len(configured) == 1
+
+
+def test_kokoro_package_is_detected_and_uses_its_lexicon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "kokoro-multi-lang-v1_1"
+    folder.mkdir()
+    for name in ("model.onnx", "tokens.txt", "voices.bin", "lexicon-us-en.txt"):
+        (folder / name).write_bytes(b"fixture")
+    (folder / "espeak-ng-data").mkdir()
+    assert inspect_tts_model(folder).family == "kokoro"
+    options: list[dict[str, object]] = []
+
+    class FakeTts:
+        num_speakers = 103
+
+        def __init__(self, config: object) -> None:
+            pass
+
+        def generate(self, *, text: str, sid: int, speed: float) -> object:
+            assert (text, sid, speed) == ("Hello", 42, 1.0)
+            return SimpleNamespace(samples=[0.1], sample_rate=24000)
+
+    def kokoro_config(**kwargs: object) -> object:
+        options.append(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    fake_sherpa = SimpleNamespace(
+        OfflineTtsKokoroModelConfig=kokoro_config,
+        OfflineTtsModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        OfflineTtsConfig=lambda **kwargs: SimpleNamespace(
+            **kwargs, validate=lambda: True
+        ),
+        OfflineTts=FakeTts,
+    )
+    monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
+    monkeypatch.setattr(
+        "kyrin.tts.runtime.import_module",
+        lambda name: (
+            fake_sherpa
+            if name == "sherpa_onnx"
+            else SimpleNamespace(play=lambda *args, **kwargs: None)
+        ),
+    )
+    ConfiguredSpeechSynthesizer(
+        TtsSelection("kokoro", folder, "42", 1.0, DevicePreference.CPU)
+    ).speak("Hello", "en")
+    assert options[0]["lexicon"] == str(folder / "lexicon-us-en.txt")
+
+
+def test_kokoro_package_rejects_missing_lexicon(tmp_path: Path) -> None:
+    folder = _kitten_folder(tmp_path / "kokoro-missing-lexicon")
+    with pytest.raises(ValueError, match="lexicon"):
+        inspect_tts_model(folder)
+
+
+def test_failed_synthesis_disposes_worker_before_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kyrin.tts import runtime as tts_runtime
+
+    folder = tmp_path / "faulty-voice"
+    folder.mkdir()
+    (folder / "voice.dat").write_bytes(b"fixture")
+    monkeypatch.setattr(tts_runtime, "_ADAPTERS", tts_runtime._ADAPTERS.copy())
+    created: list[object] = []
+    closed: list[object] = []
+
+    class FakeWorker:
+        def close(self) -> None:
+            closed.append(self)
+
+    class FakeAdapter:
+        key = "faultyvoice"
+        label = "Faulty voice"
+
+        def inspect(self, path: Path) -> tts_runtime.LocalTtsModel | None:
+            if path == folder:
+                return tts_runtime.LocalTtsModel(self.key, path / "voice.dat")
+            return None
+
+        def validate(self, selection: TtsSelection, model: object) -> None:
+            pass
+
+        def provider(self, selection: TtsSelection) -> str:
+            return "cuda:0"
+
+        def load(self, model: object, path: Path, provider: str) -> FakeWorker:
+            worker = FakeWorker()
+            created.append(worker)
+            return worker
+
+        def generate(
+            self, loaded: FakeWorker, text: str, voice: str, speed: float, language: str
+        ) -> tuple[list[float], int]:
+            if len(created) == 1:
+                raise SpeechSynthesisError("CUDA failure")
+            return [0.1], 24000
+
+    tts_runtime.register_tts_adapter(FakeAdapter())
+    monkeypatch.setattr(
+        tts_runtime,
+        "import_module",
+        lambda name: SimpleNamespace(play=lambda *args, **kwargs: None),
+    )
+    synthesizer = ConfiguredSpeechSynthesizer(
+        TtsSelection("faultyvoice", folder, "0", 1.0, DevicePreference.GPU)
+    )
+    with pytest.raises(SpeechSynthesisError, match="CUDA failure"):
+        synthesizer.speak("Hello", "en")
+    assert closed == [created[0]]
+    synthesizer.speak("Hello again", "en")
+    assert len(created) == 2
+
+
+def test_packaged_adapter_can_add_a_new_family_without_changing_playback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kyrin.tts import runtime as tts_runtime
+
+    monkeypatch.setattr(tts_runtime, "_ADAPTERS", tts_runtime._ADAPTERS.copy())
+    folder = tmp_path / "custom-voice"
+    folder.mkdir()
+    model_file = folder / "voice.dat"
+    model_file.write_bytes(b"fixture")
+    calls: list[object] = []
+
+    class FakeAdapter:
+        key = "customvoice"
+        label = "Custom voice"
+
+        def inspect(self, path: Path) -> object | None:
+            if (path / "voice.dat").is_file():
+                return tts_runtime.LocalTtsModel(self.key, path / "voice.dat")
+            return None
+
+        def validate(self, selection: TtsSelection, model: object) -> None:
+            calls.append("validated")
+
+        def provider(self, selection: TtsSelection) -> str:
+            return "cpu"
+
+        def load(self, model: object, path: Path, provider: str) -> object:
+            calls.append((path, provider))
+            return object()
+
+        def generate(
+            self, loaded: object, text: str, voice: str, speed: float, language: str
+        ) -> tuple[list[float], int]:
+            calls.append((text, voice, speed, language))
+            return [0.1], 16000
+
+    register_tts_adapter(FakeAdapter())
+    monkeypatch.setattr(
+        tts_runtime,
+        "import_module",
+        lambda _: SimpleNamespace(play=lambda *args, **kwargs: calls.append("played")),
+    )
+    selection = TtsSelection("customvoice", folder, "0", 1.0, DevicePreference.CPU)
+    assert inspect_tts_model(folder).family == "customvoice"
+    ConfiguredSpeechSynthesizer(selection).speak("Hello", "en")
+    assert calls == ["validated", (folder, "cpu"), ("Hello", "0", 1.0, "en"), "played"]
+
+
+def test_unsupported_package_is_rejected_instead_of_loaded(tmp_path: Path) -> None:
+    folder = tmp_path / "unknown"
+    folder.mkdir()
+    (folder / "weights.bin").write_bytes(b"fixture")
+    with pytest.raises(ValueError, match="Unsupported TTS package family"):
+        inspect_tts_model(folder)

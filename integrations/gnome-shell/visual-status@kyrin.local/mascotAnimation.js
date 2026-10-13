@@ -21,6 +21,16 @@ const REACTIONS = {
             {duration: 1100},
         ],
     },
+    conversation: {
+        repeat: false,
+        frames: [
+            {duration: 220, head: {rotation_angle_z: 5},
+                rightArm: {rotation_angle_z: 42}},
+            {duration: 180, rightArm: {rotation_angle_z: 20}},
+            {duration: 180, rightArm: {rotation_angle_z: 42}},
+            {duration: 260},
+        ],
+    },
     listening: {
         repeat: true,
         frames: [

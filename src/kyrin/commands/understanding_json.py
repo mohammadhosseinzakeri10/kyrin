@@ -20,7 +20,9 @@ _SYSTEM_OPERATIONS = frozenset(
         RequestedOperation.SUSPEND_SYSTEM,
     }
 )
-_ROUTES = frozenset({"execute", "clarify", "confirm", "no_action", "unsupported"})
+_ROUTES = frozenset(
+    {"execute", "clarify", "confirm", "no_action", "respond", "unsupported"}
+)
 
 
 def decode_model_response(payload: object) -> UnderstandingResult:
@@ -34,6 +36,7 @@ def decode_model_response(payload: object) -> UnderstandingResult:
         "route",
         "steps",
         "uncertainty",
+        "reply",
     }:
         raise ValueError("model response must be an object with known fields")
     route = payload.get("route")
@@ -45,6 +48,28 @@ def decode_model_response(payload: object) -> UnderstandingResult:
     uncertainty = payload.get("uncertainty", "")
     if not isinstance(uncertainty, str):
         raise ValueError("model uncertainty must be text")
+    reply = payload.get("reply")
+    # Some models fill an array item template on a conversational route, or
+    # put the reply inside that item. Normalize only an item with no action
+    # data; all populated operation fields remain invalid.
+    if route == "respond" and len(raw_steps) == 1:
+        item = raw_steps[0]
+        if (
+            isinstance(item, Mapping)
+            and set(item) <= {"operation", "target", "app", "reply"}
+            and all(
+                item.get(field, "") == ""
+                for field in ("operation", "target", "app")
+            )
+        ):
+            nested_reply = item.get("reply")
+            if nested_reply is None or reply is None or nested_reply == reply:
+                reply = nested_reply if reply is None else reply
+                raw_steps = []
+    if reply is not None and (not isinstance(reply, str) or not reply.strip()):
+        raise ValueError("model reply must be nonempty text")
+    if route != "respond" and reply is not None:
+        raise ValueError("only a conversational response may include reply text")
     if route in {"execute", "confirm"} and uncertainty.strip():
         raise ValueError("an action proposal cannot claim uncertainty")
 
@@ -66,6 +91,11 @@ def decode_model_response(payload: object) -> UnderstandingResult:
             polarity = Polarity(polarity_name)
         except ValueError as exc:
             raise ValueError("invalid model operation or polarity") from exc
+        if operation is RequestedOperation.SHOW_ALL_WINDOWS:
+            if raw.get("target") not in (None, "") or raw.get("app") not in (None, ""):
+                raise ValueError("window overview cannot name an application")
+            steps.append(MeaningStep(operation, polarity=polarity))
+            continue
         for field in ("target", "app"):
             if field in raw and (
                 not isinstance(raw[field], str) or not raw[field].strip()
@@ -120,6 +150,10 @@ def decode_model_response(payload: object) -> UnderstandingResult:
         return UnderstandingResult(
             UnderstandingStatus.NEGATED, (ProposedMeaning(tuple(steps)),)
         )
+    if route == "respond":
+        if steps or uncertainty.strip() or reply is None:
+            raise ValueError("respond requires only a short reply")
+        return UnderstandingResult(UnderstandingStatus.RESPOND, reply=reply.strip())
     if route == "unsupported":
         if steps:
             raise ValueError("unsupported route cannot propose steps")

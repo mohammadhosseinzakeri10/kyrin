@@ -12,6 +12,8 @@ from kyrin.app.settings import (
     AppSettings,
     CommandModelSelection,
     SttSelection,
+    TtsLanguageRoute,
+    TtsSelection,
 )
 from kyrin.app.settings_store import (
     JsonSettingsStore,
@@ -59,8 +61,58 @@ def test_selected_gpu_is_saved_without_claiming_it_is_available(tmp_path: Path) 
     store.save(settings)
 
     assert store.load() == settings
-    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 6
+    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 8
     assert store.path.stat().st_mode & 0o077 == 0
+
+
+def test_local_tts_selection_round_trips_and_legacy_settings_use_system_voice(
+    tmp_path: Path,
+) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    tts = TtsSelection("kitten", tmp_path / "kitten", "3", 1.1, DevicePreference.GPU)
+    store.save(AppSettings(tts=tts))
+    assert store.load().tts == tts
+
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 6
+    del document["tts"]
+    del document["tts_languages"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert store.load().tts == TtsSelection()
+
+
+def test_tts_rejects_invalid_voice_and_gpu_system_voice(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="voice number"):
+        TtsSelection("kitten", tmp_path, "8")
+    with pytest.raises(ValueError, match="CPU-only"):
+        TtsSelection(device=DevicePreference.GPU)
+
+
+def test_unavailable_tts_adapter_preserves_choice_and_reports_it(
+    tmp_path: Path,
+) -> None:
+    from kyrin.tts.runtime import validate_tts_selection
+
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    choice = TtsSelection("futurevoice", tmp_path / "voice", "0")
+    store.save(AppSettings(tts=choice))
+    assert store.load().tts == choice
+    with pytest.raises(ValueError, match="adapter is unavailable: futurevoice"):
+        validate_tts_selection(choice)
+
+
+def test_persian_tts_route_round_trips_and_v7_migrates(tmp_path: Path) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    persian = TtsLanguageRoute(
+        "fa", TtsSelection("vits", tmp_path / "vits-piper-fa_IR", "0")
+    )
+    store.save(AppSettings(tts_languages=(persian,)))
+    assert store.load().tts_languages == (persian,)
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 7
+    del document["tts_languages"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert store.load().tts_languages == ()
 
 
 def test_command_model_selection_round_trips_and_old_schema_stays_off(
@@ -75,6 +127,8 @@ def test_command_model_selection_round_trips_and_old_schema_stays_off(
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 5
     del document["command_model"]
+    del document["tts"]
+    del document["tts_languages"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().command_model is None
 
@@ -96,12 +150,12 @@ def test_unsupported_version_and_wrong_types_are_rejected(tmp_path: Path) -> Non
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
     document = json.loads(store.path.read_text(encoding="utf-8"))
-    document["schema_version"] = 7
+    document["schema_version"] = 9
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="schema version"):
         store.load()
 
-    document["schema_version"] = 6
+    document["schema_version"] = 8
     document["listening_enabled"] = 1
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="boolean"):
@@ -166,6 +220,8 @@ def test_version_one_settings_migrate_with_chat_permission_off(tmp_path: Path) -
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 1
     del document["command_model"]
+    del document["tts"]
+    del document["tts_languages"]
     del document["allowed_chat_apps"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
@@ -188,6 +244,8 @@ def test_version_two_settings_migrate_with_no_custom_wake_aliases(
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 2
     del document["command_model"]
+    del document["tts"]
+    del document["tts_languages"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
@@ -205,6 +263,8 @@ def test_legacy_settings_do_not_enable_window_or_close_permissions(
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 3
     del document["command_model"]
+    del document["tts"]
+    del document["tts_languages"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
     del document["system_power_enabled"]
@@ -222,6 +282,8 @@ def test_version_four_never_enables_power_permission(tmp_path: Path) -> None:
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 4
     del document["command_model"]
+    del document["tts"]
+    del document["tts_languages"]
     del document["system_power_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert not store.load().system_power_enabled

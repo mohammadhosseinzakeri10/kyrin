@@ -4,9 +4,13 @@ The caller supplies the audio session, concrete adapters, and presentation.
 This runtime owns only event routing and its optional action worker.
 """
 
+import logging
+import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import closing
+from datetime import UTC, datetime
 from typing import Protocol
+from uuid import uuid4
 
 from kyrin.actions.executor import ActionExecutor, execute_with_unknown_fallback
 from kyrin.actions.gate import ActionGate
@@ -26,9 +30,12 @@ from kyrin.commands.models import (
 )
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.command_bridge import observe_command_update
+from kyrin.memory.history import ConversationHistory, ConversationTurn
 from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import SystemPowerFlow
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def dispatch_command_action(
@@ -110,6 +117,7 @@ class LiveCommandRuntime:
         on_session_end: Callable[[SpeechSessionEnded], None],
         on_active_app: Callable[[str | None], None] | None = None,
         system_power: SystemPowerFlow | None = None,
+        history: ConversationHistory | None = None,
     ) -> None:
         if (coordinator is None) != (gate is None):
             raise ValueError("coordinator and action gate must be supplied together")
@@ -125,6 +133,9 @@ class LiveCommandRuntime:
         self._on_session_end = on_session_end
         self._on_active_app = on_active_app
         self._system_power = system_power
+        self._history = history
+        self._history_session_id = uuid4().hex
+        self._history_stream_id = 0
         self._worker = (
             QueuedActionDispatcher(
                 lambda command: execute_final_command(
@@ -176,6 +187,8 @@ class LiveCommandRuntime:
                         and self._system_power is not None
                         and self._system_power.on_final_speech(event.text)
                     ):
+                        coordinator.cancel_fragment()
+                        self._remember(event)
                         continue
                     active_app, decisions = observe_command_update(
                         coordinator, event, self._observer
@@ -200,6 +213,7 @@ class LiveCommandRuntime:
                                 decision, self._gate, None
                             ):
                                 self._on_action_output(action)
+                    self._remember(event)
         finally:
             self._end_stream()
             if worker is not None:
@@ -211,3 +225,26 @@ class LiveCommandRuntime:
         if self._coordinator is not None:
             for decision in self._coordinator.start_new_stream():
                 self._on_command_event(decision)
+            self._history_stream_id += 1
+
+    def _remember(self, event: TranscriptUpdate) -> None:
+        if (
+            self._history is None
+            or event.status is not TranscriptStatus.FINAL
+            or not event.text.strip()
+            or event.text.strip().startswith("[")
+        ):
+            return
+        try:
+            self._history.append(
+                ConversationTurn(
+                    event.text[:2000],
+                    event.language,
+                    datetime.now(UTC),
+                    self._history_session_id,
+                    self._history_stream_id,
+                    event.segment_id,
+                )
+            )
+        except (OSError, RuntimeError, sqlite3.Error) as exc:
+            _LOGGER.warning("Conversation history is unavailable: %s", exc)

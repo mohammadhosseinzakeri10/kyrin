@@ -2,6 +2,9 @@
 
 An open-source, modular AI desktop agent under active development.
 
+For a map of the source, tests, models, and installed local data, see
+[project layout](docs/development/PROJECT_LAYOUT.md).
+
 ## Vision
 
 KYRIN is an intelligent AI agent designed to understand voice, vision, and text, and interact with the operating system naturally like a human.
@@ -19,8 +22,12 @@ STT settings, show status, and start or stop listening. Opening it again in the
 same user session activates the existing window. On Ubuntu, Preferences can
 install a per-user desktop launcher and enable or disable login startup.
 The Desktop Actions page can select installed applications for an explicit
-allowlist and enable execution. Spoken TTS responses and management of TTS or
-command-understanding models are not yet available in that window.
+allowlist and enable execution. The control window also has local command-model
+and voice-output settings. Voice models are selected from local files; the app
+does not download models.
+Finalized speech text can be kept in a local, bounded conversation history.
+Short command fragments can be joined during one listening stream; archived
+history is retained without being supplied as current command context.
 The selected black-hole K logo appears in the window and Ubuntu launcher.
 The **Model Library** page lists installed speech models in All, CPU, and GPU
 views and can add a downloaded local model without editing code. A Whisper
@@ -30,7 +37,8 @@ See [model library](docs/app/MODEL_LIBRARY.md).
 The current interpreter recognizes a small set of English and Persian example
 commands. It does not provide general multilingual understanding or desktop
 automation. Four local Ollama command models are being compared in a text-only
-diagnostic; none is connected to the live command runtime. Local Vosk and
+diagnostic; the selected model can also assist the live command runtime behind
+independent action checks. Local Vosk and
 Whisper models are development assets, not bundled
 defaults. Vosk currently runs on CPU. Whisper can use CPU or an explicitly
 installed CUDA runtime on supported NVIDIA hardware; the same model weights
@@ -74,8 +82,10 @@ device actually opened by STT. Explicit GPU selection
 reports an error if the GPU runtime cannot start, while AUTO can use the CPU
 runtime if GPU startup fails. Vosk still runs on CPU. The close
 button minimizes the window while listening continues; use **Quit KYRIN** to
-stop and exit. The window currently shows text responses and does not select
-or play a TTS voice.
+stop and exit. The **Voice Output** page selects local voices by language,
+including Persian Piper/VITS packages and supported Kokoro packages, along with speaking speed and
+compute preference. It can play a short sample. See
+[voice model management](docs/responses/TTS_MODEL_MANAGEMENT.md).
 
 In **Preferences**, **Start KYRIN when I sign in** registers a per-user XDG
 autostart entry and desktop-menu launcher. Turning it off removes only the

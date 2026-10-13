@@ -19,6 +19,30 @@ ENGLISH: dict[str, str] = {
     "recognition": "Speech Recognition",
     "models": "Model Library",
     "command_models": "Command Understanding",
+    "tts": "Voice Output",
+    "tts_heading": "Voice output",
+    "tts_caption": (
+        "Choose an installed offline voice. KYRIN never downloads voice models. "
+        "Place a supported extracted model in your local TTS folder or browse "
+        "to it; KYRIN detects its engine. Test the current settings before saving."
+    ),
+    "tts_engine": "Engine",
+    "tts_installed": "Installed local models",
+    "tts_select_installed": "Select a local model…",
+    "tts_refresh": "Refresh",
+    "tts_system": "System voice (Speech Dispatcher)",
+    "tts_folder": "Local model folder",
+    "tts_voice": "Voice",
+    "tts_speed": "Speaking speed",
+    "tts_device": "Run voice on",
+    "tts_add_language": "Add language voice…",
+    "tts_remove_language": "Remove selected language",
+    "tts_language_code": "Language code (for example fa, de, fr)",
+    "tts_sample_text": "Test phrase in this language",
+    "tts_select_folder": "Select an extracted TTS model folder",
+    "tts_preview": "Test current voice settings",
+    "tts_preview_started": "Playing a short sample with the current settings…",
+    "tts_preview_unavailable": "Voice preview is unavailable.",
     "command_models_heading": "Command understanding",
     "command_models_caption": (
         "Choose a local language model for commands the fast rules cannot resolve. "
@@ -171,6 +195,38 @@ ENGLISH: dict[str, str] = {
     "startup_unavailable": "Installed KYRIN launcher is unavailable.",
     "import_language": "Add language pack…",
     "language_help": "Language packs can be added here without changing code.",
+    "conversation_memory_heading": "Conversation memory",
+    "conversation_memory_caption": (
+        "KYRIN keeps a bounded active history of final speech transcripts "
+        "on this device. "
+        "Audio is not stored. Earlier words never authorize a new action."
+    ),
+    "conversation_memory_clear": "Clear active conversation memory…",
+    "conversation_memory_review": "Review archived speech transcripts…",
+    "conversation_memory_review_title": "Archived conversation memory",
+    "conversation_memory_archive_count": "Archived transcripts: {count}",
+    "conversation_memory_select": "Select a transcript to read it.",
+    "conversation_memory_older": "Load older",
+    "conversation_memory_restore": "Restore selected transcript…",
+    "conversation_memory_close": "Close",
+    "conversation_memory_restore_title": "Restore this transcript?",
+    "conversation_memory_restore_question": (
+        "Make this transcript available to conversation context again? "
+        "It will never authorize an action by itself."
+    ),
+    "conversation_memory_clear_title": "Clear active conversation memory?",
+    "conversation_memory_clear_question": (
+        "Delete active speech transcripts? Archived history remains preserved. "
+        "This cannot be undone."
+    ),
+    "conversation_memory_cleared": "Active conversation memory cleared.",
+    "conversation_memory_unavailable": "Conversation memory could not be cleared.",
+    "power_safe_preview": "Test power confirmation safely (no shutdown)…",
+    "power_safe_preview_busy": (
+        "Power confirmation preview is already active or unavailable."
+    ),
+    "diagnostics_latency": "Speech onset to action result",
+    "diagnostics_final_to_result": "final text to result",
     "language_added": "Language pack added.",
     "ui_saved": "Interface preferences saved.",
     "state_stopped": "Stopped",
@@ -201,9 +257,7 @@ ENGLISH: dict[str, str] = {
     "language_file": "Select a KYRIN language pack",
 }
 
-_LOCALE = re.compile(
-    r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$"
-)
+_LOCALE = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$")
 
 
 class TranslationError(ValueError):
@@ -329,9 +383,7 @@ class UiTranslations:
                         or "}" in (spec or "")
                         or conversion is not None
                     ):
-                        raise TranslationError(
-                            "Language pack has invalid placeholders"
-                        )
+                        raise TranslationError("Language pack has invalid placeholders")
                     actual.add(field)
             except ValueError as exc:
                 raise TranslationError(

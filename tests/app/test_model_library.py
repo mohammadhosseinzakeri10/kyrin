@@ -26,6 +26,7 @@ def test_whisper_model_is_one_copy_in_both_device_views(tmp_path: Path) -> None:
     )
 
     assert cpu == gpu
+    assert cpu.model_id.startswith("whisper-ggml-small-")
     assert cpu.model_path.read_bytes() == source.read_bytes()
     assert cpu.devices == frozenset({ComputeDevice.CPU, ComputeDevice.GPU})
     assert library.list_models() == (cpu,)
@@ -71,6 +72,7 @@ def test_vosk_is_cpu_only_and_gpu_import_does_not_create_library(
     model = library.import_model(
         source, backend="vosk", language="en", requested_device=ComputeDevice.CPU
     )
+    assert model.model_id.startswith("vosk-en-")
     assert model.devices == frozenset({ComputeDevice.CPU})
     assert (model.model_path / "am" / "final.mdl").read_bytes() == b"acoustic model"
 

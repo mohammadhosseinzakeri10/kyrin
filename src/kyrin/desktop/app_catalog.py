@@ -6,10 +6,11 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class InstalledApp:
-    """A platform ID and a user-facing label; neither proves current focus."""
+    """Registered app metadata; neither its name nor categories prove focus."""
 
     platform_id: str
     display_name: str
+    categories: tuple[str, ...] = ()
 
 
 class AppCatalog(Protocol):

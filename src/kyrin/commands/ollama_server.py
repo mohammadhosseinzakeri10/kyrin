@@ -11,6 +11,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from kyrin.commands.ollama_engine import CommandModelError
+from kyrin.commands.ollama_models import ollama_model_stores
 
 
 def _unused_loopback_port() -> int:
@@ -32,12 +33,15 @@ class LocalOllamaServer:
         binary = shutil.which("ollama")
         if binary is None:
             raise CommandModelError("Ollama is not installed")
+        selected_store = ollama_model_stores(self._store).get(self._model)
+        if selected_store is None:
+            raise CommandModelError("selected command model is not in the local store")
         port = _unused_loopback_port()
         url = f"http://127.0.0.1:{port}"
         environment = os.environ.copy()
         environment.update(
             {
-                "OLLAMA_MODELS": str(self._store),
+                "OLLAMA_MODELS": str(selected_store),
                 "OLLAMA_HOST": f"127.0.0.1:{port}",
                 "OLLAMA_NO_CLOUD": "1",
             }

@@ -1,15 +1,36 @@
 """A command model may propose, but original speech and policy still decide."""
 
+import json
 from pathlib import Path
 
 import pytest
 
+from kyrin.commands.app_names import SpokenAppCandidate
+from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
-from kyrin.commands.interpreter import ReadyCommand, UnrecognizedCommand
+from kyrin.commands.interpreter import (
+    ConversationalReply,
+    Interpretation,
+    NeedsClarification,
+    NotACommand,
+    ReadyCommand,
+    UnrecognizedCommand,
+)
 from kyrin.commands.model_interpreter import ModelAssistedInterpreter
-from kyrin.commands.models import CommandContext, CommandKind
+from kyrin.commands.models import (
+    CommandContext,
+    CommandIntent,
+    CommandKind,
+    CommandResolution,
+    PendingAppClarification,
+    PendingOperationClarification,
+    ResponseChannel,
+    ResponseKind,
+    ResponseRequest,
+)
 from kyrin.commands.ollama_engine import CommandModelError, OllamaCommandEngine
 from kyrin.commands.understanding import (
+    ConfirmationDecision,
     MeaningStep,
     ProposedMeaning,
     RequestedOperation,
@@ -19,19 +40,37 @@ from kyrin.commands.understanding import (
 )
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
+from kyrin.desktop.window_presence import WindowPresence
 from kyrin.stt.device import DevicePreference
+from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 
 class FakeModel:
-    def __init__(self, result: UnderstandingResult | Exception) -> None:
+    def __init__(
+        self,
+        result: UnderstandingResult | Exception,
+        confirmation: ConfirmationDecision | Exception = ConfirmationDecision.UNCLEAR,
+    ) -> None:
         self.result = result
+        self.confirmation = confirmation
         self.calls = 0
+        self.confirmation_calls = 0
 
-    def understand(self, source, *, context):  # type: ignore[no-untyped-def]
+    def understand(
+        self, source: UnderstandingInput, *, context: CommandContext
+    ) -> UnderstandingResult:
         self.calls += 1
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+    def classify_confirmation(
+        self, source: UnderstandingInput, *, question: str
+    ) -> ConfirmationDecision:
+        self.confirmation_calls += 1
+        if isinstance(self.confirmation, Exception):
+            raise self.confirmation
+        return self.confirmation
 
 
 def _ready(operation: RequestedOperation, target: str) -> UnderstandingResult:
@@ -50,20 +89,31 @@ def _interpreter(tmp_path: Path, model: FakeModel) -> ModelAssistedInterpreter:
     (applications / "browser.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Browser\n", encoding="utf-8"
     )
+    (applications / "code.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Visual Studio Code\n",
+        encoding="utf-8",
+    )
     names = CatalogSpokenAppResolver(
         XdgDesktopAppCatalog((tmp_path,)),
-        {"telegram.desktop": "telegram", "browser.desktop": "browser"},
+        {
+            "telegram.desktop": "telegram",
+            "browser.desktop": "browser",
+            "code.desktop": "visual-studio-code",
+        },
+        {"telegram": ("تلگرام", "تيليغرام", "ٹیلیگرام")},
     )
     return ModelAssistedInterpreter(
         DemoCommandInterpreter(names),
         model,
         names,
-        allowed_apps=frozenset({"telegram", "browser"}),
+        allowed_apps=frozenset({"telegram", "browser", "visual-studio-code"}),
         supported_chat_apps=frozenset(),
     )
 
 
-def _interpret(interpreter: ModelAssistedInterpreter, text: str, language: str = "en"):
+def _interpret(
+    interpreter: ModelAssistedInterpreter, text: str, language: str = "en"
+) -> Interpretation:
     return interpreter.interpret(
         text, language=language, context=CommandContext(), pending=None
     )
@@ -71,18 +121,64 @@ def _interpret(interpreter: ModelAssistedInterpreter, text: str, language: str =
 
 def test_model_handles_a_phrase_not_covered_by_fast_rules(tmp_path: Path) -> None:
     model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
-    result = _interpret(_interpreter(tmp_path, model), "Please open Telegram")
+    result = _interpret(_interpreter(tmp_path, model), "Kindly open Telegram")
     assert isinstance(result, ReadyCommand)
     assert result.intent.kind is CommandKind.OPEN_APP
     assert result.intent.target == "telegram"
     assert model.calls == 1
 
 
+def test_old_utterance_cannot_supply_a_new_action_target(tmp_path: Path) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
+    interpreter = _interpreter(tmp_path, model)
+    result = interpreter.interpret(
+        "Please open it",
+        language="en",
+        context=CommandContext(recent_utterances=("Open Telegram",)),
+        pending=None,
+    )
+    assert not isinstance(result, ReadyCommand)
+
+
+@pytest.mark.parametrize("name", ("Visual Studio Code", "VS Code"))
+def test_polite_request_uses_registered_full_or_short_app_name(
+    tmp_path: Path, name: str
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, name))
+    result = _interpret(_interpreter(tmp_path, model), f"Please open {name}")
+    assert result == ReadyCommand(
+        CommandIntent(CommandKind.OPEN_APP, "visual-studio-code")
+    )
+
+
+@pytest.mark.parametrize(
+    ("heard", "language"),
+    [
+        ("Please open.", "en"),
+        ("في جوال أستديو كوتو", "ar"),
+        ("هي جوال أستديو قوده", "ar"),
+        ("Kötü kutusunu açın.", "tr"),
+    ],
+)
+def test_unrecognizable_stt_cannot_invent_visual_studio_code(
+    tmp_path: Path, heard: str, language: str
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Visual Studio Code"))
+    result = _interpret(_interpreter(tmp_path, model), heard, language)
+    assert not isinstance(result, (ReadyCommand, NeedsClarification))
+
+
 @pytest.mark.parametrize(
     ("source", "operation", "target", "language"),
     [
-        ("Please close Telegram", RequestedOperation.OPEN_APP, "Telegram", "en"),
-        ("Please open Telegram", RequestedOperation.OPEN_APP, "Browser", "en"),
+        (
+            "Kindly close Telegram",
+            RequestedOperation.OPEN_APP, "Telegram", "en",
+        ),
+        (
+            "Kindly open Telegram",
+            RequestedOperation.OPEN_APP, "Browser", "en",
+        ),
         ("Do not open Telegram", RequestedOperation.OPEN_APP, "Telegram", "en"),
         ("Öffne Telegram", RequestedOperation.OPEN_APP, "Telegram", "de"),
     ],
@@ -108,14 +204,208 @@ def test_existing_fast_command_does_not_wait_for_model(tmp_path: Path) -> None:
 
 def test_model_failure_fails_closed(tmp_path: Path) -> None:
     model = FakeModel(CommandModelError("not responding"))
-    result = _interpret(_interpreter(tmp_path, model), "Please open Telegram")
+    result = _interpret(_interpreter(tmp_path, model), "Kindly open Telegram")
     assert isinstance(result, UnrecognizedCommand)
 
 
 def test_explicit_command_repeats_when_model_claims_no_action(tmp_path: Path) -> None:
     model = FakeModel(UnderstandingResult(UnderstandingStatus.NOT_COMMAND))
-    result = _interpret(_interpreter(tmp_path, model), "Please open Telegram")
+    result = _interpret(_interpreter(tmp_path, model), "Kindly open Telegram")
     assert isinstance(result, UnrecognizedCommand)
+
+
+def test_greeting_gets_model_reply_without_an_action(tmp_path: Path) -> None:
+    model = FakeModel(
+        UnderstandingResult(UnderstandingStatus.RESPOND, reply="Hello! I'm KYRIN.")
+    )
+    interpreter = _interpreter(tmp_path, model)
+    assert _interpret(interpreter, "Hello Kairin") == ConversationalReply(
+        "Hello! I'm KYRIN."
+    )
+    coordinator = CommandCoordinator(interpreter)
+    events = coordinator.observe(
+        TranscriptUpdate(0, "Hello Kairin", TranscriptStatus.FINAL, "en")
+    )
+    assert events[0] == CommandResolution(0, None, language="en")
+    assert isinstance(events[1], ResponseRequest)
+    assert events[1].kind is ResponseKind.CONVERSATION
+    assert events[1].channel is ResponseChannel.TEXT_AND_VOICE
+    assert events[1].message == "Hello! I'm KYRIN."
+
+
+def test_model_reply_cannot_replace_a_recognizable_action(tmp_path: Path) -> None:
+    model = FakeModel(UnderstandingResult(UnderstandingStatus.RESPOND, reply="Done!"))
+    result = _interpret(_interpreter(tmp_path, model), "Kindly open Telegram")
+    assert isinstance(result, UnrecognizedCommand)
+
+
+@pytest.mark.parametrize("reply", ("ja", "Ja!", "nein", "یا"))
+def test_pending_app_confirmation_keeps_language_and_safety(
+    tmp_path: Path, reply: str
+) -> None:
+    model = FakeModel(CommandModelError("offline"))
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("telegram", "Telegram"),), confirmation=True
+    )
+    result = _interpreter(tmp_path, model).interpret(
+        reply, language="de", context=CommandContext(), pending=pending
+    )
+    if reply.casefold().startswith("ja"):
+        assert result == ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "telegram"))
+    else:
+        assert not isinstance(result, ReadyCommand)
+    assert model.calls == 0
+    assert model.confirmation_calls == 0
+
+
+def test_model_confirmed_terminal_name_still_asks_for_the_operation(
+    tmp_path: Path,
+) -> None:
+    applications = tmp_path / "applications"
+    applications.mkdir()
+    (applications / "org.gnome.Ptyxis.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Terminal\n", encoding="utf-8"
+    )
+    names = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"org.gnome.Ptyxis.desktop": "terminal"},
+    )
+
+    class Presence:
+        def observe(self, app_id: str) -> WindowPresence:
+            return WindowPresence.OPEN
+
+        def count(self, app_id: str) -> int:
+            return 1
+
+    rules = DemoCommandInterpreter(
+        names, window_presence=Presence(), terminal_app_id="terminal"
+    )
+    interpreter = ModelAssistedInterpreter(
+        rules,
+        FakeModel(CommandModelError("offline"), ConfirmationDecision.YES),
+        names,
+        allowed_apps=frozenset({"terminal"}),
+        supported_chat_apps=frozenset(),
+        action_review=rules.review_model_action,
+    )
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("terminal", "Terminal"),), confirmation=True
+    )
+    result = interpreter.interpret(
+        "oui", language="fr", context=CommandContext(), pending=pending
+    )
+    assert isinstance(result, NeedsClarification)
+    assert isinstance(result.pending, PendingOperationClarification)
+
+
+def test_model_proposed_terminal_open_uses_window_aware_menu(tmp_path: Path) -> None:
+    applications = tmp_path / "applications"
+    applications.mkdir()
+    (applications / "org.gnome.Ptyxis.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Terminal\n", encoding="utf-8"
+    )
+    names = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"org.gnome.Ptyxis.desktop": "terminal"},
+    )
+
+    class Presence:
+        def observe(self, app_id: str) -> WindowPresence:
+            return WindowPresence.OPEN
+
+        def count(self, app_id: str) -> int:
+            return 1
+
+    rules = DemoCommandInterpreter(
+        names, window_presence=Presence(), terminal_app_id="terminal"
+    )
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Terminal"))
+    interpreter = ModelAssistedInterpreter(
+        rules,
+        model,
+        names,
+        allowed_apps=frozenset({"terminal"}),
+        supported_chat_apps=frozenset(),
+        action_review=rules.review_model_action,
+    )
+    result = _interpret(interpreter, "Please open Terminal")
+    assert isinstance(result, NeedsClarification)
+    assert isinstance(result.pending, PendingOperationClarification)
+
+
+@pytest.mark.parametrize(
+    ("source", "language", "reply", "decision", "action"),
+    [
+        ("Ouvrir Telegram", "fr", "oui", ConfirmationDecision.YES, True),
+        ("Ouvrir Telegram", "en", "oui", ConfirmationDecision.YES, True),
+        ("打开 Telegram", "zh", "是", ConfirmationDecision.YES, True),
+        ("Ouvrir Telegram", "fr", "non", ConfirmationDecision.NO, False),
+        ("打开 Telegram", "zh", "不要", ConfirmationDecision.YES, False),
+    ],
+)
+def test_unreviewed_language_requires_a_second_explicit_confirmation(
+    tmp_path: Path,
+    source: str,
+    language: str,
+    reply: str,
+    decision: ConfirmationDecision,
+    action: bool,
+) -> None:
+    model = FakeModel(
+        _ready(RequestedOperation.OPEN_APP, "Telegram"), confirmation=decision
+    )
+    interpreter = _interpreter(tmp_path, model)
+    first = _interpret(interpreter, source, language)
+    assert isinstance(first, NeedsClarification)
+    assert isinstance(first.pending, PendingAppClarification)
+    second = interpreter.interpret(
+        reply, language=language, context=CommandContext(), pending=first.pending
+    )
+    if action:
+        assert isinstance(second, ReadyCommand)
+        assert second.intent == CommandIntent(CommandKind.OPEN_APP, "telegram")
+    else:
+        assert not isinstance(second, ReadyCommand)
+
+
+def test_model_cannot_invent_a_target_in_an_unreviewed_language(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
+    result = _interpret(_interpreter(tmp_path, model), "Ouvrir Browser", "fr")
+    assert isinstance(result, UnrecognizedCommand)
+
+
+@pytest.mark.parametrize(
+    ("source", "language"),
+    [("N'ouvre pas Telegram", "fr"), ("不要打开 Telegram", "en")],
+)
+def test_negated_uncovered_language_cannot_become_an_app_suggestion(
+    tmp_path: Path, source: str, language: str
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
+    result = _interpret(_interpreter(tmp_path, model), source, language)
+    assert not isinstance(result, (ReadyCommand, NeedsClarification))
+
+
+@pytest.mark.parametrize(
+    ("source", "language", "expected"),
+    [
+        ("اوپن تلگرام", "fa", ReadyCommand),
+        ("اپن ٹیلیگرام", "ur", ReadyCommand),
+        ("أوبين تيليغرام", "ar", ReadyCommand),
+        ("Opend telegram", "sv", NeedsClarification),
+        ("و بنتلقرام", "ar", NotACommand),
+    ],
+)
+def test_observed_mixed_script_stt_output(
+    tmp_path: Path, source: str, language: str, expected: type
+) -> None:
+    model = FakeModel(CommandModelError("offline"))
+    result = _interpret(_interpreter(tmp_path, model), source, language)
+    assert isinstance(result, expected)
+    assert model.calls == (1 if source == "و بنتلقرام" else 0)
 
 
 def test_ollama_device_options_and_probe() -> None:
@@ -165,3 +455,47 @@ def test_explicit_gpu_without_gpu_memory_does_not_claim_success() -> None:
     )
     with pytest.raises(CommandModelError, match="device"):
         engine.understand(UnderstandingInput("hello", "en"), context=CommandContext())
+
+
+@pytest.mark.parametrize(
+    ("reply", "model_decision", "evidence", "expected"),
+    [
+        ("oui", "yes", "oui", ConfirmationDecision.YES),
+        ("不要", "no", "不要", ConfirmationDecision.NO),
+        ("peut-être", "unclear", "peut-être", ConfirmationDecision.UNCLEAR),
+        ("oui, mais", "yes", "oui", ConfirmationDecision.UNCLEAR),
+    ],
+)
+def test_ollama_confirmation_requires_the_complete_spoken_reply(
+    reply: str,
+    model_decision: str,
+    evidence: str,
+    expected: ConfirmationDecision,
+) -> None:
+    requests: list[dict[str, object]] = []
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        requests.append(payload)
+        return {
+            "message": {
+                "content": json.dumps(
+                    {"decision": model_decision, "evidence": evidence}
+                )
+            }
+        }
+
+    engine = OllamaCommandEngine(
+        "http://127.0.0.1:11435",
+        "qwen3.5:4b",
+        DevicePreference.AUTO,
+        transport=transport,
+    )
+    assert (
+        engine.classify_confirmation(
+            UnderstandingInput(reply, "fr"), question="Open Telegram?"
+        )
+        is expected
+    )
+    schema = requests[0]["format"]
+    assert isinstance(schema, dict)
+    assert schema["required"] == ["decision", "evidence"]

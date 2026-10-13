@@ -21,17 +21,93 @@ from kyrin.responses.presenter import ResponsePresenter
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 
-def _entry(root: Path, desktop_id: str, name: str) -> None:
+def _entry(root: Path, desktop_id: str, name: str, *, browser: bool = False) -> None:
     path = root / "applications" / desktop_id
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"[Desktop Entry]\nType=Application\nName={name}\n",
+        f"[Desktop Entry]\nType=Application\nName={name}\n"
+        + ("Categories=Network;WebBrowser;\n" if browser else ""),
         encoding="utf-8",
     )
 
 
 def _final(segment: int, text: str) -> TranscriptUpdate:
     return TranscriptUpdate(segment, text, TranscriptStatus.FINAL, "en")
+
+
+def test_generic_browser_asks_between_permitted_browsers_before_action(
+    tmp_path: Path,
+) -> None:
+    _entry(tmp_path, "chrome.desktop", "Google Chrome", browser=True)
+    _entry(tmp_path, "firefox.desktop", "Firefox", browser=True)
+    _entry(tmp_path, "private.desktop", "Private Browser", browser=True)
+    _entry(tmp_path, "editor.desktop", "Editor")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {
+            "chrome.desktop": "google-chrome",
+            "firefox.desktop": "firefox",
+            "editor.desktop": "editor",
+        },
+    )
+    assert tuple(item.app_id for item in resolver.browser_candidates()) == (
+        "firefox",
+        "google-chrome",
+    )
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(
+            resolver, browser_candidates=resolver.browser_candidates()
+        )
+    )
+    gate = ActionGate(
+        ActionPolicy(allowed_apps=frozenset({"google-chrome", "firefox"}))
+    )
+    first = coordinator.observe(_final(0, "Open browser"))
+    assert first[0] == CommandResolution(0, None, language="en")
+    assert isinstance(first[1], ResponseRequest)
+    assert first[1].kind is ResponseKind.CHOOSE_APP
+    assert first[1].app_candidates == ("Firefox", "Google Chrome")
+    assert gate.observe(first[0]) is None
+    assert ResponsePresenter("en").present(first[1]).text == (
+        "Which app do you mean? 1. Firefox; 2. Google Chrome. "
+        "Say its number or name."
+    )
+    unclear = coordinator.observe(_final(1, "yes"))
+    assert unclear[0] == CommandResolution(1, None, language="en")
+    assert isinstance(unclear[1], ResponseRequest)
+    assert unclear[1].kind is ResponseKind.CHOOSE_APP
+    selected = coordinator.observe(_final(2, "number one"))
+    assert selected == (
+        CommandResolution(
+            2, CommandIntent(CommandKind.OPEN_APP, "firefox"), language="en"
+        ),
+    )
+    assert isinstance(gate.observe(selected[0]), ActionRequest)
+
+
+def test_persian_browser_name_asks_for_only_permitted_browser(
+    tmp_path: Path,
+) -> None:
+    _entry(tmp_path, "chrome.desktop", "Google Chrome", browser=True)
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {"chrome.desktop": "google-chrome"}
+    )
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(
+            resolver, browser_candidates=resolver.browser_candidates()
+        )
+    )
+    first = coordinator.observe(
+        TranscriptUpdate(0, "مرورگر را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    assert first[0] == CommandResolution(0, None, language="fa")
+    assert isinstance(first[1], ResponseRequest)
+    assert first[1].kind is ResponseKind.CONFIRM_APP
+    accepted = coordinator.observe(
+        TranscriptUpdate(1, "بله", TranscriptStatus.FINAL, "fa")
+    )
+    assert isinstance(accepted[0], CommandResolution)
+    assert accepted[0].intent == CommandIntent(CommandKind.OPEN_APP, "google-chrome")
 
 
 def test_observed_whisper_spellings_resolve_with_registered_telegram(
@@ -113,6 +189,84 @@ def test_catalog_alias_and_approximate_name_require_different_decisions(
             2, CommandIntent(CommandKind.OPEN_APP, "whatsapp"), language="en"
         ),
     )
+
+
+def test_registered_long_name_supplies_short_name_and_stt_hint(tmp_path: Path) -> None:
+    _entry(tmp_path, "code.desktop", "Visual Studio Code")
+    _entry(tmp_path, "other.desktop", "Another Editing Program")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {"code.desktop": "visual-studio-code"}
+    )
+    assert resolver.resolve("VS Code").exact
+    assert resolver.resolve("VSCode").exact
+    assert resolver.resolve("Visual Studio Code").candidates[0].app_id == (
+        "visual-studio-code"
+    )
+    assert resolver.vocabulary_hints() == ("Visual Studio Code", "VS Code")
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    assert coordinator.observe(_final(0, "Please open VS Code"))[0] == (
+        CommandResolution(
+            0,
+            CommandIntent(CommandKind.OPEN_APP, "visual-studio-code"),
+            language="en",
+        )
+    )
+    assert coordinator.observe(_final(1, "Open VS Code")) == (
+        CommandResolution(
+            1,
+            CommandIntent(CommandKind.OPEN_APP, "visual-studio-code"),
+            language="en",
+        ),
+    )
+
+
+def test_colliding_derived_short_names_do_not_execute(tmp_path: Path) -> None:
+    _entry(tmp_path, "code.desktop", "Visual Studio Code")
+    _entry(tmp_path, "other.desktop", "Video Streaming Code")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"code.desktop": "visual-studio-code", "other.desktop": "video-code"},
+    )
+    match = resolver.resolve("VS Code")
+    assert match.exact and len(match.candidates) == 2
+    events = CommandCoordinator(DemoCommandInterpreter(resolver)).observe(
+        _final(0, "Open VS Code")
+    )
+    assert events[0] == CommandResolution(0, None, language="en")
+    assert isinstance(events[1], ResponseRequest)
+    assert events[1].kind is ResponseKind.CHOOSE_APP
+
+
+def test_registered_camel_case_name_accepts_spoken_word_boundary(
+    tmp_path: Path,
+) -> None:
+    _entry(tmp_path, "openrgb.desktop", "OpenRGB")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {"openrgb.desktop": "openrgb"}
+    )
+    assert resolver.resolve("Open RGB").exact
+    assert CommandCoordinator(DemoCommandInterpreter(resolver)).observe(
+        _final(0, "Open Open RGB")
+    ) == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_APP, "openrgb"), language="en"
+        ),
+    )
+
+
+def test_colliding_camel_case_name_still_requires_choice(tmp_path: Path) -> None:
+    _entry(tmp_path, "openrgb.desktop", "OpenRGB")
+    _entry(tmp_path, "open-rgb.desktop", "Open RGB")
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)),
+        {"openrgb.desktop": "openrgb", "open-rgb.desktop": "open-rgb"},
+    )
+    events = CommandCoordinator(DemoCommandInterpreter(resolver)).observe(
+        _final(0, "Open Open RGB")
+    )
+    assert events[0] == CommandResolution(0, None, language="en")
+    assert isinstance(events[1], ResponseRequest)
+    assert events[1].kind is ResponseKind.CHOOSE_APP
 
 
 def test_rejected_suggestion_never_becomes_an_action(tmp_path: Path) -> None:

@@ -62,7 +62,7 @@ KYRIN باید بدون اینترنت، گفتار زنده را دریافت �
 
 ## ابزار تکرارپذیرِ ارزیابی آفلاین
 
-`scripts/stt/evaluate_offline_stt.py` فایل‌های WAV برچسب‌خورده را بدون میکروفن، اینترنت یا ذخیره‌کردن صوت می‌خواند. بخش مشترکِ سنجش در `kyrin.stt.evaluation` با قرارداد `SpeechToTextEngine` کار می‌کند؛ ابزار فرمان فعلاً آداپتور Vosk را می‌سازد. وزن مدل و فایل‌های گفتار همراه گیت نیستند. پوشهٔ مدل آزمایشی قبلی که در `/tmp` بود پس از راه‌اندازی دوبارهٔ سیستم پیدا نشد؛ نسخهٔ تازهٔ همان مدل رسمی اکنون در مسیر ثابت `models/local/vosk-model-small-fa-0.42/` قرار دارد و ZIP آن برای بازیابی در `models/archive/` نگه داشته می‌شود. این دو پوشه در گیت نادیده گرفته می‌شوند؛ مسیر و هش در `models/README.md` ثبت شده‌اند.
+`scripts/stt/evaluate_offline_stt.py` فایل‌های WAV برچسب‌خورده را بدون میکروفن، اینترنت یا ذخیره‌کردن صوت می‌خواند. بخش مشترکِ سنجش در `kyrin.stt.evaluation` با قرارداد `SpeechToTextEngine` کار می‌کند؛ ابزار فرمان فعلاً آداپتور Vosk را می‌سازد. وزن مدل و فایل‌های گفتار همراه گیت نیستند. پوشهٔ مدل آزمایشی قبلی که در `/tmp` بود پس از راه‌اندازی دوبارهٔ سیستم پیدا نشد؛ نسخهٔ تازهٔ همان مدل رسمی اکنون در مسیر ثابت `models/local/by-model/stt/vosk/vosk-model-small-fa-0.42/` قرار دارد و ZIP آن برای بازیابی در `models/archive/` نگه داشته می‌شود. این دو پوشه در گیت نادیده گرفته می‌شوند؛ مسیر و هش در `models/README.md` ثبت شده‌اند.
 
 فهرست آزمون یک فایل CSV با ستون‌های `id,path,language,reference` است. `path` می‌تواند نسبت به پوشهٔ همان CSV نوشته شود. برای نمونه، اگر `sample.wav` کنار فایل CSV باشد:
 
@@ -77,7 +77,7 @@ fa-001,sample.wav,fa,تلگرام را باز کن
 .venv/bin/python scripts/stt/evaluate_offline_stt.py --manifest /path/to/corpus.csv --model-path /path/to/vosk-model-small-fa-0.42 --model-language fa
 ```
 
-برای آزمون سلامت با مدلِ موجود در محیط توسعهٔ فعلی، از مسیر `models/local/vosk-model-small-fa-0.42` برای `--model-path` و از `models/local/vosk-model-small-fa-0.42/test/corpus.csv` برای `--manifest` استفاده کنید. مسیر مدل همچنان ورودی صریح ابزار است و داخل قرارداد STT ثابت نشده است.
+برای آزمون سلامت با مدلِ موجود در محیط توسعهٔ فعلی، از مسیر `models/local/by-model/stt/vosk/vosk-model-small-fa-0.42` برای `--model-path` و از `models/local/by-model/stt/vosk/vosk-model-small-fa-0.42/test/corpus.csv` برای `--manifest` استفاده کنید. مسیر مدل همچنان ورودی صریح ابزار است و داخل قرارداد STT ثابت نشده است.
 
 خروجی JSON برای هر فایل، متن نهایی، خطای نویسه (`CER`)، زمان نخستین متن موقت، زمان نخستین متن نهایی، مدت صدا و دستگاه پردازش واقعی را می‌دهد. زمان بارگذاری مدل نیز جدا گزارش می‌شود. `CER` کل، مجموع ویرایش‌ها بر مجموع نویسه‌های متن مرجع است؛ درصد فایل‌های کوتاه به‌طور مساوی میانگین‌گیری نمی‌شود. عادی‌سازی متن، حروف «ي/ی» و «ك/ک»، نیم‌فاصله، نشانه‌گذاری و فاصله‌های تکراری را یکسان می‌کند. متن‌های موقت برای محاسبهٔ دقت نهایی استفاده نمی‌شوند.
 
@@ -102,7 +102,7 @@ fa-001,sample.wav,fa,تلگرام را باز کن
 ```bash
 .venv/bin/python scripts/stt/evaluate_offline_stt.py \
   --manifest datasets/stt/manifest.csv \
-  --model-path models/local/vosk-model-small-fa-0.42 \
+  --model-path models/local/by-model/stt/vosk/vosk-model-small-fa-0.42 \
   --model-language fa
 ```
 

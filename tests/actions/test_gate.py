@@ -79,6 +79,54 @@ def test_window_close_needs_its_own_permission() -> None:
     )
 
 
+def test_open_window_picker_requires_window_control_permission() -> None:
+    supported = frozenset({
+        CommandKind.SHOW_ALL_WINDOWS,
+        CommandKind.SELECT_APP_WINDOW,
+        CommandKind.SELECT_OPEN_APP_WINDOW,
+        CommandKind.HIDE_APP_WINDOWS,
+    })
+    shown = CommandIntent(CommandKind.SHOW_ALL_WINDOWS, "desktop")
+    named = CommandIntent(CommandKind.SELECT_OPEN_APP_WINDOW, "telegram")
+    blocked = ActionGate(ActionPolicy(supported_kinds=supported))
+    assert blocked.observe(CommandResolution(0, shown)) == ActionNotice(
+        ActionKey(0, 0), shown, ActionNoticeReason.NOT_ALLOWED
+    )
+    permitted = ActionGate(ActionPolicy(
+        allowed_window_apps=frozenset({"telegram"}), supported_kinds=supported
+    ))
+    assert permitted.observe(CommandResolution(0, shown)) == ActionRequest(
+        ActionKey(0, 0), shown
+    )
+    assert permitted.observe(CommandResolution(1, named)) == ActionRequest(
+        ActionKey(0, 1), named
+    )
+    unbound = CommandIntent(CommandKind.SELECT_OPEN_APP_WINDOW, "browser")
+    assert permitted.observe(CommandResolution(2, unbound)) == ActionNotice(
+        ActionKey(0, 2), unbound, ActionNoticeReason.NOT_ALLOWED
+    )
+
+
+def test_numbered_close_requires_window_and_close_permissions() -> None:
+    close = CommandIntent(CommandKind.CLOSE_SHOWN_WINDOW, "desktop", window_index=2)
+    supported = frozenset({CommandKind.CLOSE_SHOWN_WINDOW})
+    window_only = ActionGate(ActionPolicy(
+        supported_kinds=supported,
+        allowed_window_apps=frozenset({"telegram"}),
+    ))
+    assert window_only.observe(CommandResolution(0, close)) == ActionNotice(
+        ActionKey(0, 0), close, ActionNoticeReason.NOT_ALLOWED
+    )
+    allowed = ActionGate(ActionPolicy(
+        supported_kinds=supported,
+        allowed_window_apps=frozenset({"telegram"}),
+        allowed_close_apps=frozenset({"telegram"}),
+    ))
+    assert allowed.observe(CommandResolution(0, close)) == ActionRequest(
+        ActionKey(0, 0), close
+    )
+
+
 @pytest.mark.parametrize(
     "kind",
     (

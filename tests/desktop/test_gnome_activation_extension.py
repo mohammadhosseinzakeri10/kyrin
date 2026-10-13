@@ -13,6 +13,14 @@ _EXTENSION = (
 
 _HARNESS = """
 class Extension {}
+class WindowPicker {
+    constructor(onSelect, onDismiss) {
+        this.onSelect = onSelect;
+        this.onDismiss = onDismiss;
+    }
+    show(_windows) { return true; }
+    destroy() {}
+}
 let windows = 1;
 let requests = 0;
 let focus = null;
@@ -38,21 +46,29 @@ const window = {
     },
 };
 const app = {
+    get_name: () => 'Telegram',
     get_n_windows: () => windows,
     get_windows: () => windows === 2 ? [window, {}] : windows ? [window] : [],
 };
+const terminalFirst = {get_stable_sequence: () => 21};
+const terminalSecond = {get_stable_sequence: () => 22};
+let terminalWindows = [terminalFirst, terminalSecond];
+const terminal = {get_name: () => 'Terminal', get_windows: () => terminalWindows};
 const Main = {
+    overview: {show: () => { requests++; }},
     activateWindow: (candidate, timestamp) => {
-        if (candidate !== window || timestamp !== 456) throw new Error('wrong window');
+        if (![window, terminalFirst, terminalSecond].includes(candidate)
+            || timestamp !== 456) throw new Error('wrong window');
         requests++;
         window.minimized = false;
-        focus = window;
+        focus = candidate;
     },
 };
 const Shell = {
     AppSystem: {get_default: () => ({lookup_app: id => {
         lookedUp.push(id);
-        return id === 'telegram.desktop' ? app : null;
+        return id === 'telegram.desktop' ? app
+            : id === 'org.gnome.Ptyxis.desktop' ? terminal : null;
     }})},
     WindowTracker: {get_default: () => ({get_window_app: candidate =>
         candidate === window ? {get_id: () => 'telegram.desktop'} : null})},
@@ -69,13 +85,21 @@ const global = {display: {
 _CASES = """
 const extension = new KyrinActiveAppExtension();
 extension.enable();
+if (extension.HasAppWindow('telegram.desktop') !== 'open'
+    || extension.CountAppWindows('telegram.desktop') !== 1)
+    throw new Error('window presence did not match the app');
+if (extension.CountAppWindows('../telegram.desktop') !== -1)
+    throw new Error('invalid window count was accepted');
+if (extension.ShowAllWindows() !== 'requested' || requests !== 1)
+    throw new Error('overview was not requested');
+requests = 0;
 if (extension.ActivateExistingApp('telegram.desktop') !== 'requested'
     || requests !== 1) throw new Error('existing window was not activated');
 windows = 0;
 if (extension.ActivateExistingApp('telegram.desktop') !== 'no_window'
     || requests !== 1) throw new Error('missing window was activated');
 if (extension.ActivateExistingApp('../telegram.desktop') !== 'unknown'
-    || lookedUp.length !== 2) throw new Error('invalid desktop ID was looked up');
+    || lookedUp.length !== 4) throw new Error('invalid desktop ID was looked up');
 windows = 2;
 focus = null;
 if (extension.ActivateExistingApp('telegram.desktop') !== 'multiple_windows')
@@ -114,6 +138,42 @@ if (extension.ControlAppWindow('telegram.desktop', 'close')[0] !== 'requested'
     throw new Error('window was not closed');
 if (extension.ControlAppWindow('../telegram.desktop', 'close')[0] !== 'unknown')
     throw new Error('invalid app was controlled');
+if (extension.ShowAppWindows('telegram.desktop') !== 'unknown')
+    throw new Error('unrelated app was shown');
+if (extension.ShowAppWindows('org.gnome.Ptyxis.desktop') !== 'requested')
+    throw new Error('terminal picker was not shown');
+if (extension.ActivateShownAppWindow('org.gnome.Ptyxis.desktop', 0) !== 'stale')
+    throw new Error('invalid window number was accepted');
+terminalWindows = [terminalSecond];
+if (extension.ActivateShownAppWindow('org.gnome.Ptyxis.desktop', 1) !== 'stale')
+    throw new Error('closed window was replaced with another window');
+terminalWindows = [terminalFirst, terminalSecond];
+if (extension.ShowAppWindows('org.gnome.Ptyxis.desktop') !== 'requested')
+    throw new Error('terminal picker could not be reopened');
+if (extension.ActivateShownAppWindow('org.gnome.Ptyxis.desktop', 2) !== 'requested'
+    || focus !== terminalSecond)
+    throw new Error('wrong terminal window was activated');
+windows = 1;
+if (extension.ShowOpenWindows(['../telegram.desktop']) !== 'unknown')
+    throw new Error('invalid ID was accepted by global picker');
+if (extension.ShowOpenWindows(
+    ['telegram.desktop', 'org.gnome.Ptyxis.desktop']) !== 'requested')
+    throw new Error('global picker was not shown');
+if (extension.ActivateShownOpenApp('org.gnome.Ptyxis.desktop') !== 'ambiguous')
+    throw new Error('ambiguous app name was activated');
+if (extension.ActivateShownOpenApp('telegram.desktop') !== 'requested'
+    || focus !== window)
+    throw new Error('unique app window was not activated');
+if (extension.ShowOpenWindows(
+    ['telegram.desktop', 'org.gnome.Ptyxis.desktop']) !== 'requested')
+    throw new Error('global picker could not be reopened');
+terminalWindows = [terminalSecond];
+if (extension.ActivateShownOpenWindow(2) !== 'stale')
+    throw new Error('stale global window activated another window');
+if (extension.ShowOpenWindows(['telegram.desktop']) !== 'requested'
+    || extension.HideOpenWindows() !== 'requested'
+    || extension.ActivateShownOpenWindow(1) !== 'not_shown')
+    throw new Error('global picker cancel did not clear the snapshot');
 extension.disable();
 print('GNOME existing-window activation: passed');
 """

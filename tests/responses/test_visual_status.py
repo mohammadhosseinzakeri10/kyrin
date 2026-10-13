@@ -87,6 +87,23 @@ def test_wake_only_shows_readiness_without_a_question_state() -> None:
     )
 
 
+def test_conversation_shows_reply_without_an_action_success_state() -> None:
+    states: list[VisualPresentation] = []
+    controller = VisualStatusController(states.append)
+    controller.on_command_event(
+        ResponseRequest(
+            0,
+            ResponseKind.CONVERSATION,
+            ResponseChannel.TEXT_ONLY,
+            language="en",
+            message="Hello! I'm KYRIN. How can I help?",
+        )
+    )
+    assert states[-1] == VisualPresentation(
+        VisualStatus.CONVERSATION, "Hello! I'm KYRIN. How can I help?"
+    )
+
+
 def test_non_command_does_not_hide_an_action_still_running() -> None:
     states: list[VisualPresentation] = []
     controller = VisualStatusController(states.append)
@@ -131,6 +148,37 @@ def test_execution_status_requires_actual_start_and_evidence_for_success() -> No
     )
     assert states[-1].status is VisualStatus.CONFIRMED
     assert states[2].caption == "Opening telegram…"
+
+
+def test_terminal_picker_keeps_the_mascot_in_question_state() -> None:
+    states: list[VisualPresentation] = []
+    controller = VisualStatusController(states.append)
+    intent = CommandIntent(CommandKind.SHOW_APP_WINDOWS, "terminal")
+    request = ActionRequest(ActionKey(0, 0), intent, "en")
+    controller.on_action_start(request)
+    controller.on_action_output(
+        ActionFeedback(
+            request.key,
+            intent,
+            ActionOutcome.LAUNCH_ACCEPTED,
+            ResponseChannel.TEXT_ONLY,
+            language="en",
+        )
+    )
+    assert states[-1].status is VisualStatus.QUESTION
+    assert "window number" in states[-1].caption
+
+
+def test_window_action_does_not_claim_to_open_a_chat() -> None:
+    states: list[VisualPresentation] = []
+    controller = VisualStatusController(states.append)
+    controller.on_action_start(
+        ActionRequest(
+            ActionKey(0, 0),
+            CommandIntent(CommandKind.NEW_APP_WINDOW, "terminal"),
+        )
+    )
+    assert states[-1].caption == "Working with terminal…"
 
 
 def test_clarification_and_blocked_action_have_distinct_statuses() -> None:

@@ -26,9 +26,22 @@ dependencies = [
 [project.optional-dependencies]
 desktop = [
     "PySide6_Essentials>=6.10,<7",
+    "sherpa-onnx>=1.13,<2",
 ]
 stt-vosk = [
     "vosk>=0.3.45,<0.4",
+]
+tts-kitten = [
+    "sherpa-onnx>=1.13,<2",
+]
+tts-sherpa = [
+    "sherpa-onnx>=1.13,<2",
+]
+tts-chatterbox = [
+    "chatterbox-tts>=0.1.7,<1",
+]
+tts-qwen = [
+    "qwen-tts>=0.1.1,<1",
 ]
 dev = [
     "coverage>=7.0",

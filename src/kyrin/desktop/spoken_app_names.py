@@ -15,6 +15,36 @@ def _normalize(name: str) -> str:
     return " ".join(re.findall(r"[^\W_]+", name, flags=re.UNICODE))
 
 
+def _abbreviations(name: str) -> tuple[str, ...]:
+    """Derive names like VS Code from a registered three-word display name."""
+    words = _normalize(name).split()
+    if len(words) < 3 or not all(word[0].isalpha() for word in words):
+        return ()
+    prefix = "".join(word[0] for word in words[:-1])
+    return (
+        f"{prefix} {words[-1]}",
+        f"{prefix}{words[-1]}",
+        "".join(word[0] for word in words),
+    )
+
+
+def _split_camel_case(name: str) -> str:
+    """Allow speech recognition to separate words in a registered brand name."""
+    return re.sub(
+        r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name
+    )
+
+
+def _sound_key(name: str) -> str:
+    """A conservative Latin sound hint used only for suggestions."""
+    compact = _normalize(name).replace(" ", "")
+    if not compact.isascii() or len(compact) < 5:
+        return ""
+    compact = re.sub(r"(?<=[a-z])(?:two|too|tor(?=r)|to)(?=[a-z])", "2", compact)
+    key = re.sub(r"[aeiouy]", "", compact)
+    return key if len(key) >= 3 else ""
+
+
 class CatalogSpokenAppResolver:
     """Suggest only bound apps; approximate suggestions always require a reply."""
 
@@ -39,24 +69,66 @@ class CatalogSpokenAppResolver:
         self._app_ids = dict(app_ids)
         self._aliases = {key: tuple(values) for key, values in (aliases or {}).items()}
         self._names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
+        self._browser_candidates: tuple[SpokenAppCandidate, ...] = ()
         self.refresh()
 
     def refresh(self) -> None:
         """Refresh after installation/removal, outside the live audio callback."""
         names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
+        browser_ids: set[str] = set()
         for installed in self._catalog.list_apps():
             app_id = self._app_ids.get(installed.platform_id)
             if app_id is None:
                 continue
+            if "WebBrowser" in installed.categories:
+                browser_ids.add(app_id)
             _, spellings = names.setdefault(
                 app_id, (SpokenAppCandidate(app_id, installed.display_name), set())
             )
             spellings.add(_normalize(installed.display_name))
+            spellings.add(_normalize(_split_camel_case(installed.display_name)))
             spellings.add(_normalize(app_id))
+            spellings.update(_abbreviations(installed.display_name))
             spellings.update(
                 _normalize(alias) for alias in self._aliases.get(app_id, ())
             )
         self._names = names
+        self._browser_candidates = tuple(
+            sorted(
+                (names[app_id][0] for app_id in browser_ids),
+                key=lambda candidate: (
+                    candidate.display_name.casefold(),
+                    candidate.app_id,
+                ),
+            )
+        )
+
+    def browser_candidates(self) -> tuple[SpokenAppCandidate, ...]:
+        """Return only permitted installed apps registered as web browsers."""
+        return self._browser_candidates
+
+    def vocabulary_hints(self, limit: int = 16) -> tuple[str, ...]:
+        """Give STT bounded, non-executable names from allowed registrations."""
+        if not 0 <= limit <= 16:
+            raise ValueError("vocabulary hint limit must be between 0 and 16")
+        full_names: list[str] = []
+        abbreviations: list[str] = []
+        for candidate, _ in sorted(
+            self._names.values(), key=lambda item: item[0].display_name.casefold()
+        ):
+            name = candidate.display_name
+            if (
+                3 <= len(_normalize(name).split()) <= 5
+                and len(name) <= 64
+                and re.fullmatch(r"[\w ]+", name, flags=re.UNICODE)
+            ):
+                full_names.append(name)
+                words = name.split()
+                initials = "".join(word[0] for word in words[:-1]).upper()
+                short = f"{initials} {words[-1]}"
+                if len(short) <= 64:
+                    abbreviations.append(short)
+        return tuple(dict.fromkeys((*full_names, *abbreviations)))[:limit]
 
     def resolve(self, spoken_name: str) -> SpokenAppMatch:
         return self._match(spoken_name, allow_weak_suggestion=False)
@@ -80,6 +152,7 @@ class CatalogSpokenAppResolver:
             return SpokenAppMatch(exact, exact=True)
 
         scores: list[tuple[float, SpokenAppCandidate]] = []
+        sound_key = _sound_key(name) if allow_weak_suggestion else ""
         for candidate, spellings in self._names.values():
             score = max(
                 (
@@ -104,6 +177,10 @@ class CatalogSpokenAppResolver:
                         default=0.0,
                     ),
                 )
+                if sound_key and any(
+                    _sound_key(spelling) == sound_key for spelling in spellings
+                ):
+                    score = max(score, 0.85)
             scores.append((score, candidate))
         scores.sort(key=lambda item: (-item[0], item[1].app_id))
         if not scores:

@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kyrin.stt.device import DevicePreference
+from kyrin.tts.models import (
+    TtsLanguageRoute as TtsLanguageRoute,
+)
+from kyrin.tts.models import (
+    TtsSelection as TtsSelection,
+)
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
@@ -87,6 +93,8 @@ class AppSettings:
     microphone_device_key: str | None = None
     stt: SttSelection | None = None
     command_model: CommandModelSelection | None = None
+    tts: TtsSelection = TtsSelection()
+    tts_languages: tuple[TtsLanguageRoute, ...] = ()
     action_execution_enabled: bool = False
     system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
@@ -111,6 +119,17 @@ class AppSettings:
             self.command_model, CommandModelSelection
         ):
             raise ValueError("command_model must be a model selection or null")
+        if not isinstance(self.tts, TtsSelection):
+            raise ValueError("tts must be a voice selection")
+        if (
+            not isinstance(self.tts_languages, tuple)
+            or not all(
+                isinstance(route, TtsLanguageRoute) for route in self.tts_languages
+            )
+            or len({route.language.casefold() for route in self.tts_languages})
+            != len(self.tts_languages)
+        ):
+            raise ValueError("TTS language routes must have unique languages")
         if type(self.action_execution_enabled) is not bool:
             raise ValueError("action_execution_enabled must be a boolean")
         if type(self.system_power_enabled) is not bool:

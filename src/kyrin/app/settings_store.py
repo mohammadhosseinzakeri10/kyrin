@@ -11,10 +11,12 @@ from kyrin.app.settings import (
     AppSettings,
     CommandModelSelection,
     SttSelection,
+    TtsLanguageRoute,
+    TtsSelection,
 )
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 
 class SettingsError(ValueError):
@@ -60,6 +62,38 @@ def _string(value: object, location: str) -> str:
     return value
 
 
+def _parse_tts(value: object, location: str) -> TtsSelection:
+    selected = _object(
+        value, {"backend", "model_path", "voice", "speed", "device"}, location
+    )
+    raw_path = selected["model_path"]
+    if raw_path is not None:
+        raw_path = _string(raw_path, f"{location}.model_path")
+    raw_speed = selected["speed"]
+    if type(raw_speed) not in (int, float):
+        raise SettingsError(f"{location}.speed must be a number")
+    try:
+        return TtsSelection(
+            backend=_string(selected["backend"], f"{location}.backend"),
+            model_path=Path(raw_path) if isinstance(raw_path, str) else None,
+            voice=_string(selected["voice"], f"{location}.voice"),
+            speed=float(cast("int | float", raw_speed)),
+            device=DevicePreference(_string(selected["device"], f"{location}.device")),
+        )
+    except ValueError as exc:
+        raise SettingsError(str(exc)) from exc
+
+
+def _tts_document(selection: TtsSelection) -> dict[str, object]:
+    return {
+        "backend": selection.backend,
+        "model_path": str(selection.model_path) if selection.model_path else None,
+        "voice": selection.voice,
+        "speed": selection.speed,
+        "device": selection.device.value,
+    }
+
+
 def _parse_settings(document: object) -> AppSettings:
     if (
         not isinstance(document, dict)
@@ -67,7 +101,7 @@ def _parse_settings(document: object) -> AppSettings:
     ):
         raise SettingsError("unsupported settings schema version")
     version = document["schema_version"]
-    if version not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
+    if version not in (1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
         raise SettingsError("unsupported settings schema version")
     fields = {
         "schema_version",
@@ -88,6 +122,10 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("system_power_enabled")
     if version >= 6:
         fields.add("command_model")
+    if version >= 7:
+        fields.add("tts")
+    if version >= 8:
+        fields.add("tts_languages")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -135,6 +173,29 @@ def _parse_settings(document: object) -> AppSettings:
             ),
             device=command_device,
         )
+
+    tts = TtsSelection()
+    if version >= 7:
+        tts = _parse_tts(root["tts"], "tts")
+    tts_languages: tuple[TtsLanguageRoute, ...] = ()
+    if version >= 8:
+        raw_routes = root["tts_languages"]
+        if not isinstance(raw_routes, list):
+            raise SettingsError("tts_languages must be a list")
+        routes: list[TtsLanguageRoute] = []
+        for index, raw_route in enumerate(raw_routes):
+            location = f"tts_languages[{index}]"
+            item = _object(raw_route, {"language", "selection"}, location)
+            try:
+                routes.append(
+                    TtsLanguageRoute(
+                        _string(item["language"], f"{location}.language"),
+                        _parse_tts(item["selection"], f"{location}.selection"),
+                    )
+                )
+            except ValueError as exc:
+                raise SettingsError(str(exc)) from exc
+        tts_languages = tuple(routes)
 
     raw_apps = root["allowed_apps"]
     if not isinstance(raw_apps, list):
@@ -186,6 +247,8 @@ def _parse_settings(document: object) -> AppSettings:
             microphone_device_key=microphone,
             stt=stt,
             command_model=command_model,
+            tts=tts,
+            tts_languages=tts_languages,
             action_execution_enabled=_boolean(
                 root["action_execution_enabled"], "action_execution_enabled"
             ),
@@ -231,6 +294,11 @@ def _document(settings: AppSettings) -> dict[str, object]:
                 "device": settings.command_model.device.value,
             }
         ),
+        "tts": _tts_document(settings.tts),
+        "tts_languages": [
+            {"language": route.language, "selection": _tts_document(route.selection)}
+            for route in settings.tts_languages
+        ],
         "action_execution_enabled": settings.action_execution_enabled,
         "system_power_enabled": settings.system_power_enabled,
         "allowed_apps": [

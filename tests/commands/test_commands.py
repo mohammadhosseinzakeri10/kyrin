@@ -47,7 +47,21 @@ def test_custom_wake_spelling_changes_only_prefix_recognition() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ("Kyreen", "Kyrie", "Kairi", "Kairin!"))
+@pytest.mark.parametrize(
+    "name",
+    (
+        "Kyreen",
+        "Kyrie",
+        "Kairi",
+        "Kairin!",
+        "Kyren",
+        "Kyrene",
+        "Kirin",
+        "Kairina",
+        "Kiring",
+        "Curring",
+    ),
+)
 def test_observed_wake_spellings_alone_acknowledge_without_an_action(
     name: str,
 ) -> None:
@@ -59,6 +73,13 @@ def test_observed_wake_spellings_alone_acknowledge_without_an_action(
     assert coordinator.observe(
         update(1, f"{name} open Telegram", TranscriptStatus.FINAL)
     ) == (CommandResolution(1, CommandIntent(CommandKind.OPEN_APP, "telegram")),)
+
+
+def test_unrelated_creator_word_is_not_a_wake_name() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, "Creator", TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+    )
 
 
 def test_observed_unsupported_door_phrase_does_not_become_an_action() -> None:
@@ -123,6 +144,12 @@ def test_final_only_backend_can_produce_command_without_partials() -> None:
         ("Show Telegram", CommandKind.RESTORE_APP),
         ("Minimize Telegram", CommandKind.MINIMIZE_APP),
         ("Close Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("Exit Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("Quit Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("Please hide Telegram", CommandKind.MINIMIZE_APP),
+        ("Bring Telegram to front", CommandKind.RESTORE_APP),
+        ("تلگرام را پنهان کن", CommandKind.MINIMIZE_APP),
+        ("تلگرام رو نشان بده", CommandKind.RESTORE_APP),
         ("تلگرام را دوباره نشان بده", CommandKind.RESTORE_APP),
         ("تلگرام را کوچک کن", CommandKind.MINIMIZE_APP),
         ("تلگرام را ببند", CommandKind.CLOSE_APP_WINDOW),
@@ -148,6 +175,16 @@ def test_unknown_window_target_never_becomes_action() -> None:
     assert coordinator.observe(update(0, "Close Telegrum", TranscriptStatus.FINAL))[
         0
     ] == (CommandResolution(0, None))
+
+
+@pytest.mark.parametrize("phrase", (
+    "Launch Telegram", "Please start Telegram", "Switch to Telegram",
+))
+def test_clear_open_synonyms_use_registered_open_action(phrase: str) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, CommandIntent(CommandKind.OPEN_APP, "telegram")),
+    )
 
 
 def test_chat_requires_fresh_active_app_or_asks_for_app() -> None:
@@ -338,12 +375,135 @@ def test_dropped_negation_prefix_requests_repetition_without_authorizing() -> No
     ) == (CommandResolution(1, None),)
 
 
-@pytest.mark.parametrize("phrase", ["open", "باز کن", "Kyrin, please help"])
+@pytest.mark.parametrize("phrase", ["Kyrin, please help"])
 def test_short_or_addressed_unclear_final_requests_repetition(phrase: str) -> None:
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
         CommandResolution(0, None),
         ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+    )
+
+
+def test_short_operation_joins_only_nearby_final_target() -> None:
+    from kyrin.commands.fragments import CommandFragmentBuffer
+
+    now = [0.0]
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(),
+        fragment_buffer=CommandFragmentBuffer(clock=lambda: now[0]),
+    )
+    assert coordinator.observe(update(0, "Open", TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+    )
+    now[0] = 1.0
+    assert coordinator.observe(update(1, "Telegram", TranscriptStatus.FINAL)) == (
+        CommandResolution(1, CommandIntent(CommandKind.OPEN_APP, "telegram")),
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "target", "kind"),
+    [
+        ("Minimize", "Telegram", CommandKind.MINIMIZE_APP),
+        ("Restore", "Telegram", CommandKind.RESTORE_APP),
+        ("Maximize", "Telegram", CommandKind.MAXIMIZE_APP),
+        ("Fullscreen", "Telegram", CommandKind.FULLSCREEN_APP),
+        ("باز کن", "تلگرام", CommandKind.OPEN_APP),
+        ("کوچک کن", "تلگرام", CommandKind.MINIMIZE_APP),
+        ("بزرگ کن", "تلگرام", CommandKind.MAXIMIZE_APP),
+    ],
+)
+def test_window_operation_joins_nearby_target(
+    operation: str, target: str, kind: CommandKind
+) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, operation, TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+    )
+    assert coordinator.observe(update(1, target, TranscriptStatus.FINAL)) == (
+        CommandResolution(1, CommandIntent(kind, "telegram")),
+    )
+
+
+def test_old_fragment_cannot_authorize_a_later_target() -> None:
+    from kyrin.commands.fragments import CommandFragmentBuffer
+
+    now = [0.0]
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(),
+        fragment_buffer=CommandFragmentBuffer(clock=lambda: now[0]),
+    )
+    coordinator.observe(update(0, "Open", TranscriptStatus.FINAL))
+    now[0] = 5.0
+    decisions = coordinator.observe(update(1, "Telegram", TranscriptStatus.FINAL))
+    assert all(
+        not isinstance(event, CommandResolution) or event.intent is None
+        for event in decisions
+    )
+
+
+def test_fragment_does_not_join_negation_or_new_command() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    coordinator.observe(update(0, "Open", TranscriptStatus.FINAL))
+    assert coordinator.observe(
+        update(1, "Do not open Telegram", TranscriptStatus.FINAL)
+    ) == (CommandResolution(1, None),)
+    coordinator.observe(update(2, "Open", TranscriptStatus.FINAL))
+    assert coordinator.observe(update(3, "Close Telegram", TranscriptStatus.FINAL)) == (
+        CommandResolution(
+            3, CommandIntent(CommandKind.CLOSE_APP_WINDOW, "telegram")
+        ),
+    )
+
+
+def test_window_fragment_discards_negated_or_confirming_continuation() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    coordinator.observe(update(0, "Minimize", TranscriptStatus.FINAL))
+    decisions = coordinator.observe(
+        update(1, "Do not minimize Telegram", TranscriptStatus.FINAL)
+    )
+    assert all(
+        not isinstance(event, CommandResolution) or event.intent is None
+        for event in decisions
+    )
+    coordinator.observe(update(2, "Minimize", TranscriptStatus.FINAL))
+    decisions = coordinator.observe(update(3, "Yes", TranscriptStatus.FINAL))
+    assert all(
+        not isinstance(event, CommandResolution) or event.intent is None
+        for event in decisions
+    )
+
+
+def test_a_complete_persian_window_command_supersedes_an_old_fragment() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    coordinator.observe(update(0, "Minimize", TranscriptStatus.FINAL))
+    assert coordinator.observe(
+        update(1, "تلگرام را از تمام صفحه خارج کن", TranscriptStatus.FINAL)
+    ) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.UNFULLSCREEN_APP, "telegram")
+        ),
+    )
+
+
+def test_fragment_allows_unreliable_language_labels_but_not_stream_restart() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    coordinator.observe(TranscriptUpdate(0, "Open", TranscriptStatus.FINAL, "ar"))
+    assert coordinator.observe(
+        TranscriptUpdate(1, "Telegram", TranscriptStatus.FINAL, "en")
+    ) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_APP, "telegram"), language="en"
+        ),
+    )
+    coordinator.observe(TranscriptUpdate(2, "Open", TranscriptStatus.FINAL, "en"))
+    coordinator.start_new_stream()
+    decisions = coordinator.observe(
+        TranscriptUpdate(0, "Telegram", TranscriptStatus.FINAL, "en")
+    )
+    assert all(
+        not isinstance(event, CommandResolution) or event.intent is None
+        for event in decisions
     )
 
 

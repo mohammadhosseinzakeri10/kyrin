@@ -55,6 +55,25 @@ def test_voice_is_async_and_suppresses_capture_until_playback_finishes() -> None
     assert not errors
 
 
+def test_preview_speaks_with_its_own_selection_without_changing_normal_voice() -> None:
+    backend = BlockingSynthesizer()
+    speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
+    response = PresentedResponse(
+        0, 1, "Preview", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    preview_calls: list[tuple[str, str]] = []
+    try:
+        assert speaker.submit(
+            response,
+            speak=lambda text, language: preview_calls.append((text, language)),
+        )
+        assert speaker.wait_until_idle(2)
+        assert preview_calls == [("Preview", "en")]
+        assert backend.calls == []
+    finally:
+        speaker.close()
+
+
 def test_local_backend_waits_for_offline_speech_and_propagates_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

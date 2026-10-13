@@ -1,11 +1,106 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-10.
+> Updated: 2026-10-13.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **TTS catalog consolidation (2026-10-13):** The owner clarified that all TTS
+> families should share the project's `models/local/by-model/tts/` root, with
+> one folder per family and model. Kokoro v1.0 was moved there, its archive to
+> `models/archive/tts/kokoro/`, and the existing Qwen and Chatterbox catalog
+> copies were verified byte-for-byte against their duplicate installed copies.
+> The Voice Output page now discovers the catalog in this source checkout and
+> falls back to the platform application-data root when the catalog is absent.
+> The local active Qwen selection points to its catalog model; the duplicate
+> installed TTS folders were removed. The owner's GPU device selection was
+> preserved. Focused UI tests and model-package inspection passed; this sandbox
+> could not probe CUDA availability for an audible post-migration test.
+
+> **Kokoro voice picker (2026-10-13):** The Voice Output page now shows the
+> documented speaker names for the English voices in the known sherpa-onnx
+> Kokoro v1.0 and v1.1 packages. It saves the corresponding numeric speaker ID
+> for the runtime. Unknown package names keep the numeric control because their
+> voice mapping is unverified. Focused Qt and TTS tests pass; the owner has not
+> yet checked the names or heard each selection in the desktop app.
+
+> **Kokoro GPU preview diagnosis (2026-10-13):** The managed desktop launcher
+> uses the project `.venv`. Its Python ONNX Runtime exposes only
+> `CPUExecutionProvider`, and the installed sherpa-onnx native package has no
+> CUDA provider library. Kokoro GPU preview could not run with that runtime,
+> while CPU could still be selected. The preview previously hid the
+> specific missing-GPU validation error behind `Local TTS playback failed`;
+> it now reports the specific reason.
+
+> **Kokoro GPU runtime (2026-10-13):** A separate Python 3.14 sherpa-onnx
+> CUDA 13 environment now lives at `local-data/kyrin/runtimes/tts/sherpa-gpu/`.
+> It uses hard-linked CUDA/cuDNN libraries from the existing Qwen runtime,
+> leaving the main `.venv` and TTS model files unchanged. KYRIN now routes
+> explicit sherpa-family GPU selections through an isolated worker and keeps
+> CPU requests in the main runtime. A short Kokoro generation passed through
+> this application path; its worker PID appeared in `nvidia-smi` using about
+> 658 MiB of GPU memory. A separate preview call completed playback through
+> the default audio output. This was the status before the owner's later
+> report that the Kokoro GPU playback problem was resolved.
+
+> **TTS recovery (2026-10-13):** The owner observed Qwen3-TTS apparently not
+> using GPU, a CPU attempt exhausting host RAM, and an unavailable speed
+> control. Explicit Qwen GPU selection now rejects missing CUDA and verifies
+> the loaded model's reported device instead of silently accepting CPU. The
+> isolated Linux Qwen CPU worker applies a conservative address-space limit
+> before loading weights. Qwen speed 0.5–1.5 is now available through optional
+> FFmpeg audio tempo processing; it is not a native model generation parameter.
+> Focused deterministic TTS tests and a CUDA runtime probe passed. A full
+> model generation on GPU and a CPU load have deliberately not been performed
+> since the owner reported a host freeze; real audio quality and peak memory
+> remain open for a controlled user-session test.
+
+> **Qwen GPU diagnosis (2026-10-13):** The owner provided a screenshot of a
+> CUDA device-side assertion during the saved-voice preview. The installed
+> Qwen adapter selected FP16 for GPU. The owner's RTX 5060 Ti supports BF16.
+> A bounded GPU run with the installed 0.6B checkpoint generated the exact
+> preview sentence using BF16, and a second run passed through the installed
+> isolated worker's `load` and `generate` protocol without saving or playing
+> audio. The adapter now selects BF16 on capable CUDA devices and FP32 on
+> older devices, avoiding FP16. A failed generation evicts its worker so a
+> CUDA error cannot poison later previews. The owner later confirmed live
+> Qwen GPU playback and a working CPU preview.
+
+> **TTS preview speed correction (2026-10-13):** The owner confirmed GPU voice
+> playback but reported that changing the visible speed did not change the
+> preview. The preview button used the saved synthesizer configuration, and
+> the local saved Qwen speed was still 1.0. The page now sends its current
+> draft voice/device/speed to the response speaker for one preview without
+> saving or reconfiguring the active voice. A bounded real Qwen GPU sample
+> measured 5.74 s at speed 0.5, 2.88 s at 1.0, and 1.94 s at 1.5 using the
+> same waveform. Automated UI/queue tests pass; the owner later confirmed
+> audible speed differences through the application.
+
+> **TTS owner validation and controls (2026-10-13):** The owner confirmed that
+> Qwen GPU output and speaking-speed previews now work, and reported that a
+> CPU preview also completed without problems. Peak CPU memory has not been
+> measured. The owner noticed that the Refresh and Browse button labels on
+> Voice Output were invisible. Those compact utility buttons now receive
+> their labels at construction, fixed minimum widths, and explicit high
+> contrast styling. Offscreen theme rendering showed both labels, and focused
+> tests confirmed Refresh discovers a newly added model and Browse selects a
+> model folder. The appearance in the restarted desktop application still
+> needs the owner's visual check.
+
+> **Local layout update (2026-10-12):** The four Ollama development models now
+> live in separate complete stores under
+> `models/local/by-model/command-understanding/ollama/`. The command-model
+> selector discovers the parent directory and starts only the selected store.
+> The local setting for `qwen3.5:4b` points there. The old combined Ollama
+> store and duplicate development Vosk/Whisper folders were removed after
+> comparison and startup checks. Installed STT folders now use readable names
+> with unique suffixes; the selected model path was updated. Selected TTS and
+> OCR app data
+> remain under `local-data/kyrin/models/`; see
+> `docs/development/PROJECT_LAYOUT.md`. Older notes below describe the state
+> at the time they were written and may mention retired paths.
 
 ## Status Vocabulary
 
@@ -51,6 +146,51 @@
   validated a real microphone-to-Telegram launch. Model packaging,
   multilingual setup, a complete product UI, broader stability validation, and
   Windows/macOS/mobile adapters remain future work.
+- **Conversational response boundary (2026-10-11):** The selected local command
+  model can now return a short response to direct speech such as a greeting.
+  This becomes a response event with no action intent. A model response to
+  recognizable command text is rejected; executable model proposals still
+  require independent source, target, and permission checks. The existing
+  pending app-name confirmation accepts exact German `Ja` and `Nein` as well
+  as its English and Persian words. These are local code and deterministic
+  test results; a live microphone and spoken-response check remains open.
+- **Mixed-script and multilingual opening (2026-10-11):** Owner diagnostics
+  showed `Open Telegram` transcribed as Arabic, Urdu, Swedish, and Persian,
+  including `اوپن تلگرام` and `اپن ٹیلیگرام`. Reviewed spellings of the open
+  verb now use exact registered app-name matching, with ambiguous `Opend`
+  asking for confirmation. For other languages, a model-proposed single app
+  opening with a literal, exact, permitted target requires a second short
+  confirmation; model-proposed actions in uncovered languages do not execute
+  directly. A local model can classify that reply in its spoken language.
+  Deterministic tests pass; actual model quality and microphone behavior still
+  require a user-session trial. Other operations and localized confirmation
+  prompts remain open work.
+- **Registered app names and STT hints (2026-10-11):** The owner reported
+  `Please open Visual Studio Code` transcribed as Turkish, Arabic, or only
+  `Please open.` The installed Snap desktop entry is named `Visual Studio
+  Code` and is already in the owner's allowed-app settings. The app-name
+  resolver now derives short forms such as `VS Code` and `VSCode` from
+  registered multiword names, preserving ambiguity when names collide.
+  STT backends that advertise vocabulary-hint support receive up to 16
+  bounded names/short forms from permitted installed apps; the Whisper
+  adapter already passes such hints to local inference. Tests cover the
+  mapping and hint wiring. The reported real audio has not been replayed,
+  and lost or badly transcribed words cannot safely be reconstructed from
+  a model guess.
+- **Generic browser requests (2026-10-11):** `Open browser` was correctly
+  transcribed but could not resolve when only specific browsers such as Chrome
+  and Firefox were permitted. The XDG catalog now reads the registered
+  `WebBrowser` category. The Ubuntu session offers only installed, explicitly
+  allowed browsers as clarification candidates; it does not launch one until
+  the user names it. With one candidate it asks for confirmation. Exact app
+  names still follow the existing direct path. Focused unit and composition
+  tests pass; live microphone validation remains open.
+- **Mascot alignment (2026-10-11):** The owner observed that long status
+  captions left the mascot at the left edge. The GNOME extension now gives
+  the mascot a row matching the caption width and positions it at that row's
+  center after each caption resize. The revised extension file was installed
+  in the current user's GNOME extension directory. A fresh Shell session and
+  visual confirmation of short and long captions remain pending.
 - **Current speech and window-focus correction (2026-10-09):** The owner supplied
   diagnostic traces showing standalone wake-name spellings `Kairin`, `Kyreen`,
   `Kyrie`, and `Kairi`. The standalone name is now acknowledged with text-only
@@ -3128,3 +3268,366 @@ UI catalog. The selected locale drives Qt left-to-right or right-to-left
 layout. UI language preferences remain separate from STT and voice settings.
 See `docs/app/UI_LANGUAGE_SETTINGS.md`. Speech responses and system-action
 prompt wording remain a separate localization concern.
+
+## 97. Registered camel-case application names in spoken commands
+
+The owner reported that `Open OpenRGB` asked for confirmation instead of
+opening the permitted app. Diagnostics showed the actual final transcript was
+`Open Open RGB` with language `tr`. The application binding already identified
+the installed `OpenRGB` desktop entry, and exact `Open OpenRGB` text already
+worked. Registered names now also provide a spelling split at Latin case
+boundaries, so `Open RGB` resolves exactly to `OpenRGB`. If two permitted apps
+share that spoken spelling, the existing choice prompt remains in force.
+Focused tests and a deterministic check with the installed app registration
+pass; live microphone validation after restarting KYRIN remains open. The
+separate reported `Open Terminal` failure has no diagnostic transcript; the
+owner suspects their pronunciation in that attempt. Its exact text resolves
+to the permitted `Terminal` desktop entry in a deterministic check, so no
+terminal-specific alias or behavior change was added.
+
+## 98. Local model greeting reply rejected by a structured-output placeholder
+
+The owner observed `Heard (en): Hello Kyrene.` followed by `No action
+requested` and no user-facing reply. A read-only, action-free probe of the
+selected local `qwen3.5:4b` model showed that it proposed `route=respond` with
+a valid short greeting reply, but also filled the required `steps` array with
+one item whose `operation`, `target`, and `app` were all empty strings. The
+decoder rejected that template before the reply could reach the presenter.
+It now treats an entirely empty item template as no steps, and accepts a
+reply misplaced inside an otherwise action-free item, only on the
+conversational route. Populated steps and action-route placeholders still
+fail. A focused decoder test and an isolated end-to-end local-model
+probe produced a `CONVERSATION` response with no action intent. Live
+microphone and voice-output validation in the restarted app remains open.
+
+## 99. Observed KYRIN wake spellings and greeting response
+
+The owner chose to recognize observed spellings `Kyren`, `Kyrene`, `Kirin`,
+`Kairina`, `Kiring`, and `Curring`, in addition to the existing built-in wake
+names. `Creator` remains excluded because it can represent ordinary speech.
+The reviewed names now live in one shared list used by the fast interpreter,
+source-operation evidence, and explicit power-request recognition (whose two
+separate confirmations remain mandatory). A bare wake name continues to
+produce only the readiness cue; greeting plus name goes through the selected
+local command model and cannot create an action. The greeting prompt now asks
+for a short, warm response without claiming unsupported capabilities. Local
+model probes of `Hello Kyren` and `Hello Kyrene` produced conversational
+responses and no command intent. The owner selected text and mascot reaction
+for now; product TTS integration stays deferred. A separate `conversation`
+visual state shows the model's reply beneath a brief one-shot arm gesture,
+without displaying an action-success mark. The updated GNOME extension files
+were copied into this user's installed extension, preserving unrelated
+installed differences; a new GNOME session is needed to load them. Live
+microphone and visual behavior still require owner validation after restarting
+the application and GNOME session.
+
+## 100. Application-choice dialogue and Terminal observation
+
+Bare permitted app names now lead to a numbered operation choice. Approximate
+names are suggestions only; they require app confirmation before the operation
+choice. Closing from the menu has a separate confirmation. GNOME window
+presence is queried only on final speech and only for mapped permitted apps;
+unknown status offers only open/bring forward. The adapter is optional and the
+contract is platform-neutral. The installed user-scoped GNOME extension was
+updated with the read-only `HasAppWindow` method, which needs a new GNOME
+session before live use. Focused automated tests pass.
+
+A live Terminal request was accepted by `gio launch` and the GNOME activation
+method, while `GetActiveApp` kept reporting ChatGPT. The owner first reported
+that Terminal came forward, then clarified that they saw their existing
+ChatGPT-related terminal window; this does not establish that KYRIN brought
+the requested Ptyxis window forward. The Terminal launch/activation issue
+remains open. The user's separate workaround of terminating and restarting
+ChatGPT is not part of KYRIN's Terminal action and was not executed here.
+
+The owner wants Terminal to offer context-sensitive choices for existing or
+new windows, tabs, all windows, preferences, and safe closing. This is a new
+design request, not implemented by the generic app-choice menu. The local
+Ptyxis desktop entry advertises `new-window`, `new-tab`, and `preferences`;
+multiwindow enumeration and safe quit need further design and validation.
+
+## 101. Ptyxis-specific Terminal choices and review of the prior dialogue change
+
+The previous app-choice work was reviewed before extending it. Its numbered
+selection, bound-app resolution, and optional window-presence adapter are
+needed by the Terminal flow; no broad removal was justified. Two real defects
+were found and fixed: non-chat actions displayed an "opening chat" mascot
+caption, and a model-classified affirmative reply could bypass the
+Terminal-specific choice after a suggested app name. Model-proposed opening
+and closing now pass the same Terminal review as fast-rule commands.
+
+The current GNOME/Ptyxis path counts only windows associated with the exact
+bound `org.gnome.Ptyxis.desktop` entry. `Open Terminal` launches when the
+count is zero, offers bring-forward/new-window/new-tab/Preferences for one,
+and offers GNOME overview/new-window/Preferences for several. GNOME overview
+shows all desktop windows, not only Ptyxis. Unknown count offers only a
+conservative open/bring-forward choice. New window, tab, and Preferences run
+fixed Ptyxis arguments; an accepted request is not reported as verified
+success. Direct `Close Terminal` asks for a separate confirmation. Bulk Quit
+and dock Unpin are intentionally absent because they need distinct safety
+and desktop integration. The user-scoped active-app extension was updated
+with window count and overview methods; a new GNOME session is required.
+Focused automated tests pass; live verification after session restart remains
+open. The owner clarified that a prior apparent Terminal activation was a
+pre-existing ChatGPT-related terminal, so it is not counted as success.
+The GNOME presence adapter is now kept during login even if its Shell
+extension loads later, avoiding a stale startup availability decision. A
+new-tab request rechecks the one-window condition at execution time.
+
+## 102. Terminal-only numbered window picker
+
+The owner reported that the earlier `ShowAllWindows` Terminal option displayed
+Telegram, VS Code, ChatGPT, and other unrelated windows. The proposed
+replacement was approved. The Terminal menu now requests a GNOME picker for
+only the exact bound Ptyxis desktop ID. The picker shows equally sized live
+previews with numbers, allows click or a spoken number, and checks the
+displayed stable window token before activating it. A disappeared window is
+rejected instead of replaced by another one. Cancel and Escape dismiss it.
+The platform-neutral command and permission layers retain their boundaries;
+the live preview implementation is GNOME-specific. Focused deterministic
+tests and packaging checks cover the new path. Live confirmation after a new
+GNOME session remains open; the installed extension must include both its
+`extension.js` and `windowPicker.js` files.
+
+## 103. Permission-scoped open-window picker
+
+The owner approved a general open-window preview and selection by click,
+spoken number, or app name after validating the Terminal picker. The GNOME
+adapter now reuses that visual surface for windows of applications with
+explicit window-control permission. No other windows are displayed. Python's
+command layer receives no image or window title. The Shell stores temporary
+app-ID and stable-window-token pairs, rejects vanished windows, and accepts
+an app name only when exactly one of its windows was shown. The Terminal-only
+menu remains intact. Focused Python and GJS tests and GNOME packaging pass.
+The two source files were copied into the current user's extension directory.
+The owner later reported that the general open-window picker worked correctly
+on their desktop. This is a real-use check of the picker, not a comprehensive
+multilingual or cross-platform validation. Other desktop environments need
+their own adapter.
+
+## 104. Meaning-based requests for the open-window picker
+
+The owner rejected relying on a list of complete trigger sentences for the
+general picker. The command contract now has a targetless
+`show_all_windows` semantic operation. The selected local command model can
+propose it for paraphrases across languages; only the established action gate
+can authorize the chooser. A small English/Persian concept-slot path handles
+clear display + collective + open-window/running-app requests quickly,
+independent of word order. It is a fast path, not a closed utterance list.
+Explicit negation and requests about installed apps, browser tabs, or files
+are rejected. Bare “pages” remains ambiguous. The model cannot directly
+select a window through this operation: selection still needs the numbered
+snapshot or an exact registered app name. Focused tests pass. A local
+`qwen3.5:4b` probe correctly proposed the operation for “Bring up every window
+I have open” and a Persian open-app-pages request, but produced invalid JSON
+for “List the currently running apps”; the concept-slot fast path now covers
+that case. Model quality for arbitrary languages and live microphone behavior
+remain unverified.
+
+## 105. Desktop-wide two-step system power confirmation
+
+The owner validated the general open-window picker on their desktop and then
+reported that system-power confirmation was inconvenient because the controls
+were inside the main KYRIN window. The approved change shows a separate,
+non-modal Qt confirmation window without bringing the settings window forward.
+It appears during the blocker check and stays visible through both stages.
+Closing it cancels the request. The existing `SystemPowerFlow` remains the
+authority for request IDs, permissions, timeout, cancellation, and the two
+confirmations. The final spoken challenges are shorter and action-specific:
+`Power off`, `Restart computer`, `Log out`, and `Suspend computer`. A vague
+second answer such as `Okay` or `Yes` never submits a system action; it keeps
+the request and shows a repeat instruction. It cannot select a different
+action. The Qt application now shares one offline Speech Dispatcher response
+speaker with the listening session, so the sensitive prompts can be spoken
+and microphone capture is guarded during playback. This is an initial voice
+using the existing local backend, not the previously preferred Kitten voice.
+Focused deterministic tests pass. The owner validated a safe preview on their
+GNOME/Wayland desktop: the dialog appeared over the current application, and
+both confirmation stages showed text and played audio. The preview's backend
+was fake, so it could not request a real system action. At first the operating
+system sent audio to a digital sink; selecting the TSCO headset as default
+made speech audible. Actual KYRIN voice input plus GUI confirmation remains
+to be validated end to end. The dialog now also shows a voice-output error
+in place if speech playback fails. No automated test calls a real shutdown,
+restart, logout, or suspend action.
+
+## 106. Local TTS selection in the control center
+
+The owner decided that KYRIN must not download STT, command, or TTS models from
+inside the application. Users can obtain compatible models themselves and
+select installed local files. The owner approved a Voice Output management
+page. The current implementation persists a selected backend, local Kitten
+folder, voice, speaking speed, and AUTO/CPU/GPU preference in settings schema
+7. It supports Speech Dispatcher/eSpeak NG and optional sherpa-onnx Kitten;
+other engines require a separate adapter. The default remains the existing
+system voice. Explicit GPU choice is rejected when its CUDA provider is
+missing. Kitten currently covers English speech; other languages use the
+system voice. The app lists complete local Kitten packages in the user TTS
+data folder and can browse to a folder elsewhere. No model is downloaded or
+packaged. This is a code-level integration validated with deterministic tests;
+audible Kitten playback on the owner's computer has not yet been validated.
+See `docs/responses/TTS_MODEL_MANAGEMENT.md` for setup and limits.
+
+## 107. Multilingual TTS routing and Piper/VITS packages
+
+The owner rejected the English-only Kitten boundary as inconsistent with the
+goal of user-selectable offline voices. Settings schema 8 now preserves the
+existing default voice and adds independent language-specific routes. The Qt
+Voice Output page can add a language code, choose and preview its local voice,
+and remove that route. The same `SpeechSynthesizer` contract now loads Kitten
+or a compatible sherpa-onnx Piper/VITS archive. The official
+`vits-piper-fa_IR-gyro-medium` package provides a concrete Persian route.
+An unconfigured language falls back to the system voice; English model output
+is not used to pronounce unrelated languages. Model downloads remain outside
+the app. Deterministic routing, settings migration, package inspection, and
+UI tests pass; real Persian-model playback on the owner's machine is still
+unverified because the optional runtime/model have not been installed there.
+Unknown TTS families need an adapter; the app must never imply that any ONNX
+file can be executed by selecting its folder.
+
+## 108. Automatic TTS family selection from local packages
+
+The owner wants the user to obtain a voice package, select its extracted folder,
+and adjust language, speaker, speed, and device in the app without coding or
+installing a separate engine. Voice Output now recognizes supported package
+families when a local folder is selected and chooses their engine automatically.
+The built-in family catalog is shared by settings validation, model discovery,
+and the UI. It includes Kitten, Piper/VITS, and sherpa-onnx Kokoro packages;
+the desktop installation includes the shared sherpa-onnx runtime. The current
+development environment also has sherpa-onnx 1.13.8 installed. Model weights
+remain user-provided. Deterministic tests cover the new package and selection
+path. Actual playback with a downloaded model remains to be validated on the
+owner's computer. Unknown formats still require engineering support and must report
+an explicit incompatibility instead of being accepted silently.
+
+## 109. TTS adapter boundary and direct model selection
+
+The owner wants downloaded TTS packages to be selected in the app without
+editing code or installing a runtime separately. A model package remains data;
+unknown weights cannot be executed safely without a compatible engine. The
+TTS runtime now exposes a typed adapter contract for package inspection,
+validation, device selection, loading, and synthesis. Built-in Kitten,
+Kokoro, and Piper/VITS adapters keep their existing behavior. The default
+system-voice state no longer disables the local-model picker, so selecting a
+supported folder detects its engine immediately. A saved adapter identifier
+can survive a temporarily unavailable adapter; validation reports the missing
+adapter explicitly. Unsupported packages are rejected rather than executed.
+Deterministic tests cover a registered test adapter and the default-state UI
+selection; audible playback of additional families has not been validated.
+
+## 110. Offline high-naturalness TTS adapter expansion
+
+The owner approved extending local TTS support beyond the original sherpa
+families. This turn added adapters for complete Chatterbox Multilingual V2/V3
+packages with a built-in reference voice and Qwen3-TTS 0.6B/1.7B CustomVoice
+packages. Both load local paths only and route response language to the engine;
+unsupported languages and unsupported speed settings are rejected. The Qt
+voice page detects these packages and exposes the available built-in speakers.
+Deterministic integration tests use fake model runtimes. Real model weights and
+upstream Python runtimes have not been installed or audibly tested. The two
+upstream packages pin incompatible Transformers versions. Separate worker
+execution was added later (section 111); packaging their environments for a
+shipped desktop installation is still open. Fish S2 Pro, CosyVoice 3, IndexTTS 2.5,
+and F5-TTS remain open work; some require a reference recording and/or a
+different Python version. Do not describe these as implemented.
+
+## 111. Separate execution for incompatible optional TTS runtimes
+
+The owner chose to download model weights later and asked KYRIN to continue
+engine integration without downloading them now. Chatterbox and Qwen3-TTS
+can now run in persistent, separate Python worker processes when their
+optional runtimes are installed at documented user-data locations. The
+existing adapter contract, language routes, and voice/device settings remain
+the application-facing boundary. A bounded line protocol returns float32
+audio; the worker loads only built-in adapters and model folders are never
+treated as executable plugins. A model-free subprocess test exercised probe,
+load, and repeated synthesis. Real engine dependencies and weights are absent
+on this machine, so neither engine has passed an audible end-to-end test.
+Packaging/provisioning the worker environments and the remaining TTS families
+are still open; do not present the two environments as installed by the UI.
+
+Later owner validation superseded the installation and playback limitations
+recorded in sections 106–111: Qwen3-TTS CustomVoice played on GPU and CPU,
+and its preview speed changed audibly. The owner also reported that the
+Kokoro GPU playback issue was resolved. These are owner-observed results on
+the current Ubuntu machine, not evidence that all optional TTS families or
+fresh installations are provisioned. Peak Qwen CPU RAM use remains unmeasured.
+
+## 112. Text-only conversation memory and short command fragments
+
+The owner approved a real local memory of multiple finalized spoken turns,
+without storing audio, and requires KYRIN data on the AI-Projects drive on
+the current Ubuntu machine. `ConversationHistory` separates persistence from
+speech and command backends. Its SQLite implementation lives at the XDG data
+path (linked to `local-data/kyrin/memory/` here), keeps up to 2,000 active turns, and
+offers bounded recent reads and explicit clearing from Preferences. Only
+final raw transcript text is saved. Up to six recent shortened turns reach
+the local model as non-authoritative context; current-utterance operation and
+target checks still govern actions. A separate four-second in-memory fragment
+buffer can join a bare English operation with a nearby target, and is cleared
+on STT reconnect. Deterministic tests cover persistence, bounds, clearing,
+fragment expiry and negation, and runtime wiring. At that point, live microphone
+latency had not been measured; topic-ranked retrieval remains unimplemented.
+
+The short fragment buffer was subsequently extended to the existing
+English window actions (including minimize, restore, maximize, and fullscreen)
+and corresponding Persian suffix actions. It still accepts only explicit
+operation fragments followed by a nearby target, never a delayed confirmation
+or an unrelated new command. Action policy and window verification remain
+unchanged.
+
+The owner subsequently confirmed that joining short spoken command fragments
+works in real use. A later audit found that Ubuntu session composition tests
+had not isolated `XDG_DATA_HOME`, so fake transcripts could reach the owner's
+SQLite history. Those tests now use a fresh temporary XDG data directory per
+test, with a regression assertion for the stored path and turns. A read-only
+inspection of the existing database found 81 turns in 55 sessions; 78 turns
+across 54 sessions matched literal test utterances. This is strong evidence of
+test contamination but cannot establish provenance for individual records,
+because a real utterance could match the same text. The database was not
+modified or purged. Future tests cannot add to that user history through this
+composition path.
+
+After the owner approved remediation, the 81 existing turns were marked
+archived rather than classified or deleted. A separate private SQLite snapshot
+was saved on the AI-Projects drive before the change. Recent command-model
+context now starts empty and receives only new active turns. The schema retains
+the old text and supports restoring archived rows; no per-turn provenance was
+invented.
+
+A synthetic SQLite benchmark on the same AI-Projects data drive measured 300
+appends at median 0.845 ms/p95 1.354 ms and 300 six-turn reads at median
+0.011 ms/p95 0.012 ms. This does not measure full speech-to-action latency;
+the synchronous history write was retained because no material storage delay
+was observed in this bounded test.
+
+For desktop-wide system-power confirmation, a new safe live microphone
+preview used the actual Qt dialog and spoken prompts with an inert backend.
+The owner spoke `Power off`, `Yes`, then `Power off`, and confirmed seeing the
+dialog and hearing both stages. The backend only recorded
+`SAFE_BACKEND_ONLY: power_off`; no operating-system power request was made.
+Automated Qt integration coverage now exercises the same voice progression.
+
+## 113. Archived-memory review, safe power preview, and observed latency
+
+Preferences now opens a paged review of archived transcripts only on user
+request. The owner may restore one selected row after a separate confirmation;
+archived turns do not enter model context until restored, and old text never
+authorizes an action. The 81 preserved rows and the private snapshot were not
+deleted or bulk-restored.
+
+Desktop Actions now exposes a safe power-confirmation preview through the
+installed control center. It uses the same two-stage dialog and listening
+flow, but an inert backend, including when real system-power permission is
+off. Tests verified that the real backend receives no request. A supervised
+live check of this particular new button remains open; the earlier standalone
+safe preview was confirmed by the owner.
+
+Speech Recognition diagnostics now show observed time from VAD-confirmed
+speech start to action feedback, and from final STT text to feedback. A
+repeatable safe probe uses current saved STT and command-model settings with
+an inert executor and temporary conversation database. One owner-spoken
+`Open Telegram` trial produced 1,100.28 ms from VAD-confirmed speech start to
+final text and 0.32 ms from final text to inert result. It was one warm run;
+the command may have used the rule-based interpretation path and does not
+characterize all commands or model cold starts. No app was opened in the probe.
