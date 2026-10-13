@@ -86,5 +86,6 @@ explicitly says no operating-system request was sent. A running listening
 session can answer both stages by voice; clicking remains available. The
 normal power buttons continue to use the GNOME backend and their separate
 permission. The built-in preview is covered by automated backend-routing
-tests; a supervised microphone check of this exact new button remains to be
-recorded.
+tests. On 2026-10-14, the owner restarted the installed control center and
+confirmed the `SAFE PREVIEW` window, both spoken stages, and the final
+`No operating-system request was sent` message while responding by voice.

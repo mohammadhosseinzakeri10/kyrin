@@ -3619,9 +3619,10 @@ deleted or bulk-restored.
 Desktop Actions now exposes a safe power-confirmation preview through the
 installed control center. It uses the same two-stage dialog and listening
 flow, but an inert backend, including when real system-power permission is
-off. Tests verified that the real backend receives no request. A supervised
-live check of this particular new button remains open; the earlier standalone
-safe preview was confirmed by the owner.
+off. Tests verified that the real backend receives no request. On 2026-10-14,
+after restarting the installed control center, the owner confirmed the new
+button's `SAFE PREVIEW` window, both audible prompts and voice stages, and
+the final message that no operating-system request was sent.
 
 Speech Recognition diagnostics now show observed time from VAD-confirmed
 speech start to action feedback, and from final STT text to feedback. A
