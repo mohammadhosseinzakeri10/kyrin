@@ -14,7 +14,13 @@ import pytest
 PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+)
 
 from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
@@ -22,9 +28,9 @@ from kyrin.app.events import SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
 from kyrin.app.permission_token import permission_token_path, save_opaque_token
 from kyrin.app.qt.model_library_page import ModelLibraryPage
-from kyrin.app.qt.translations import ENGLISH, UiTranslations
+from kyrin.app.qt.translations import ENGLISH, UiPreferences, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
-from kyrin.app.settings import AppSettings, SttSelection
+from kyrin.app.settings import AppSettings, OcrSelection, SttSelection
 from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
@@ -364,6 +370,39 @@ def test_command_model_and_cpu_choice_are_saved_from_app(
         assert selected.store_path == store_path
         assert selected.model == "qwen3.5:4b"
         assert selected.device is DevicePreference.CPU
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_screen_page_saves_a_compatible_ocr_package(
+    application: QApplication, tmp_path: Path
+) -> None:
+    root = tmp_path / "alternate-ocr"
+    data = root / "runtime/usr/share/tesseract-ocr/5/tessdata"
+    data.mkdir(parents=True)
+    (data / "eng.traineddata").write_bytes(b"model")
+    executable = root / "tesseract-local"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o700)
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path),
+        ocr_default_root=tmp_path / "default-ocr",
+    )
+    try:
+        window.screen_access_page.ocr_path.setText(str(root))
+        window.apply_button.click()
+        assert store.load().ocr == OcrSelection("tesseract", root)
     finally:
         window._timer.stop()
         window.deleteLater()
@@ -949,6 +988,77 @@ def test_actions_page_saves_only_explicitly_selected_app(
         window.apply_button.click()
         assert store.load().allowed_chat_apps == ()
         assert not token_path.exists()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_actions_page_scrolls_without_squashing_app_list(
+    application: QApplication, tmp_path: Path
+) -> None:
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    for index in range(30):
+        (directory / f"example-{index}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName=Example {index}\nExec=true\n",
+            encoding="utf-8",
+        )
+    window = _window(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
+    )
+    try:
+        window.resize(980, 650)
+        window._select_page(6)
+        window.show()
+        application.processEvents()
+        page = window.actions_page
+        scrollbar = page.scroll_area.verticalScrollBar()
+        assert page.apps.count() == 30
+        assert page.apps.height() >= 300
+        assert page.apps.verticalScrollBar().maximum() > 0
+        assert scrollbar.maximum() > 0
+        scrollbar.setValue(scrollbar.maximum())
+        application.processEvents()
+        assert scrollbar.value() == scrollbar.maximum()
+        assert page.power_preview_button.isVisible()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+@pytest.mark.parametrize("locale", ["en", "fa"])
+def test_settings_pages_keep_controls_readable_at_minimum_window_size(
+    application: QApplication, tmp_path: Path, locale: str
+) -> None:
+    UiTranslations(tmp_path).save(UiPreferences(locale))
+    window = _window(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+    )
+    try:
+        window.resize(980, 650)
+        window.show()
+        for index in range(window.pages.count()):
+            window._select_page(index)
+            application.processEvents()
+            page = window.pages.widget(index)
+            assert page is not None
+            for button in page.findChildren(QPushButton):
+                if button.isVisible():
+                    assert button.height() >= 35, (index, button.text())
+            for text_area in page.findChildren(QPlainTextEdit):
+                if text_area.isVisible():
+                    assert text_area.height() >= 180, index
+            if index in (2, 3, 4, 5, 6, 7, 8):
+                scroll = page.findChild(QScrollArea)
+                assert scroll is not None
+                assert scroll.verticalScrollBar().maximum() > 0
     finally:
         window._timer.stop()
         window.deleteLater()

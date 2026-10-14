@@ -54,9 +54,15 @@ both expected words from the captured image. OCR took 0.146 seconds after
 capture in that one run. This is a health check, not an accuracy or latency
 benchmark across applications or screen conditions.
 
-A model-management UI, an OCR-engine selector in saved settings, multilingual
-model downloads, and a
-measured CPU/GPU benchmark remain separate product work. Model file size does
+A local OCR package selector is now saved in application settings. The Screen
+Access page offers the installed Tesseract adapter and a folder picker for a
+compatible, already extracted Tesseract runtime with its language models. The
+saved choice is applied to new reads without changing the screen capture or
+Telegram verification code; a read already in flight is discarded when the
+engine changes. Other OCR families still require a dedicated adapter before
+they can appear in this selector. The app does not download OCR models.
+Multilingual model acquisition and a measured CPU/GPU benchmark remain
+separate product work. Model file size does
 not establish RAM or VRAM requirements; those must be measured with the chosen
 runtime and image size.
 
@@ -72,12 +78,20 @@ access discards any late result. Only one read is in flight, and image bytes
 are never written to disk. The page displays up to 2,000 characters as plain
 text and clears them when access is revoked.
 
-The Ubuntu Qt composition currently discovers an optional English Tesseract
+The Ubuntu Qt composition discovers the default optional Tesseract
 runtime at the user's XDG data location,
 `kyrin/models/ocr/tesseract/`, alongside the STT model library. The discovery
 step does not install or download it. `ScreenTextReader` accepts the `OcrEngine`
 contract, so another OCR adapter can replace Tesseract without changing the
 capture or page logic. An absent runtime leaves the read button unavailable.
+The general Screen Access read remains English. When a Telegram chat target
+contains Persian script and `fas.traineddata` is installed beside
+`eng.traineddata`, the chat verifier requests `fas+eng` only for that capture.
+It uses Tesseract page segmentation mode 3 for Persian and preserves mode 11
+for English-only reads. A missing Persian model stops the chat match without
+clicking. Both the language data and the optional runtime stay in the local
+project data on the owner's AI-Projects drive. This does not translate a
+misheard chat name or guarantee OCR accuracy on the owner's Telegram theme.
 This read-only path does not send OCR text to the command interpreter, click
 anything, or treat image text as an instruction. Action targeting needs a
 separate design and a fresh identity/target check at execution time.

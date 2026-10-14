@@ -26,7 +26,7 @@ from kyrin.app.platforms.xdg_startup import (
 )
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.chat_verifier import QtChatVerifier
-from kyrin.app.qt.ocr_setup import installed_ocr_engine
+from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.single_instance import SingleInstanceError, SingleInstanceGuard
@@ -209,7 +209,7 @@ def main() -> int:
     ocr_root = linux_model_library_path().parent / "ocr" / "tesseract"
     screen_reader = ScreenTextReader(
         screen_access,
-        installed_ocr_engine(ocr_root),
+        selected_ocr_engine(settings.ocr if settings is not None else None, ocr_root),
         focused_window,
         OcrOptions("eng"),
         app,
@@ -275,6 +275,7 @@ def main() -> int:
         app_catalog=catalog,
         screen_access=screen_access,
         screen_reader=screen_reader,
+        ocr_default_root=ocr_root,
         startup_registration=registration,
         startup_error=startup_error,
     )

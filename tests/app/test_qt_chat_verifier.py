@@ -17,7 +17,13 @@ from kyrin.actions.telegram_verification import ChatSearchMatch
 from kyrin.app.qt.chat_verifier import QtChatVerifier
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
-from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
+from kyrin.vision.ocr.contracts import (
+    OcrDevice,
+    OcrOptions,
+    OcrResult,
+    RecognizedText,
+    TextBox,
+)
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 
@@ -39,8 +45,11 @@ class Reader(QObject):
         self.busy = False
         self.observation = observation
         self.read_on_ui_thread = False
+        self.supported_languages = frozenset({"eng", "fas"})
+        self.last_options: OcrOptions | None = None
 
-    def read(self) -> bool:
+    def read(self, options: OcrOptions | None = None) -> bool:
+        self.last_options = options
         self.read_on_ui_thread = current_thread() is main_thread()
         self.completed.emit(self.observation)
         return True
@@ -133,3 +142,26 @@ def test_search_result_is_only_returned_for_unique_left_pane_match(
         app,
         lambda: verifier.find_search_result("telegram.desktop", 123, "Bob") is None,
     )
+
+
+def test_persian_chat_uses_bilingual_ocr_only_when_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    access = Access()
+    reader = Reader(_observation())
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, access), cast(ScreenTextReader, reader)
+    )
+    def search() -> bool:
+        result = verifier.find_search_result("telegram.desktop", 123, "دانشگاه")
+        return result is not None
+
+    assert not _call_from_worker(app, search)
+    assert reader.last_options == OcrOptions("fas+eng")
+    reader.supported_languages = frozenset({"eng"})
+    reader.last_options = None
+    assert not _call_from_worker(app, search)
+    assert reader.last_options is None

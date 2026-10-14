@@ -14,6 +14,7 @@ _PREFIX_OPERATIONS = frozenset(
         "fullscreen", "exit fullscreen on",
     }
 )
+_CHAT_PREFIX_OPERATIONS = frozenset({"open chat", "go to chat"})
 _SUFFIX_OPERATIONS = frozenset(
     {
         "باز کن", "ببند", "کوچک کن", "پنهان کن",
@@ -75,7 +76,9 @@ class CommandFragmentBuffer:
 
     def hold(self, text: str) -> bool:
         operation = _normalize(text)
-        if operation not in _PREFIX_OPERATIONS | _SUFFIX_OPERATIONS:
+        if operation not in (
+            _PREFIX_OPERATIONS | _CHAT_PREFIX_OPERATIONS | _SUFFIX_OPERATIONS
+        ):
             return False
         self._fragment = _Fragment(
             operation, operation in _SUFFIX_OPERATIONS, self._clock()

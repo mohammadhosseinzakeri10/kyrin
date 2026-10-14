@@ -2,6 +2,28 @@
 
 CONTROL_WINDOW_STYLE = """
 QWidget#ControlWindow, QWidget#Content { background: #080b18; color: #e9eeff; }
+QScrollArea#ActionsScrollArea, QWidget#ActionsScrollContent,
+QScrollArea#SettingsScrollArea, QWidget#SettingsScrollContent {
+    background: #080b18; border: 0;
+}
+QScrollArea#ActionsScrollArea QScrollBar:vertical,
+QScrollArea#SettingsScrollArea QScrollBar:vertical,
+QWidget#ActionsScrollContent QListWidget QScrollBar:vertical {
+    background: #10182d; width: 11px; margin: 0;
+}
+QScrollArea#ActionsScrollArea QScrollBar::handle:vertical,
+QScrollArea#SettingsScrollArea QScrollBar::handle:vertical,
+QWidget#ActionsScrollContent QListWidget QScrollBar::handle:vertical {
+    background: #53669e; border-radius: 5px; min-height: 24px;
+}
+QScrollArea#ActionsScrollArea QScrollBar::add-line:vertical,
+QScrollArea#ActionsScrollArea QScrollBar::sub-line:vertical,
+QScrollArea#SettingsScrollArea QScrollBar::add-line:vertical,
+QScrollArea#SettingsScrollArea QScrollBar::sub-line:vertical,
+QWidget#ActionsScrollContent QListWidget QScrollBar::add-line:vertical,
+QWidget#ActionsScrollContent QListWidget QScrollBar::sub-line:vertical {
+    height: 0;
+}
 QFrame#Sidebar { background: #0d1225; border-right: 1px solid #222b48; }
 QLabel { color: #c0cbe9; font-size: 14px; }
 QLabel#Brand { color: #d7c9ff; font-size: 26px; font-weight: 800; letter-spacing: 3px; }
@@ -33,7 +55,8 @@ QPushButton#NavButton { text-align: left; background: transparent; border: 0;
 QPushButton#NavButton:hover { background: #1c2545; }
 QPushButton#NavButton:checked { background: #293666; color: #f7f3ff;
                                 border-left: 3px solid #a389ff; }
-QComboBox, QLineEdit { background: #151d35; color: #f2f4ff;
+QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit {
+                       background: #151d35; color: #f2f4ff;
                        border: 1px solid #3b496f; border-radius: 7px;
                        min-height: 34px; padding: 3px 8px; }
 QComboBox QAbstractItemView { background: #18213d; color: #f2f4ff; }

@@ -9,6 +9,7 @@ from kyrin.vision.ocr.contracts import OcrResult, RecognizedText, TextBox
 
 def _word(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = normalized.replace("ي", "ی").replace("ك", "ک").replace("‌", "")
     return normalized.strip(" \t\r\n.,:;!?()[]{}«»\"'’")
 
 
@@ -18,7 +19,10 @@ def _same_line(left: RecognizedText, right: RecognizedText) -> bool:
         left_box.top + left_box.height,
         right_box.top + right_box.height,
     )
-    horizontal_gap = right_box.left - (left_box.left + left_box.width)
+    if any(unicodedata.bidirectional(char) in {"R", "AL"} for char in left.text):
+        horizontal_gap = left_box.left - (right_box.left + right_box.width)
+    else:
+        horizontal_gap = right_box.left - (left_box.left + left_box.width)
     return overlaps_vertically and 0 <= horizontal_gap <= max(
         12, 2 * max(left_box.height, right_box.height)
     )

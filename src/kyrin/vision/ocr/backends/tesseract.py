@@ -93,7 +93,9 @@ class TesseractOcrEngine:
     def recognize(self, image: bytes, options: OcrOptions) -> OcrResult:
         if options.device is OcrDevicePreference.GPU:
             raise OcrUnavailableError("Tesseract does not support the selected GPU")
-        if options.language not in self._capabilities.supported_languages:
+        if not set(options.language.split("+")).issubset(
+            self._capabilities.supported_languages
+        ):
             raise OcrUnavailableError("Tesseract language model is not installed")
         if not image or len(image) > self._max_image_bytes:
             raise ValueError("OCR image is empty or exceeds the size limit")
@@ -108,7 +110,7 @@ class TesseractOcrEngine:
                     "-l",
                     options.language,
                     "--psm",
-                    "11",
+                    "3" if "fas" in options.language.split("+") else "11",
                     "tsv",
                 ],
                 input=image,

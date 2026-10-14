@@ -19,12 +19,15 @@ Today `LiveCommandRuntime` already routes speech, command decisions, and bounded
 actions. `scripts/audio/check_live_speech.py` still chooses the concrete audio
 device, STT backend, responses, and desktop adapters from terminal arguments.
 There is now a product settings data model, file store, lifecycle controller,
-Ubuntu session factory, and a first control window. The Preferences page can
-register login startup for the current user. The factory chooses a microphone, STT engine, response presenter,
-and bounded desktop action adapters from explicit settings. The STT contract
-accepts AUTO/CPU/GPU requests. Vosk advertises CPU only; Whisper can use a
-separate CUDA-enabled runtime when one is installed. The current TTS protocol does
-not expose model, voice, speed, or compute-device selection.
+Ubuntu session factory, and a multi-page control window. The Preferences page
+can register login startup for the current user. The factory chooses a
+microphone, STT engine, response presenter, and bounded desktop action adapters
+from explicit settings. The STT contract accepts AUTO/CPU/GPU requests. Vosk
+advertises CPU only; Whisper can use a separate CUDA-enabled runtime when one
+is installed. Voice Output now selects supported local TTS models, language
+routes, speakers, speed where the engine supports it, and AUTO/CPU/GPU
+preference. The selected adapter and runtime validate actual compatibility;
+see [TTS model management](../responses/TTS_MODEL_MANAGEMENT.md).
 
 ## User-visible controls
 
@@ -74,11 +77,11 @@ Initial settings need to describe:
   is not a durable identity across reboots; selection needs a resolution step
   against currently available devices.
 - STT backend, installed model, language, and AUTO/CPU/GPU preference.
-- Whether voice responses are enabled, the installed TTS backend/voice when
-  supported, and a separate AUTO/CPU/GPU preference once the TTS contract can
-  honor it. The UI still shows the GPU choice before that support exists; an
-  attempt to apply it explains what is missing and keeps the previous valid
-  choice. Speed controls should show the engine-defined supported range.
+- Selected TTS backend, local model, voice, language route, and separate
+  AUTO/CPU/GPU preference. The adapter validates a requested device before
+  applying it; unavailable GPU support produces an error and preserves the
+  previous valid setting. Speed is available only where the selected engine
+  and installed processing tools support it.
 - Explicitly allowed desktop applications and whether action execution is
   enabled. No application receives permission merely because it is installed.
 - Optional visual feedback and response-language preferences.
@@ -322,6 +325,10 @@ next login.
 The owner selected the original second black-hole K concept as the application
 logo. Its transparent PNG is packaged with the Qt assets, shown in the control
 window, and referenced by the managed menu and autostart desktop entries.
+The logo was later rerendered with more realistic lighting while retaining its
+K silhouette and black-hole center. The earlier PNG remains beside it as
+`kyrin-logo-original.png`; `kyrin-logo.png` is the active asset at the same
+path used by existing desktop entries.
 The Qt process also declares the same desktop-file ID as the menu entry and
 sets the display name to `KYRIN`, so the desktop can associate its live window
 with that launcher instead of showing the Python runtime as the application.

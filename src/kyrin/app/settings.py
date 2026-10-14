@@ -60,6 +60,20 @@ class CommandModelSelection:
 
 
 @dataclass(frozen=True, slots=True)
+class OcrSelection:
+    """A user-selected local OCR package, resolved by an installed adapter."""
+
+    backend: str
+    model_path: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.backend, str) or not _IDENTIFIER.fullmatch(self.backend):
+            raise ValueError("OCR backend must be a lowercase identifier")
+        if not isinstance(self.model_path, Path) or not self.model_path.is_absolute():
+            raise ValueError("OCR model path must be absolute")
+
+
+@dataclass(frozen=True, slots=True)
 class AllowedApp:
     """An explicit Ubuntu desktop-entry binding, not arbitrary shell text."""
 
@@ -93,6 +107,7 @@ class AppSettings:
     microphone_device_key: str | None = None
     stt: SttSelection | None = None
     command_model: CommandModelSelection | None = None
+    ocr: OcrSelection | None = None
     tts: TtsSelection = TtsSelection()
     tts_languages: tuple[TtsLanguageRoute, ...] = ()
     action_execution_enabled: bool = False
@@ -119,6 +134,8 @@ class AppSettings:
             self.command_model, CommandModelSelection
         ):
             raise ValueError("command_model must be a model selection or null")
+        if self.ocr is not None and not isinstance(self.ocr, OcrSelection):
+            raise ValueError("ocr must be a model selection or null")
         if not isinstance(self.tts, TtsSelection):
             raise ValueError("tts must be a voice selection")
         if (

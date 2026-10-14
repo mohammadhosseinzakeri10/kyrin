@@ -1,18 +1,25 @@
-"""User control for a remembered GNOME screen permission."""
+"""User control for screen permission and a local OCR package."""
+
+from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
+from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.translations import UiTranslations
+from kyrin.app.settings import OcrSelection
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 
@@ -22,13 +29,16 @@ class ScreenAccessPage(QWidget):
         access: ScreenAccess | None,
         translations: UiTranslations,
         reader: ScreenTextReader | None = None,
+        *,
+        ocr_default_root: Path | None = None,
+        ocr_selection: OcrSelection | None = None,
     ) -> None:
         super().__init__()
         self._access = access
         self._reader = reader
         self._translations = translations
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 25, 20, 20)
+        self._ocr_default_root = ocr_default_root
+        layout, self.scroll_area = scrollable_page_layout(self)
         self.heading = QLabel()
         self.heading.setObjectName("PageTitle")
         layout.addWidget(self.heading)
@@ -44,6 +54,34 @@ class ScreenAccessPage(QWidget):
         self.status.setObjectName("Info")
         layout.addWidget(self.status)
         layout.addSpacing(20)
+        self.ocr_label = QLabel()
+        layout.addWidget(self.ocr_label)
+        self.ocr_backend = QComboBox()
+        self.ocr_backend.addItem("Tesseract (CPU)", "tesseract")
+        if ocr_selection is not None and ocr_selection.backend != "tesseract":
+            self.ocr_backend.addItem(
+                f"{ocr_selection.backend} (unavailable)", ocr_selection.backend
+            )
+            self.ocr_backend.setCurrentIndex(1)
+        self.ocr_backend.setAccessibleName("OCR engine")
+        layout.addWidget(self.ocr_backend)
+        ocr_row = QHBoxLayout()
+        self.ocr_path = QLineEdit()
+        self.ocr_path.setAccessibleName("Local OCR package folder")
+        self.ocr_path.setText(
+            str(ocr_selection.model_path)
+            if ocr_selection is not None
+            else str(ocr_default_root) if ocr_default_root is not None else ""
+        )
+        ocr_row.addWidget(self.ocr_path)
+        self.ocr_browse = QPushButton()
+        self.ocr_browse.clicked.connect(self._browse_ocr)
+        ocr_row.addWidget(self.ocr_browse)
+        layout.addLayout(ocr_row)
+        self.ocr_hint = QLabel()
+        self.ocr_hint.setWordWrap(True)
+        layout.addWidget(self.ocr_hint)
+        layout.addSpacing(16)
         self.read_button = QPushButton()
         self.read_button.clicked.connect(self._read)
         layout.addWidget(self.read_button)
@@ -52,6 +90,7 @@ class ScreenAccessPage(QWidget):
         self.read_status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.read_status)
         self.read_output = QPlainTextEdit()
+        self.read_output.setMinimumHeight(180)
         self.read_output.setReadOnly(True)
         self.read_output.setMaximumBlockCount(40)
         layout.addWidget(self.read_output)
@@ -77,6 +116,9 @@ class ScreenAccessPage(QWidget):
         self.heading.setText(text("screen_heading"))
         self.caption.setText(text("screen_caption"))
         self.enabled_checkbox.setText(text("screen_enable"))
+        self.ocr_label.setText(text("screen_ocr_model"))
+        self.ocr_browse.setText(text("screen_ocr_browse"))
+        self.ocr_hint.setText(text("screen_ocr_hint"))
         self.read_button.setText(text("screen_read"))
         if self._reader is None or not self._reader.available:
             self.read_status.setText(text("screen_ocr_unavailable"))
@@ -88,6 +130,25 @@ class ScreenAccessPage(QWidget):
             self.status.setText(text("screen_active"))
         else:
             self.status.setText(text("screen_off"))
+
+    def _browse_ocr(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, self._translations.text("screen_ocr_browse")
+        )
+        if directory:
+            self.ocr_path.setText(directory)
+
+    def selection(self) -> OcrSelection | None:
+        path = self.ocr_path.text().strip()
+        if not path:
+            return None
+        selected = Path(path)
+        if self._ocr_default_root is not None and selected == self._ocr_default_root:
+            return None
+        return OcrSelection(str(self.ocr_backend.currentData()), selected)
+
+    def has_unsaved_changes(self, current: OcrSelection | None) -> bool:
+        return self.selection() != current
 
     def _toggled(self, enabled: bool) -> None:
         access = self._access

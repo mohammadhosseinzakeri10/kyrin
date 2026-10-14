@@ -13,6 +13,7 @@ from kyrin.app.permission_token import permission_token_path  # noqa: E402
 from kyrin.app.qt.screen_access import SERVICE_NAME, ScreenAccess  # noqa: E402
 from kyrin.app.qt.screen_access_page import ScreenAccessPage  # noqa: E402
 from kyrin.app.qt.translations import UiTranslations  # noqa: E402
+from kyrin.app.settings import OcrSelection  # noqa: E402
 from kyrin.vision.screen_capture import IdentifiedWindowImage  # noqa: E402
 
 _PNG = b"\x89PNG\r\n\x1a\n" + b"pixels"
@@ -198,6 +199,29 @@ def test_screen_page_revokes_access_without_saving_settings(
         assert not (tmp_path / "settings.json").exists()
     finally:
         access.close()
+
+
+def test_screen_page_selects_local_ocr_package_without_installing_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    default = tmp_path / "default"
+    alternate = tmp_path / "alternate"
+    page = ScreenAccessPage(
+        None, UiTranslations(tmp_path), ocr_default_root=default
+    )
+    try:
+        assert page.selection() is None
+        page.ocr_path.setText(str(alternate))
+        assert page.selection() == OcrSelection("tesseract", alternate)
+        assert page.has_unsaved_changes(None)
+        page.ocr_path.setText(str(default))
+        assert not page.has_unsaved_changes(None)
+        assert not alternate.exists()
+    finally:
+        page.deleteLater()
         page.deleteLater()
         app.processEvents()
 

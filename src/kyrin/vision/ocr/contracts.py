@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-_LANGUAGE_CODE = re.compile(r"[a-z][a-z0-9_]*\Z")
+_LANGUAGE_CODE = re.compile(r"[a-z][a-z0-9_]*(?:\+[a-z][a-z0-9_]*)*\Z")
 
 
 class OcrDevice(StrEnum):
@@ -35,7 +35,11 @@ class OcrOptions:
     device: OcrDevicePreference = OcrDevicePreference.AUTO
 
     def __post_init__(self) -> None:
-        if _LANGUAGE_CODE.fullmatch(self.language) is None:
+        if (
+            len(self.language) > 64
+            or len(self.language.split("+")) > 4
+            or _LANGUAGE_CODE.fullmatch(self.language) is None
+        ):
             raise ValueError("OCR language must be a valid language code")
         if not isinstance(self.device, OcrDevicePreference):
             raise ValueError("OCR device must be auto, cpu, or gpu")

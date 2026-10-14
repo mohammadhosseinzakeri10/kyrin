@@ -14,11 +14,12 @@ PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from kyrin.app.qt.ocr_setup import installed_ocr_engine
+from kyrin.app.qt.ocr_setup import installed_ocr_engine, selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.translations import UiTranslations
+from kyrin.app.settings import OcrSelection
 from kyrin.vision.ocr.contracts import (
     OcrCapabilities,
     OcrDevice,
@@ -55,14 +56,19 @@ class FakeAccess(QObject):
 
 
 class FakeOcr:
-    def __init__(self, wait: Event | None = None) -> None:
+    def __init__(
+        self, wait: Event | None = None, *, expected_language: str = "eng"
+    ) -> None:
         self.wait = wait
+        self.expected_language = expected_language
         self.started = Event()
         self.used_worker = False
 
     @property
     def capabilities(self) -> OcrCapabilities:
-        return OcrCapabilities(frozenset({OcrDevice.CPU}), frozenset({"eng"}))
+        return OcrCapabilities(
+            frozenset({OcrDevice.CPU}), frozenset({"eng", "fas"})
+        )
 
     def recognize(self, image: bytes, options: OcrOptions) -> OcrResult:
         self.used_worker = current_thread() is not main_thread()
@@ -70,7 +76,7 @@ class FakeOcr:
         if self.wait is not None:
             assert self.wait.wait(2)
         assert image == _IMAGE.image
-        assert options.language == "eng"
+        assert options.language == self.expected_language
         return OcrResult(
             (RecognizedText("Telegram", TextBox(1, 2, 30, 10), 0.9),),
             "eng",
@@ -148,6 +154,29 @@ def test_focus_change_discards_recognized_text(monkeypatch: pytest.MonkeyPatch) 
         reader.close()
 
 
+def test_one_read_can_override_default_ocr_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    access = FakeAccess()
+    engine = FakeOcr(expected_language="fas+eng")
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        engine,
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    results: list[IdentifiedWindowText] = []
+    reader.completed.connect(results.append)
+    try:
+        assert reader.supported_languages == frozenset({"eng", "fas"})
+        assert reader.read(OcrOptions("fas+eng"))
+        _until(app, lambda: bool(results))
+        assert engine.used_worker
+    finally:
+        reader.close()
+
+
 def test_revocation_discards_late_ocr_result(monkeypatch: pytest.MonkeyPatch) -> None:
     app = _app(monkeypatch)
     access = FakeAccess()
@@ -176,6 +205,62 @@ def test_revocation_discards_late_ocr_result(monkeypatch: pytest.MonkeyPatch) ->
         reader.close()
 
 
+def test_engine_change_discards_old_result_and_uses_new_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    access = FakeAccess()
+    release = Event()
+    old_engine = FakeOcr(release)
+    new_engine = FakeOcr()
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        old_engine,
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    results: list[object] = []
+    reader.completed.connect(results.append)
+    try:
+        assert reader.read()
+        assert old_engine.started.wait(1)
+        reader.set_engine(new_engine)
+        assert not reader.busy
+        assert reader.read()
+        _until(app, lambda: bool(results))
+        assert new_engine.used_worker
+        release.set()
+        app.processEvents()
+        assert len(results) == 1
+    finally:
+        release.set()
+        reader.close()
+
+
+def test_engine_becomes_available_without_reopening_screen_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _app(monkeypatch)
+    access = FakeAccess()
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        None,
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    page = ScreenAccessPage(
+        cast(ScreenAccess, access), UiTranslations(tmp_path), reader
+    )
+    try:
+        assert not page.read_button.isEnabled()
+        reader.set_engine(FakeOcr())
+        page.translate()
+        assert page.read_button.isEnabled()
+    finally:
+        reader.close()
+        page.deleteLater()
+
+
 def test_only_installed_local_ocr_runtime_is_discovered(tmp_path: Path) -> None:
     root = tmp_path / "tesseract"
     assert installed_ocr_engine(root) is None
@@ -188,3 +273,6 @@ def test_only_installed_local_ocr_runtime_is_discovered(tmp_path: Path) -> None:
     engine = installed_ocr_engine(root)
     assert engine is not None
     assert engine.capabilities.supported_languages == frozenset({"eng"})
+    assert selected_ocr_engine(None, root) is not None
+    assert selected_ocr_engine(OcrSelection("tesseract", root), tmp_path) is not None
+    assert selected_ocr_engine(OcrSelection("unknown", root), tmp_path) is None

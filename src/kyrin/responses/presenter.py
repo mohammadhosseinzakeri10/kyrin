@@ -54,7 +54,8 @@ _TEXT: dict[str, dict[str, str]] = {
         "unsupported_chat": "هنوز نمی‌توانم چت را باز کنم.",
         "unsupported_chat_target": "نام یا برنامهٔ این چت پشتیبانی نمی‌شود.",
         "chat_search_uncertain": (
-            "یک نتیجهٔ یکتا و دقیق برای این چت پیدا نکردم؛ لطفاً نام کامل‌تر را بگویید."
+            "برای نام «{target}» نتیجهٔ یکتا و دقیق پیدا نکردم؛ "
+            "لطفاً نام چت را دوباره بگویید."
         ),
         "screen_access_required": "برای بررسی چت، دسترسی صفحه را در برنامه فعال کنید.",
         "telegram_not_active": (
@@ -147,7 +148,8 @@ _TEXT: dict[str, dict[str, str]] = {
         "unsupported_chat": "I can't open chats yet.",
         "unsupported_chat_target": "That chat name or app is not supported.",
         "chat_search_uncertain": (
-            "I couldn't find one exact chat result. Please say a more specific name."
+            "I couldn't find one exact chat result for “{target}”. "
+            "Please repeat the chat name."
         ),
         "screen_access_required": "Enable Screen Access in KYRIN to verify the chat.",
         "telegram_not_active": (
@@ -280,7 +282,11 @@ class ResponsePresenter:
                 "window_unverified",
                 "window_state_changed",
             }:
-                text = messages[event.error_code]
+                text = (
+                    messages[event.error_code].format(target=event.intent.target)
+                    if event.error_code == "chat_search_uncertain"
+                    else messages[event.error_code]
+                )
             else:
                 text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id

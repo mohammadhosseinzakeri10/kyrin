@@ -12,6 +12,7 @@ from kyrin.actions.telegram_verification import (
 )
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
+from kyrin.vision.ocr.contracts import OcrOptions
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 
@@ -89,7 +90,26 @@ class QtChatVerifier(QObject):
             request.finished.set()
             return
         self._pending = request
-        if not self._reader.read() and self._pending is request:
+        language = (
+            OcrOptions("fas+eng")
+            if request.target is not None
+            and any("\u0600" <= char <= "\u06ff" for char in request.target)
+            and {"fas", "eng"}.issubset(self._reader.supported_languages)
+            else None
+        )
+        if (
+            request.target is not None
+            and any("\u0600" <= char <= "\u06ff" for char in request.target)
+            and language is None
+        ):
+            self._finish(False)
+            return
+        started = (
+            self._reader.read()
+            if language is None
+            else self._reader.read(language)
+        )
+        if not started and self._pending is request:
             self._finish(False)
 
     def _completed(self, observation: object) -> None:

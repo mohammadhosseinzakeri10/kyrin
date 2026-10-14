@@ -11,38 +11,47 @@ KYRIN is an intelligent AI agent designed to understand voice, vision, and text,
 
 ## Current status
 
-KYRIN has an offline, continuously listening voice prototype for Ubuntu. It
-separates microphone capture, audio processing, replaceable speech recognition,
-command interpretation, desktop actions, and responses. A terminal diagnostic
-can launch explicitly allowed applications after a final command; it is a dry
-run by default. An optional GNOME Shell extension shows a movable animated
-status character. This is not yet a packaged, always-on application.
-An optional Qt control window can edit the first set of local microphone and
-STT settings, show status, and start or stop listening. Opening it again in the
-same user session activates the existing window. On Ubuntu, Preferences can
-install a per-user desktop launcher and enable or disable login startup.
-The Desktop Actions page can select installed applications for an explicit
-allowlist and enable execution. The control window also has local command-model
-and voice-output settings. Voice models are selected from local files; the app
-does not download models.
-Finalized speech text can be kept in a local, bounded conversation history.
-Short command fragments can be joined during one listening stream; archived
-history is retained without being supplied as current command context.
-The selected black-hole K logo appears in the window and Ubuntu launcher.
-The **Model Library** page lists installed speech models in All, CPU, and GPU
-views and can add a downloaded local model without editing code. A Whisper
-model compatible with both devices is stored once and appears in both views.
-See [model library](docs/app/MODEL_LIBRARY.md).
+KYRIN runs as a local Ubuntu/GNOME desktop application with continuous
+microphone listening, a PySide6 control center, and an optional movable GNOME
+status character. Its components separate audio acquisition, replaceable STT,
+bounded command understanding, permission-gated actions, optional screen/OCR
+observation, TTS, and responses. The current user's session can start KYRIN at
+login; the control center can pause listening or quit. Opening the launcher
+again activates the existing window. This development installation is not yet
+a portable, self-contained release.
 
-The current interpreter recognizes a small set of English and Persian example
-commands. It does not provide general multilingual understanding or desktop
-automation. Four local Ollama command models are being compared in a text-only
-diagnostic; the selected model can also assist the live command runtime behind
-independent action checks. Local Vosk and
-Whisper models are development assets, not bundled
-defaults. Vosk currently runs on CPU. Whisper can use CPU or an explicitly
-installed CUDA runtime on supported NVIDIA hardware; the same model weights
-are used for both. See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md).
+The control center has separate pages for audio input, speech recognition,
+local speech models, command understanding, voice output, desktop actions,
+screen access, and preferences. English and Persian interface text are built
+in; other interface languages can be imported from local JSON packs. The
+selected black-hole K logo appears in the window and Ubuntu launcher. Models
+are selected from local files; KYRIN does not download model weights in the
+application. The **Model Library** shows installed STT models in All, CPU,
+and GPU views and stores compatible Whisper weights only once. See
+[model library](docs/app/MODEL_LIBRARY.md),
+[interface language packs](docs/app/UI_LANGUAGE_PACKS.md), and
+[voice management](docs/responses/TTS_MODEL_MANAGEMENT.md).
+
+The current Ubuntu action path can open or activate explicitly allowed apps,
+control supported windows, and show a numbered open-window overview. Telegram
+Saved Messages has passed a live speech-to-action check. Other Telegram chat
+names have a guarded OCR/search path but still need live validation, especially
+for Persian titles. Screen and keyboard permissions can be remembered and
+revoked in the app. System power actions require separate permission and two
+confirmations; only the inert safe preview has been validated end to end.
+Finalized speech text can be retained in a bounded local conversation history;
+audio is not stored by that feature.
+
+Vosk currently runs on CPU. Whisper can use CPU or a separately installed
+CUDA runtime on supported NVIDIA hardware; the same weights serve both. A
+local Ollama command model can assist the live interpreter behind independent
+source-text and action-permission checks. The interpreter is still bounded:
+automatic language detection, arbitrary phrasing, and general multilingual
+desktop control are not guaranteed. STT, TTS, and command-model weights are
+not bundled by default.
+See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md),
+[command-model integration](docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md), and
+[OCR architecture](docs/vision/OCR_ARCHITECTURE.md).
 
 ## Development entry point
 
@@ -63,7 +72,7 @@ and an explicit `--launch-app` binding. See
 diagnostic. See [project context](PROJECT_CONTEXT.md) for confirmed state,
 experiments, and remaining limitations.
 
-For the experimental control window, install the optional desktop dependency
+For the development control window, install the optional desktop dependency
 in a connected development environment, then run:
 
 ```bash

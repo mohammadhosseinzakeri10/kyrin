@@ -81,3 +81,26 @@ def test_search_result_rejects_ambiguous_matches() -> None:
         unique_search_result(observation, "telegram.desktop", 123, "Saved Messages")
         is None
     )
+
+
+def test_persian_search_result_uses_right_to_left_word_positions() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("آموزش", TextBox(270, 210, 80, 24), 0.91),
+                RecognizedText("هوش", TextBox(207, 210, 52, 24), 0.90),
+                RecognizedText("مصنوعی", TextBox(104, 210, 90, 24), 0.89),
+            ),
+            "fas+eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    match = unique_search_result(
+        observation, "telegram.desktop", 123, "آموزش هوش مصنوعی"
+    )
+    assert match is not None
+    assert (match.left, match.top, match.width) == (104, 210, 246)

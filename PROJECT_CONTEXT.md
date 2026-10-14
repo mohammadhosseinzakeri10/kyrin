@@ -2552,14 +2552,23 @@ the owner.
 
 The owner chose the second of four black-hole logo concepts and explicitly
 preferred its original generated image over a later simplified revision. The
-original transparent PNG is copied unchanged into the Qt assets as
-`kyrin-logo.png`. The control window displays it beside the KYRIN name; the Qt
-application uses it as its window icon, and managed XDG desktop entries include
-its packaged absolute path. The user's existing menu and autostart entries
-were refreshed without changing their enabled state. A built wheel contains
+original transparent PNG was copied unchanged into the Qt assets as
+`kyrin-logo.png` at that time. The control window displays the active logo
+beside the KYRIN name; the Qt application uses it as its window icon, and
+managed XDG desktop entries include its packaged absolute path. The user's
+existing menu and autostart entries were refreshed without changing their
+enabled state. A built wheel contains
 the PNG and the desktop entries passed `desktop-file-validate`. An offscreen
 window preview was inspected. A future packaged release may need
 multi-resolution icon files.
+
+The owner later requested a more realistic rendering of the same emblem across
+the application. The original PNG remains as `kyrin-logo-original.png`, while
+the newly rendered transparent PNG now occupies `kyrin-logo.png`. The K
+silhouette and black-hole center remain recognizable. The Qt window icon,
+sidebar logo, and existing XDG menu and autostart entries all reference that
+unchanged active path; their live appearance after application restart remains
+for the owner to inspect.
 
 The owner then reported that the applications menu showed a generic gear and
 the running application's tooltip said `Python 3`. Inspection found that the
@@ -3717,3 +3726,61 @@ the pointer grant for Telegram with a system consent prompt. The installed
 OCR data remains English-only, so unrecognized or ambiguous names must stop
 without a click. This new slice has deterministic tests but still needs a
 GNOME extension reload and live owner validation before being called complete.
+
+After a desktop restart, the owner observed a confirmed `Saved Messages`
+opening. Other chat attempts were frequently split into `Open chat` followed
+by a name such as `Hunter VP`, or STT replaced the intended name with `call
+your email`. The generic search entered the transcribed text but returned
+`chat_search_uncertain` before any result click; this does not establish an OCR
+or pointer defect. The short in-memory fragment buffer now accepts `Open chat`
+and `Go to chat` followed by a nearby name, with the existing four-second,
+negation, new-command, and stream-reset limits. The uncertainty response now
+shows the name actually searched. Focused deterministic tests pass; the new
+fragment behavior and arbitrary chat selection still need a live check.
+
+The owner listed many Telegram titles written in Persian. The installed local
+Tesseract data currently contains only `eng.traineddata`, and the Qt screen
+reader requests `OcrOptions("eng")`, so these titles are outside the currently
+verified OCR path. The owner also reported failure to open v2rayN, but the
+provided diagnostic lines did not include a V2RayN open intent. Read-only
+inspection found `v2rayn.desktop` and `/usr/bin/v2rayn`, both bound and allowed
+in KYRIN settings. The local resolver accepts exact `Open V2RayN` and asks
+for confirmation on `Open V2Rain`; the observed `Visual Network Configuration`
+and `Download Manager` are different transcriptions and cannot safely be
+silently mapped to v2rayN. The actual live failure stage remains unconfirmed.
+
+The next OCR change was started after this report. The local Ubuntu Persian
+Tesseract data package was downloaded to `local-data/downloads/ocr/tesseract/`
+and `fas.traineddata` placed beside the existing `eng.traineddata` in
+`local-data/kyrin/models/ocr/tesseract/`; the downloaded package SHA-256
+matched Ubuntu's package metadata. The OCR contract now accepts bounded
+multi-language codes, and the Telegram verifier selects `fas+eng` only for
+Persian-script chat targets. Persian OCR uses Tesseract page segmentation mode
+3 and phrase matching accepts right-to-left word geometry. A synthetic
+Persian image recognized `آموزش هوش مصنوعی` with three confidence scores above
+0.91 and produced one exact phrase match. The owner has not yet checked a
+private Telegram chat in the live application, so real chat-name accuracy and
+input behavior remain unconfirmed.
+
+The OCR architecture already had an `OcrEngine` contract but the Qt app always
+selected the discovered Tesseract runtime in code. A saved `OcrSelection` and
+Screen Access package picker now let the owner switch among compatible local
+Tesseract runtime folders without editing code. The selection is versioned in
+settings schema 9; schema 8 and earlier use the existing default. New reads,
+including Telegram verification, use the selected engine after saving, while
+an in-flight old read is discarded. Only the Tesseract adapter is installed
+today, so different OCR engine families still need their own adapters before
+the app can list them. This change does not download a model or establish live
+accuracy for Persian Telegram titles.
+
+The owner's desktop layout review found that controls on several Qt pages
+were compressed at the control window's minimum size: the Desktop Actions app
+list could show only one row, Speech Recognition reduced its clear button to
+four pixels, and Preferences reduced a button to ten pixels. Settings pages
+with longer content now scroll vertically while their app/model lists and
+diagnostic fields retain readable minimum heights. The Dashboard and Audio
+Input pages fit without scrolling. Plain-text output fields and spin boxes
+now use the dark theme, and longer guidance labels wrap. Offscreen visual
+checks covered the top and bottom of all nine pages in Persian; deterministic
+geometry tests cover English and Persian at the minimum window size and a
+30-app Desktop Actions list. Live desktop feedback remains open.

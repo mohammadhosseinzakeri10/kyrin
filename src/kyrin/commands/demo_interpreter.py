@@ -420,9 +420,9 @@ class DemoCommandInterpreter:
 
         smaller_match = _SMALLER_EN.fullmatch(phrase) or _SMALLER_FA.fullmatch(phrase)
         if smaller_match is not None and self._app_name_resolver is not None:
-            match = self._app_name_resolver.resolve(smaller_match[1])
-            if match.exact and len(match.candidates) == 1:
-                candidate = match.candidates[0]
+            resolved_smaller_app = self._app_name_resolver.resolve(smaller_match[1])
+            if resolved_smaller_app.exact and len(resolved_smaller_app.candidates) == 1:
+                candidate = resolved_smaller_app.candidates[0]
                 if candidate.app_id in self._allowed_window_apps:
                     return NeedsClarification(PendingOperationClarification(
                         candidate,

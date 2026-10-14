@@ -15,7 +15,7 @@ active recent turns, shortened to 240 characters each, and only on a final
 transcript. These are background context for the local command model;
 the current utterance still has to independently support any executable
 operation and target. Old transcripts cannot grant confirmation or action
-permission. An operation fragment such as `Open`, `Minimize`, or `کوچک کن`
+permission. An operation fragment such as `Open`, `Open chat`, `Minimize`, or `کوچک کن`
 can join a nearby final target such as `Telegram` for up to four seconds
 within the same STT stream. English prefix and Persian suffix forms are
 assembled according to the existing interpreter grammar; fragments are never

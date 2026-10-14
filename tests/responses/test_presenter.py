@@ -59,6 +59,19 @@ def test_chat_failure_explains_unsupported_name_and_missing_screen_access() -> N
     assert "Screen Access" in ResponsePresenter("en").present(access).text
 
 
+def test_uncertain_chat_search_shows_the_name_kyrin_actually_searched() -> None:
+    intent = CommandIntent(CommandKind.OPEN_CHAT, "call your email", "telegram")
+    feedback = ActionFeedback(
+        KEY,
+        intent,
+        ActionOutcome.FAILED,
+        ResponseChannel.TEXT_AND_VOICE,
+        "chat_search_uncertain",
+        "en",
+    )
+    assert "call your email" in ResponsePresenter("en").present(feedback).text
+
+
 def test_clarification_is_localized_and_keeps_candidate_order() -> None:
     event = ResponseRequest(
         7,

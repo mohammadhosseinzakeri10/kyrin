@@ -3,12 +3,14 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -30,12 +32,24 @@ class DesktopActionsPage(QWidget):
     ) -> None:
         super().__init__()
         self._translations = translations
-        layout = QVBoxLayout(self)
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("ActionsScrollArea")
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page_layout.addWidget(self.scroll_area)
+        content = QWidget()
+        content.setObjectName("ActionsScrollContent")
+        self.scroll_area.setWidget(content)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 25, 20, 20)
         self.heading = QLabel()
         self.heading.setObjectName("PageTitle")
         layout.addWidget(self.heading)
         self.caption = QLabel()
+        self.caption.setWordWrap(True)
         layout.addWidget(self.caption)
         layout.addSpacing(24)
         self.enabled_checkbox = QCheckBox()
@@ -60,12 +74,13 @@ class DesktopActionsPage(QWidget):
         layout.addLayout(selection_row)
         self.apps = QListWidget()
         self.apps.setAccessibleName("Allowed desktop applications")
+        self.apps.setMinimumHeight(300)
         self._pressed_item: QListWidgetItem | None = None
         self._pressed_check_state: Qt.CheckState | None = None
         self.apps.itemPressed.connect(self._remember_pressed_state)
         self.apps.itemClicked.connect(self._toggle_row_if_needed)
         self.apps.itemChanged.connect(self._update_selection_count)
-        layout.addWidget(self.apps, 1)
+        layout.addWidget(self.apps)
         self.telegram_chat_checkbox = QCheckBox()
         layout.addWidget(self.telegram_chat_checkbox)
         self.window_control_checkbox = QCheckBox()

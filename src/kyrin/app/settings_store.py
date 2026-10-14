@@ -10,13 +10,14 @@ from kyrin.app.settings import (
     AllowedApp,
     AppSettings,
     CommandModelSelection,
+    OcrSelection,
     SttSelection,
     TtsLanguageRoute,
     TtsSelection,
 )
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class SettingsError(ValueError):
@@ -101,7 +102,7 @@ def _parse_settings(document: object) -> AppSettings:
     ):
         raise SettingsError("unsupported settings schema version")
     version = document["schema_version"]
-    if version not in (1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
+    if version not in range(1, SCHEMA_VERSION + 1):
         raise SettingsError("unsupported settings schema version")
     fields = {
         "schema_version",
@@ -126,6 +127,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("tts")
     if version >= 8:
         fields.add("tts_languages")
+    if version >= 9:
+        fields.add("ocr")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -172,6 +175,15 @@ def _parse_settings(document: object) -> AppSettings:
                 _string(selected_command["store_path"], "command_model.store_path")
             ),
             device=command_device,
+        )
+
+    ocr: OcrSelection | None = None
+    raw_ocr = root["ocr"] if version >= 9 else None
+    if raw_ocr is not None:
+        selected_ocr = _object(raw_ocr, {"backend", "model_path"}, "ocr")
+        ocr = OcrSelection(
+            backend=_string(selected_ocr["backend"], "ocr.backend"),
+            model_path=Path(_string(selected_ocr["model_path"], "ocr.model_path")),
         )
 
     tts = TtsSelection()
@@ -247,6 +259,7 @@ def _parse_settings(document: object) -> AppSettings:
             microphone_device_key=microphone,
             stt=stt,
             command_model=command_model,
+            ocr=ocr,
             tts=tts,
             tts_languages=tts_languages,
             action_execution_enabled=_boolean(
@@ -292,6 +305,14 @@ def _document(settings: AppSettings) -> dict[str, object]:
                 "model": settings.command_model.model,
                 "store_path": str(settings.command_model.store_path),
                 "device": settings.command_model.device.value,
+            }
+        ),
+        "ocr": (
+            None
+            if settings.ocr is None
+            else {
+                "backend": settings.ocr.backend,
+                "model_path": str(settings.ocr.model_path),
             }
         ),
         "tts": _tts_document(settings.tts),

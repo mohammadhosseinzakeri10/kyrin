@@ -22,7 +22,7 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.cosmic_dashboard = CosmicDashboard()
         self.cosmic_dashboard.setObjectName("CosmicDashboard")
-        self.cosmic_dashboard.setMinimumSize(600, 440)
+        self.cosmic_dashboard.setMinimumSize(600, 400)
         self.cosmic_dashboard.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         hero_layout = QHBoxLayout(self.cosmic_dashboard)

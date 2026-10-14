@@ -24,6 +24,7 @@ from kyrin.app.model_library import (
     ModelLibraryError,
     vosk_language_hint,
 )
+from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import SttSelection
 from kyrin.stt.device import ComputeDevice, DevicePreference
@@ -59,8 +60,7 @@ class ModelLibraryPage(QWidget):
         self._events.completed.connect(self._import_completed)
         self._events.failed.connect(self._import_failed)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 25, 20, 20)
+        layout, self.scroll_area = scrollable_page_layout(self)
         self.title = QLabel()
         self.title.setObjectName("PageTitle")
         layout.addWidget(self.title)
@@ -86,6 +86,7 @@ class ModelLibraryPage(QWidget):
         layout.addLayout(import_row)
 
         self.tabs = QTabWidget()
+        self.tabs.setMinimumHeight(320)
         self.lists: list[QListWidget] = []
         self.import_buttons: dict[ComputeDevice, QPushButton] = {}
         for index in range(3):
@@ -105,7 +106,7 @@ class ModelLibraryPage(QWidget):
                 page_layout.addWidget(button)
                 self.import_buttons[device] = button
             self.tabs.addTab(page, "")
-        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.tabs)
         self.use_button = QPushButton()
         self.use_button.clicked.connect(self._use_selected)
         layout.addWidget(self.use_button)

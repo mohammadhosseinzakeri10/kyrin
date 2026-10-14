@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import TtsLanguageRoute, TtsSelection
 from kyrin.stt.device import DevicePreference
@@ -323,7 +324,7 @@ class TtsPage(QWidget):
         self._translations = translations
         self.model_root = model_root
         self._preview = preview
-        layout = QVBoxLayout(self)
+        layout, self.scroll_area = scrollable_page_layout(self)
         self.title = QLabel()
         self.title.setObjectName("PageTitle")
         layout.addWidget(self.title)
@@ -331,6 +332,7 @@ class TtsPage(QWidget):
         self.caption.setWordWrap(True)
         layout.addWidget(self.caption)
         self.tabs = QTabWidget()
+        self.tabs.setMinimumHeight(500)
         layout.addWidget(self.tabs)
         self._editors: dict[str, _VoiceEditor] = {}
         self._add_editor("en", current, label="Default / English")

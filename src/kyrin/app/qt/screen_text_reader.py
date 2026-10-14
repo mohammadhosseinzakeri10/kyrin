@@ -51,7 +51,9 @@ class ScreenTextReader(QObject):
         self._busy = False
         self._generation = 0
         self._closed = False
-        self._events = _WorkerEvents(self)
+        # A worker may finish after this reader closes. Keep its signal source
+        # alive in the worker rather than letting Qt delete it with this parent.
+        self._events = _WorkerEvents()
         self._events.completed.connect(self._completed)
         self._events.failed.connect(self._failed)
         access.changed.connect(self._access_changed)
@@ -64,7 +66,22 @@ class ScreenTextReader(QObject):
     def busy(self) -> bool:
         return self._busy
 
-    def read(self) -> bool:
+    @property
+    def supported_languages(self) -> frozenset[str]:
+        return (
+            self._engine.capabilities.supported_languages
+            if self._engine is not None
+            else frozenset()
+        )
+
+    def set_engine(self, engine: OcrEngine | None) -> None:
+        """Switch after saving settings; discard any result from the old engine."""
+        self._generation += 1
+        self._engine = engine
+        self._finish()
+        self.busy_changed.emit(self._busy)
+
+    def read(self, options: OcrOptions | None = None) -> bool:
         """Start at most one read; never ask for access implicitly."""
         if self._closed or self._busy:
             return False
@@ -77,12 +94,19 @@ class ScreenTextReader(QObject):
         self._busy = True
         self.busy_changed.emit(True)
         generation = self._generation
-        self._access.capture(lambda image: self._captured(generation, image))
+        selected_options = options or self._options
+        self._access.capture(
+            lambda image: self._captured(generation, image, selected_options)
+        )
         return True
 
-    def _captured(self, generation: int, image: IdentifiedWindowImage | None) -> None:
+    def _captured(
+        self,
+        generation: int,
+        image: IdentifiedWindowImage | None,
+        selected_options: OcrOptions,
+    ) -> None:
         if generation != self._generation or self._closed:
-            self._finish()
             return
         if image is None:
             self._finish()
@@ -90,13 +114,14 @@ class ScreenTextReader(QObject):
             return
         engine = self._engine
         assert engine is not None
+        events = self._events
 
         def work() -> None:
             try:
-                result = engine.recognize(image.image, self._options)
+                result = engine.recognize(image.image, selected_options)
                 identity = self._identity_reader()
                 if identity != (image.platform_app_id, image.process_id):
-                    self._events.failed.emit(generation, "window_changed")
+                    events.failed.emit(generation, "window_changed")
                     return
                 observation = IdentifiedWindowText(
                     image.platform_app_id,
@@ -104,28 +129,31 @@ class ScreenTextReader(QObject):
                     result,
                     _png_size(image.image),
                 )
-                self._events.completed.emit(generation, observation)
+                events.completed.emit(generation, observation)
             except Exception:
                 # This boundary also contains failures from future OCR plugins.
-                self._events.failed.emit(generation, "ocr_failed")
+                events.failed.emit(generation, "ocr_failed")
 
         Thread(target=work, name="kyrin-screen-ocr", daemon=True).start()
 
     def _completed(self, generation: int, observation: object) -> None:
+        if generation != self._generation or self._closed:
+            return
         self._finish()
-        if generation == self._generation and not self._closed:
-            self.completed.emit(observation)
+        self.completed.emit(observation)
 
     def _failed(self, generation: int, reason: str) -> None:
+        if generation != self._generation or self._closed:
+            return
         self._finish()
-        if generation == self._generation and not self._closed:
-            self.failed.emit(reason)
+        self.failed.emit(reason)
 
     def _access_changed(self, granted: bool) -> None:
         if not granted:
             self._generation += 1
             if self._busy:
                 self.failed.emit("access_off")
+            self._finish()
 
     def _finish(self) -> None:
         if self._busy:
@@ -135,3 +163,4 @@ class ScreenTextReader(QObject):
     def close(self) -> None:
         self._closed = True
         self._generation += 1
+        self._finish()

@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
+from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import CommandModelSelection
 from kyrin.commands.ollama_models import installed_ollama_models
@@ -34,8 +34,7 @@ class CommandModelPage(QWidget):
     ) -> None:
         super().__init__()
         self._translations = translations
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 25, 20, 20)
+        layout, self.scroll_area = scrollable_page_layout(self)
         self.title = QLabel()
         self.title.setObjectName("PageTitle")
         layout.addWidget(self.title)
@@ -71,8 +70,9 @@ class CommandModelPage(QWidget):
         self.refresh_button.clicked.connect(self.refresh)
         layout.addWidget(self.refresh_button)
         self.models = QListWidget()
+        self.models.setMinimumHeight(240)
         self.models.setAccessibleName("Installed command understanding models")
-        layout.addWidget(self.models, 1)
+        layout.addWidget(self.models)
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)

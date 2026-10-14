@@ -35,6 +35,7 @@ from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.command_model_page import CommandModelPage
 from kyrin.app.qt.dashboard_page import DashboardPage
 from kyrin.app.qt.model_library_page import ModelLibraryPage
+from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.power_dialog import PowerConfirmationDialog
 from kyrin.app.qt.preferences_page import PreferencesPage
 from kyrin.app.qt.recognition_page import RecognitionPage
@@ -134,6 +135,7 @@ class ControlWindow(QWidget):
         app_catalog: AppPickerCatalog | None = None,
         screen_access: ScreenAccess | None = None,
         screen_reader: ScreenTextReader | None = None,
+        ocr_default_root: Path | None = None,
         startup_registration: StartupRegistration | None = None,
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
@@ -152,6 +154,8 @@ class ControlWindow(QWidget):
         self._translations = ui_translations
         self._startup_registration = startup_registration
         self._configure_tts = configure_tts
+        self._screen_reader = screen_reader
+        self._ocr_default_root = ocr_default_root
         self._labels: dict[str, QLabel] = {}
         self._action_latency = SpeechActionLatency()
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
@@ -309,7 +313,11 @@ class ControlWindow(QWidget):
         self.pages.addWidget(self.actions_page)
 
         self.screen_access_page = ScreenAccessPage(
-            screen_access, ui_translations, screen_reader
+            screen_access,
+            ui_translations,
+            screen_reader,
+            ocr_default_root=ocr_default_root,
+            ocr_selection=settings.ocr if settings is not None else None,
         )
         self.pages.addWidget(self.screen_access_page)
 
@@ -646,6 +654,12 @@ class ControlWindow(QWidget):
             if key not in available:
                 raise MicrophoneError(self._translations.text("error_microphone"))
         selected_apps = self.actions_page.selected_apps()
+        ocr = self.screen_access_page.selection()
+        if ocr is not None and (
+            self._ocr_default_root is None
+            or selected_ocr_engine(ocr, self._ocr_default_root) is None
+        ):
+            raise ValueError(self._translations.text("screen_ocr_unavailable"))
         actions_enabled = self.actions_page.enabled_checkbox.isChecked()
         if (
             actions_enabled
@@ -658,6 +672,7 @@ class ControlWindow(QWidget):
             microphone_device_key=key,
             stt=stt,
             command_model=self.command_model_page.selection(),
+            ocr=ocr,
             tts=self.tts_page.selection(),
             tts_languages=self.tts_page.language_routes(),
             action_execution_enabled=actions_enabled,
@@ -694,6 +709,7 @@ class ControlWindow(QWidget):
             != self._settings.wake_aliases
             or self.actions_page.has_unsaved_changes(self._settings)
             or self.command_model_page.has_unsaved_changes(self._settings.command_model)
+            or self.screen_access_page.has_unsaved_changes(self._settings.ocr)
             or self.tts_page.has_unsaved_changes(
                 self._settings.tts, self._settings.tts_languages
             )
@@ -731,6 +747,11 @@ class ControlWindow(QWidget):
             except OSError as error:
                 self._show_error(error)
         self._settings = candidate
+        if self._screen_reader is not None and self._ocr_default_root is not None:
+            self._screen_reader.set_engine(
+                selected_ocr_engine(candidate.ocr, self._ocr_default_root)
+            )
+            self.screen_access_page.translate()
         if self._configure_tts is not None:
             self._configure_tts(candidate.tts, candidate.tts_languages)
         self.models_page.set_current_selection(candidate.stt)

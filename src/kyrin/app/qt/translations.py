@@ -163,11 +163,17 @@ ENGLISH: dict[str, str] = {
         "if another process owns its session name."
     ),
     "screen_read": "Read text in the active window",
+    "screen_ocr_model": "Local OCR model",
+    "screen_ocr_browse": "Browse OCR folder…",
+    "screen_ocr_hint": (
+        "Choose a supported local Tesseract package. OCR runs on CPU; "
+        "KYRIN does not download models. Save changes to switch."
+    ),
     "screen_read_hint": (
         "Read a snapshot when you need it. Visible text stays in memory."
     ),
     "screen_reading": "Reading the active window…",
-    "screen_ocr_unavailable": "An offline English OCR runtime is not installed.",
+    "screen_ocr_unavailable": "The selected offline OCR runtime is unavailable.",
     "screen_capture_unavailable": "The active window could not be captured.",
     "screen_window_changed": "The active window changed. Read it again.",
     "screen_ocr_failed": "The screen text could not be read.",

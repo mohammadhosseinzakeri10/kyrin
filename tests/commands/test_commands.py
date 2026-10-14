@@ -401,6 +401,42 @@ def test_short_operation_joins_only_nearby_final_target() -> None:
     )
 
 
+def test_split_open_chat_joins_nearby_name_with_active_telegram() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(update(0, "Open chat.", TranscriptStatus.FINAL)) == (
+        CommandResolution(0, None),
+    )
+    assert coordinator.observe(
+        update(1, "Hunter VPN", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_CHAT, "hunter vpn", "telegram")
+        ),
+    )
+
+
+def test_split_open_chat_cannot_join_late_or_negated_name() -> None:
+    from kyrin.commands.fragments import CommandFragmentBuffer
+
+    now = [0.0]
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(),
+        fragment_buffer=CommandFragmentBuffer(clock=lambda: now[0]),
+    )
+    coordinator.observe(update(0, "Open chat", TranscriptStatus.FINAL))
+    now[0] = 5.0
+    assert coordinator.observe(
+        update(1, "Hunter VPN", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0].intent is None
+    coordinator.observe(update(2, "Open chat", TranscriptStatus.FINAL))
+    assert coordinator.observe(
+        update(3, "Do not open chat Hunter VPN", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0].intent is None
+
+
 @pytest.mark.parametrize(
     ("operation", "target", "kind"),
     [
