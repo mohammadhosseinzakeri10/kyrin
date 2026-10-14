@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="assets/brand/hero-still.webp">
-    <img src="assets/brand/hero-animated.svg" alt="KYRIN by Kailarin — an open-source AI desktop agent. A luminous blue intelligence core suspended in deep space." width="1200">
-  </picture>
+  <img src="assets/brand/hero-still.webp" alt="KYRIN by Kailarin — an evolving AI desktop agent. The black-hole K emblem in blue and violet deep space." width="1200">
 </p>
 
 <h1 align="center">Intelligence, within reach.</h1>
