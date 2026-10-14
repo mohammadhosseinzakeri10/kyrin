@@ -21,16 +21,19 @@ The helper receives a PipeWire stream, encodes one frame as PNG in memory, and
 closes the session. No image is written to disk. A user cancellation, portal
 failure, or oversized/invalid output becomes an unavailable capture.
 
-This one-shot path is a first image acquisition adapter. The selected portal
-window is not yet bound to KYRIN's active-app identity, and the returned pixels
-must not be used to authorize an automated click. Browser/chat navigation needs
-a separate target verification and action design. Other operating systems need
-their own permission-aware `ScreenCapture` adapters.
+This one-shot portal path is a first image acquisition adapter. Its
+user-selected window is not bound to KYRIN's active-app identity, and its
+pixels must not authorize an automated click. The separate GNOME active-window
+adapter described below does bind an image to desktop ID and PID. General
+browser/chat navigation still needs verified targets and dedicated actions.
+Other operating systems need their own permission-aware `ScreenCapture`
+adapters.
 
 The optional GNOME active-window capture adapter is described in
 `docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md`. It is installed for the
-current user and has passed one live Qt capture/revocation check. It is not
-connected to automatic actions.
+current user and has passed live Qt capture/revocation checks. Its fresh
+identity checks also support the narrowly scoped Telegram `Saved Messages`
+verification path; they do not enable general screen-driven actions.
 
 ## Recognition and models
 
@@ -99,6 +102,8 @@ selection. Screen-dependent actions still require a separate design.
 A third read-only run found the exact adjacent words `Saved Messages` in the
 owner's Telegram chat list. It did not open the chat or print other titles.
 This one controlled match does not validate arbitrary or non-English names.
+The later, narrowly scoped `Saved Messages` action uses a fresh identified
+capture to verify its header; general screen-dependent actions remain open.
 
 Once a local Tesseract executable and language data are available, an explicit
 read-only diagnostic is available:

@@ -43,6 +43,7 @@ class FakeAccess(QObject):
         super().__init__()
         self.available = True
         self.granted = True
+        self.remembered = False
         self.image: IdentifiedWindowImage | None = _IMAGE
 
     def capture(self, callback: Callable[[IdentifiedWindowImage | None], None]) -> None:

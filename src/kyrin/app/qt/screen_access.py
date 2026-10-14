@@ -1,4 +1,4 @@
-"""Qt-owned, session-scoped access to the optional GNOME capture extension."""
+"""Qt-owned access to the optional GNOME capture extension."""
 
 from collections.abc import Callable
 from typing import cast
@@ -6,6 +6,12 @@ from typing import cast
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtDBus import QDBusConnection, QDBusMessage, QDBusPendingCallWatcher
 
+from kyrin.app.permission_token import (
+    new_token,
+    permission_token_path,
+    read_token,
+    save_token,
+)
 from kyrin.vision.screen_capture import IdentifiedWindowImage
 
 SERVICE_NAME = "org.kyrin.Desktop"
@@ -32,6 +38,11 @@ class ScreenAccess(QObject):
         self._pending = False
         self._closed = False
         self._generation = 0
+        self._token_path = permission_token_path("screen")
+
+    @property
+    def remembered(self) -> bool:
+        return read_token(self._token_path) is not None
 
     @property
     def available(self) -> bool:
@@ -42,11 +53,17 @@ class ScreenAccess(QObject):
         return self._granted
 
     def _call(
-        self, member: str, timeout_ms: int, done: Callable[[QDBusMessage], None]
+        self,
+        member: str,
+        timeout_ms: int,
+        done: Callable[[QDBusMessage], None],
+        token: str | None = None,
     ) -> None:
         message = QDBusMessage.createMethodCall(
             _SHELL_SERVICE, _OBJECT_PATH, _INTERFACE, member
         )
+        if token is not None:
+            message.setArguments([token])
         watcher = QDBusPendingCallWatcher(
             self._bus.asyncCall(message, timeout_ms), self
         )
@@ -72,6 +89,16 @@ class ScreenAccess(QObject):
             return
         if self._pending or self._granted:
             return
+        token = read_token(self._token_path)
+        if token is None:
+            token = new_token()
+            try:
+                save_token(self._token_path, token)
+            except OSError:
+                self.error.emit(
+                    "Could not remember the screen permission on this device."
+                )
+                return
         self._pending = True
         generation = self._generation
 
@@ -83,18 +110,28 @@ class ScreenAccess(QObject):
             self._granted = granted
             self.changed.emit(granted)
             if not granted:
+                try:
+                    self._token_path.unlink(missing_ok=True)
+                except OSError:
+                    self.error.emit("Could not remove the screen permission token.")
                 self.error.emit("Screen access was denied or is unavailable.")
 
-        self._call("RequestSession", 25000, done)
+        self._call("RequestPersistentSession", 25000, done, token)
 
     def revoke(self) -> None:
         was_granted = self._granted
         was_pending = self._pending
+        had_token = self.remembered
         self._generation += 1
         self._pending = False
         self._granted = False
         self.changed.emit(False)
-        if self._owned and (was_granted or was_pending):
+        try:
+            self._token_path.unlink(missing_ok=True)
+            self._token_path.with_name("screen-grant.sha256").unlink(missing_ok=True)
+        except OSError:
+            self.error.emit("Could not remove the remembered screen permission.")
+        if self._owned and (was_granted or was_pending or had_token):
             self._call("RevokeSession", 3000, lambda _reply: None)
 
     def capture(self, done: Callable[[IdentifiedWindowImage | None], None]) -> None:
@@ -130,7 +167,7 @@ class ScreenAccess(QObject):
                     done(None)
                     return
                 done(IdentifiedWindowImage(app_id, pid, image))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 done(None)
 
         self._call("CaptureActiveWindow", 10000, received)
@@ -139,7 +176,8 @@ class ScreenAccess(QObject):
         if self._closed:
             return
         self._closed = True
-        self.revoke()
+        self._generation += 1
+        self._granted = False
         if self._owned:
             self._bus.unregisterService(SERVICE_NAME)
             self._owned = False

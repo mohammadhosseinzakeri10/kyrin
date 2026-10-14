@@ -11,6 +11,10 @@ const INTERFACE_XML = `<node>
     <method name="RequestSession">
       <arg name="granted" type="b" direction="out"/>
     </method>
+    <method name="RequestPersistentSession">
+      <arg name="token" type="s" direction="in"/>
+      <arg name="granted" type="b" direction="out"/>
+    </method>
     <method name="RevokeSession">
       <arg name="revoked" type="b" direction="out"/>
     </method>
@@ -26,6 +30,36 @@ const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 const CAPTURE_TIMEOUT_MS = 8000;
 const CONSENT_TIMEOUT_MS = 20000;
 const KYRIN_SERVICE = 'org.kyrin.Desktop';
+const GRANT_FILE = GLib.build_filenamev([
+    GLib.get_user_data_dir(), 'kyrin', 'permissions', 'screen-grant.sha256',
+]);
+
+function tokenHash(token) {
+    if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token))
+        return null;
+    return GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, token, -1);
+}
+
+function rememberedHash() {
+    try {
+        const [ok, contents] = GLib.file_get_contents(GRANT_FILE);
+        return ok ? new TextDecoder().decode(contents).trim() : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function rememberHash(hash) {
+    try {
+        if (GLib.mkdir_with_parents(GLib.path_get_dirname(GRANT_FILE), 0o700) !== 0)
+            return false;
+        if (!GLib.file_set_contents(GRANT_FILE, hash))
+            return false;
+        return GLib.chmod(GRANT_FILE, 0o600) === 0;
+    } catch (_error) {
+        return false;
+    }
+}
 
 function unavailableCapture(invocation) {
     invocation.return_value(new GLib.Variant('(suay)', ['', 0, new Uint8Array()]));
@@ -86,6 +120,19 @@ export default class KyrinWindowCapturePrototype extends Extension {
     }
 
     RequestSessionAsync(_params, invocation) {
+        this._requestSession(invocation, null);
+    }
+
+    RequestPersistentSessionAsync(params, invocation) {
+        const hash = tokenHash(params[0]);
+        if (hash === null) {
+            invocation.return_value(new GLib.Variant('(b)', [false]));
+            return;
+        }
+        this._requestSession(invocation, hash);
+    }
+
+    _requestSession(invocation, persistentHash) {
         if (this._capturePending !== null || this._consentPending !== null) {
             invocation.return_value(new GLib.Variant('(b)', [false]));
             return;
@@ -121,14 +168,21 @@ export default class KyrinWindowCapturePrototype extends Extension {
                 invocation.return_value(new GLib.Variant('(b)', [false]));
                 return;
             }
-            this._askSessionConsent(sender, invocation);
+            if (persistentHash !== null && rememberedHash() === persistentHash) {
+                this._consentPending = null;
+                this._pendingSender = null;
+                this._sessionSender = sender;
+                invocation.return_value(new GLib.Variant('(b)', [true]));
+                return;
+            }
+            this._askSessionConsent(sender, invocation, persistentHash);
         });
     }
 
-    _askSessionConsent(sender, invocation) {
+    _askSessionConsent(sender, invocation, persistentHash = null) {
         const dialog = new ModalDialog.ModalDialog({destroyOnClose: true});
         dialog.contentLayout.add_child(new St.Label({
-            text: 'Allow KYRIN to read the active window during this app session?\n' +
+            text: 'Allow KYRIN to read the active window until you turn it off?\n' +
                 'The current owner of KYRIN\'s session name can request images.\n' +
                 'No image is saved. Turn this off in KYRIN at any time.',
             style_class: 'kyrin-capture-consent-label',
@@ -142,6 +196,8 @@ export default class KyrinWindowCapturePrototype extends Extension {
             finished = true;
             this._consentPending = null;
             this._pendingSender = null;
+            if (granted && persistentHash !== null)
+                granted = rememberHash(persistentHash);
             if (granted)
                 this._sessionSender = sender;
             invocation.return_value(new GLib.Variant('(b)', [granted]));
@@ -162,7 +218,8 @@ export default class KyrinWindowCapturePrototype extends Extension {
         };
         dialog.setButtons([
             {label: 'Deny', action: () => decide(false)},
-            {label: 'Allow for this session', action: () => decide(true)},
+            {label: persistentHash === null ? 'Allow for this session' : 'Remember permission',
+                action: () => decide(true)},
         ]);
         const consentTimeoutId = GLib.timeout_add(
             GLib.PRIORITY_DEFAULT, CONSENT_TIMEOUT_MS, () => {
@@ -193,7 +250,20 @@ export default class KyrinWindowCapturePrototype extends Extension {
             this._consentPending?.deny();
         if (sender === this._sessionSender)
             this._revoke();
-        invocation.return_value(new GLib.Variant('(b)', [authorized]));
+        let removed = true;
+        if (authorized) {
+            try {
+                if (GLib.unlink(GRANT_FILE) !== 0 &&
+                    GLib.file_test(GRANT_FILE, GLib.FileTest.EXISTS))
+                    removed = false;
+            } catch (error) {
+                if (!GLib.file_test(GRANT_FILE, GLib.FileTest.EXISTS))
+                    removed = true;
+                else
+                    removed = false;
+            }
+        }
+        invocation.return_value(new GLib.Variant('(b)', [authorized && removed]));
     }
 
     CaptureActiveWindowAsync(_params, invocation) {

@@ -18,19 +18,25 @@ process ID, and OCR words including `Open` and `Telegram`. These two results
 verify the earlier one-image prototype on this GNOME 50.1 desktop. They do not
 verify other apps, persistent access, or any action based on OCR text.
 
-## Current session-access design
+## Remembered access design
 
 The Qt control application owns `org.kyrin.Desktop` on the user's session
 D-Bus. `ScreenAccess` sends all image and permission requests on that same
-connection. The GNOME extension checks that a `RequestSession` sender is the
+connection. The GNOME extension checks that a permission request sender is the
 current unique owner of the name and asks the user once in a GNOME Shell
 dialog. A second owner check follows the decision. A successful grant is bound
 to that unique connection name in memory. Another process cannot use the
-grant by sending its own request. The `Screen Access` page turns the grant on
-or off; it is off at each application start and is never stored in settings.
+active grant by sending its own request. For a remembered grant, the Qt app
+stores a random 256-bit token in a 0600 local data file, and the extension
+stores its hash. On later starts, the app requests access with that token;
+the extension compares its hash and rebinds the grant to the new verified
+D-Bus owner. The `Screen Access` switch deletes both local records and asks
+the extension to revoke the active grant. Merely quitting KYRIN releases the
+active connection but keeps the remembered choice. No image is saved.
 
-The extension revokes its grant when the app's bus name changes owner, on an
-explicit `RevokeSession`, or when the extension is disabled. Capture requests
+The extension releases the active grant when the app's bus name changes owner
+or it is disabled. Explicit `RevokeSession` also forgets the remembered grant.
+Capture requests
 still reject an unregistered active window, missing PID, focus change during
 capture, failed screenshot, image over 16 MiB, concurrent capture, and the
 eight-second capture timeout. Image bytes remain in memory. No capture runs
@@ -47,9 +53,11 @@ Owning a well-known D-Bus name proves which **connection** sent a request; it
 does not prove that the process is a trustworthy KYRIN binary. Another process
 in the same user session could claim the name before KYRIN starts and ask the
 user to approve its prompt. The Qt app refuses screen access if the name is
-already owned; the Shell dialog is the user's explicit gate. This prototype
-is not a security boundary against a malicious process running as the same
-user, which could also alter user-installed extension files. A stronger
+already owned. The remembered token prevents a process that merely claims
+the bus name from silently using the owner's prior choice, but another process
+running as the same user could read or replace the token or extension files.
+This prototype is not a security boundary against a malicious process running
+as the same user. A stronger
 isolation requirement would need a sandbox and a trusted portal design.
 
 The session path has passed focused Python tests and a GJS permission harness,
@@ -73,3 +81,9 @@ other applications, or stronger protection against a malicious process in the
 same user account.
 No image should be used to authorize a click or keystroke until the active
 target is checked again at action time.
+
+On 2026-10-14, after the owner restarted GNOME, the loaded extension exposed
+`RequestPersistentSession` and the owner reported that remembered Screen Access
+worked across the restart. The local token and grant hash were both mode 0600.
+The owner subsequently turned Screen Access off inside KYRIN and confirmed
+that the switch worked.

@@ -1,7 +1,7 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-13.
+> Updated: 2026-10-14.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
@@ -3632,3 +3632,69 @@ an inert executor and temporary conversation database. One owner-spoken
 final text and 0.32 ms from final text to inert result. It was one warm run;
 the command may have used the rule-based interpretation path and does not
 characterize all commands or model cold starts. No app was opened in the probe.
+
+## 114. Saved Messages speech-path check and observed STT alias
+
+A first installed-app microphone trial of `Open chat Saved Messages` did not
+open the chat. The command interpreter produced `open_chat` with Telegram in
+context, but Whisper transcribed the target as `Saved Massages`. The Telegram
+executor rejected it as `unsupported_chat` before requesting keyboard input.
+Other fragments in that trial did not authorize an action. An exact alias for
+this observed target spelling is now accepted only by the bounded Telegram
+Saved Messages executor. Permission, focused desktop ID/PID, temporary
+keyboard access, and fresh OCR header verification remain required. Focused
+tests cover the alias with both confirmed and unverified headers. After
+restarting the installed app, the owner repeated the spoken request; the
+interpreter produced `open_chat: saved massages`, the action result was
+`confirmed`, and the owner saw the chat open. Two earlier short fragments in
+the same session produced no action. This validates one live product path on
+the current Ubuntu desktop, not arbitrary chat names or other languages.
+The observed final-text-to-result interval was 16,849 ms, including temporary
+input permission and screen verification; stage costs were not separated.
+Inspection then found an unconditional ten-second sleep after the keyboard
+portal grant. The helper now polls for two matching Telegram focus observations
+up to the same ten-second deadline and can proceed earlier when focus is
+already correct. Deterministic tests cover prompt focus, delayed focus,
+unstable focus, and timeout. At that point, installed-app timing after the
+change had not yet been measured.
+
+The owner then repeated the complete spoken request without restarting KYRIN;
+the freshly launched keyboard helper used the new polling code. The transcript
+was `Open Chat Saved Messages`, the action result was `confirmed`, and the
+owner reported the chat opened. Final-text-to-result time was 6,187 ms, versus
+16,849 ms in the previous run. This is an observed improvement in two trials,
+not a full latency distribution or a breakdown of portal and OCR time.
+
+## 115. Remembered screen and keyboard access
+
+The owner requested that Screen Access remain enabled across KYRIN restarts
+until switched off in the app, and that opening Saved Messages not repeatedly
+ask for GNOME keyboard consent. The implementation now stores a random local
+screen capability and its hash for the GNOME extension, and binds each active
+capture session to KYRIN's verified D-Bus connection. Quitting releases only
+the active session. Turning Screen Access off removes both local records and
+requests immediate revocation. The Telegram keyboard helper now asks the
+RemoteDesktop portal for a remembered grant, stores the opaque restore token,
+and rotates it after each successful `Start`; each input session is still
+closed after the fixed shortcut. Removing Telegram chat permission clears
+KYRIN's saved keyboard token. Focus ID/PID and fresh OCR checks remain.
+
+Focused deterministic tests validate grant, restore, rotation, and revocation
+logic. The changed GNOME extension must be installed and the desktop session
+restarted before the app path can be checked live. Portal backend support for
+actually restoring the token on this machine, behavior across a logout, and
+the full installed-app workflow had not yet been verified at that point.
+After restarting the desktop session, the owner reported checking both
+permissions in the installed app and found them working without the repeated
+approval problem. A read-only check found the loaded extension exposing
+`RequestPersistentSession`; the screen token, screen grant hash, and Telegram
+keyboard restore token were present in the AI-Projects-backed local data, each
+with mode 0600. The owner later turned Screen Access off inside the app and
+confirmed that this worked. Telegram keyboard permission revocation after
+turning its app permission off has automated coverage but has not been
+confirmed by the owner in a live test. The observations do not measure portal
+restoration latency.
+
+A same-user malicious
+process can still read local user files or replace a user-installed extension;
+these remembered grants are not a boundary against such a process.

@@ -9,6 +9,7 @@ PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtDBus import QDBusMessage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from kyrin.app.permission_token import permission_token_path  # noqa: E402
 from kyrin.app.qt.screen_access import SERVICE_NAME, ScreenAccess  # noqa: E402
 from kyrin.app.qt.screen_access_page import ScreenAccessPage  # noqa: E402
 from kyrin.app.qt.translations import UiTranslations  # noqa: E402
@@ -49,7 +50,11 @@ class StubAccess(ScreenAccess):
         super().__init__()
 
     def _call(
-        self, member: str, timeout_ms: int, done: Callable[[QDBusMessage], None]
+        self,
+        member: str,
+        timeout_ms: int,
+        done: Callable[[QDBusMessage], None],
+        token: str | None = None,
     ) -> None:
         self.calls.append(member)
         done(self.replies[member])
@@ -57,8 +62,10 @@ class StubAccess(ScreenAccess):
 
 def test_session_permission_and_capture_use_the_owned_connection(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     app = QApplication.instance() or QApplication([])
     assert app is not None
     bus = FakeBus()
@@ -67,7 +74,7 @@ def test_session_permission_and_capture_use_the_owned_connection(
     )
     access = StubAccess(
         {
-            "RequestSession": _reply(True),
+            "RequestPersistentSession": _reply(True),
             "RevokeSession": _reply(True),
             "CaptureActiveWindow": _reply("test.desktop", 123, _PNG),
         }
@@ -83,22 +90,28 @@ def test_session_permission_and_capture_use_the_owned_connection(
     assert not access.granted
     access.capture(captured.append)
     assert captured[-1] is None
-    assert access.calls == ["RequestSession", "CaptureActiveWindow", "RevokeSession"]
+    assert access.calls == [
+        "RequestPersistentSession",
+        "CaptureActiveWindow",
+        "RevokeSession",
+    ]
     access.close()
     assert bus.unregistered == [SERVICE_NAME]
 
 
 def test_unavailable_name_and_temporary_window_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     app = QApplication.instance() or QApplication([])
     assert app is not None
     bus = FakeBus(allow_name=False)
     monkeypatch.setattr(
         "kyrin.app.qt.screen_access.QDBusConnection.sessionBus", lambda: bus
     )
-    denied = StubAccess({"RequestSession": _reply(True)})
+    denied = StubAccess({"RequestPersistentSession": _reply(True)})
     assert not denied.available
     denied.request_session()
     assert denied.calls == []
@@ -106,7 +119,7 @@ def test_unavailable_name_and_temporary_window_fail_closed(
     bus.allow_name = True
     access = StubAccess(
         {
-            "RequestSession": _reply(True),
+            "RequestPersistentSession": _reply(True),
             "CaptureActiveWindow": _reply("window:8", 123, _PNG),
             "RevokeSession": _reply(True),
         }
@@ -120,8 +133,10 @@ def test_unavailable_name_and_temporary_window_fail_closed(
 
 def test_late_capture_reply_is_discarded_after_revoke(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     app = QApplication.instance() or QApplication([])
     assert isinstance(app, QApplication)
     bus = FakeBus()
@@ -133,15 +148,19 @@ def test_late_capture_reply_is_discarded_after_revoke(
         pending_capture: Callable[[QDBusMessage], None] | None = None
 
         def _call(
-            self, member: str, timeout_ms: int, done: Callable[[QDBusMessage], None]
+            self,
+            member: str,
+            timeout_ms: int,
+            done: Callable[[QDBusMessage], None],
+            token: str | None = None,
         ) -> None:
             if member == "CaptureActiveWindow":
                 self.pending_capture = done
                 return
-            super()._call(member, timeout_ms, done)
+            super()._call(member, timeout_ms, done, token)
 
     access = DelayedCaptureAccess(
-        {"RequestSession": _reply(True), "RevokeSession": _reply(True)}
+        {"RequestPersistentSession": _reply(True), "RevokeSession": _reply(True)}
     )
     access.request_session()
     captured: list[IdentifiedWindowImage | None] = []
@@ -157,6 +176,7 @@ def test_screen_page_revokes_access_without_saving_settings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     app = QApplication.instance() or QApplication([])
     assert isinstance(app, QApplication)
     bus = FakeBus()
@@ -164,7 +184,7 @@ def test_screen_page_revokes_access_without_saving_settings(
         "kyrin.app.qt.screen_access.QDBusConnection.sessionBus", lambda: bus
     )
     access = StubAccess(
-        {"RequestSession": _reply(True), "RevokeSession": _reply(True)}
+        {"RequestPersistentSession": _reply(True), "RevokeSession": _reply(True)}
     )
     page = ScreenAccessPage(access, UiTranslations(tmp_path))
     try:
@@ -174,8 +194,37 @@ def test_screen_page_revokes_access_without_saving_settings(
         page.enabled_checkbox.click()
         assert not access.granted
         assert not page.enabled_checkbox.isChecked()
+        assert not permission_token_path("screen").exists()
         assert not (tmp_path / "settings.json").exists()
     finally:
         access.close()
         page.deleteLater()
         app.processEvents()
+
+
+def test_remembered_screen_token_survives_app_close(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    monkeypatch.setattr(
+        "kyrin.app.qt.screen_access.QDBusConnection.sessionBus", lambda: FakeBus()
+    )
+    access = StubAccess({"RequestPersistentSession": _reply(True)})
+    access.request_session()
+    saved = permission_token_path("screen").read_text(encoding="ascii")
+    access.close()
+    assert permission_token_path("screen").read_text(encoding="ascii") == saved
+    reopened = StubAccess(
+        {"RequestPersistentSession": _reply(True), "RevokeSession": _reply(True)}
+    )
+    try:
+        assert reopened.remembered
+        reopened.request_session()
+        assert permission_token_path("screen").read_text(encoding="ascii") == saved
+        reopened.revoke()
+        assert not permission_token_path("screen").exists()
+    finally:
+        reopened.close()

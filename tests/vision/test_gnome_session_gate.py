@@ -19,6 +19,7 @@ let ownerChanged = null;
 let screenshotCount = 0;
 let deferOwner = false;
 let pendingOwnerCheck = null;
+let files = new Map();
 const window = {get_pid: () => 123};
 let signals = new Map();
 let nextId = 1;
@@ -61,6 +62,21 @@ const GLib = {
     VariantType: class {},
     PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
     timeout_add: () => nextId++, source_remove: () => {},
+    get_user_data_dir: () => '/tmp/kyrin-gjs-test',
+    build_filenamev: parts => parts.join('/'),
+    path_get_dirname: path => path.slice(0, path.lastIndexOf('/')),
+    ChecksumType: {SHA256: 1},
+    compute_checksum_for_string: (_type, value) => `hash:${value}`,
+    file_get_contents: path => {
+        if (!files.has(path)) throw new Error('missing file');
+        return [true, new TextEncoder().encode(files.get(path))];
+    },
+    file_set_contents: (path, value) => {files.set(path, value); return true;},
+    mkdir_with_parents: () => 0,
+    chmod: () => 0,
+    unlink: path => {if (!files.delete(path)) throw new Error('missing file');},
+    FileTest: {EXISTS: 1},
+    file_test: path => files.has(path),
 };
 const Shell = {
     WindowTracker: {get_default: () => ({get_window_app: () => ({
@@ -87,6 +103,14 @@ function request(extension, member, sender) {
         return_value: reply => {invocation.reply = reply;},
     };
     extension[member + 'Async']([], invocation);
+    return invocation;
+}
+function requestPersistent(extension, sender, token) {
+    const invocation = {
+        get_sender: () => sender,
+        return_value: reply => {invocation.reply = reply;},
+    };
+    extension.RequestPersistentSessionAsync([token], invocation);
     return invocation;
 }
 function check(condition, message) {if (!condition) throw new Error(message);}
@@ -142,6 +166,25 @@ captured = request(extension, 'CaptureActiveWindow', ':1.42');
 check(captured.reply.values[0] === '' && screenshotCount === 1,
     'captured after race-time revocation');
 extension.disable();
+extension.enable();
+deferOwner = false;
+let persistent = requestPersistent(extension, ':1.42', 'a'.repeat(64));
+check(!persistent.reply, 'first persistent request did not ask');
+dialogs.at(-1).buttons[1].action();
+check(persistent.reply.values[0] === true, 'persistent consent denied');
+ownerChanged(null, null, null, null, null,
+    {deepUnpack: () => ['org.kyrin.Desktop', ':1.42', '']});
+owner = ':1.43';
+const dialogCount = dialogs.length;
+persistent = requestPersistent(extension, ':1.43', 'a'.repeat(64));
+check(persistent.reply.values[0] === true, 'remembered permission not restored');
+check(dialogs.length === dialogCount, 'restore unexpectedly asked again');
+revoke = request(extension, 'RevokeSession', ':1.43');
+check(revoke.reply.values[0] === true, 'remembered permission not revoked');
+persistent = requestPersistent(extension, ':1.43', 'a'.repeat(64));
+check(!persistent.reply, 'revoked permission restored');
+dialogs.at(-1).buttons[0].action();
+extension.disable();
 print('GNOME session permission gate: passed');
 """
 
@@ -151,7 +194,8 @@ def test_gnome_extension_requires_the_app_owned_session() -> None:
     if gjs is None:
         pytest.skip("GJS is not installed")
     source = "\n".join(
-        line for line in _EXTENSION.read_text(encoding="utf-8").splitlines()
+        line
+        for line in _EXTENSION.read_text(encoding="utf-8").splitlines()
         if not line.startswith("import ")
     ).replace(
         "export default class KyrinWindowCapturePrototype",

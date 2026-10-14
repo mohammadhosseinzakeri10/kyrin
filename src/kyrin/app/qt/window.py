@@ -26,6 +26,7 @@ from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
 from kyrin.app.events import ApplicationEvent, SttDeviceReady
 from kyrin.app.model_library import InstalledModel, ModelLibrary
+from kyrin.app.permission_token import permission_token_path
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.archived_memory_dialog import ArchivedMemoryDialog
@@ -721,6 +722,14 @@ class ControlWindow(QWidget):
         except SettingsError as error:
             self._show_error(error)
             return
+        if self._settings is not None and (
+            "telegram" in self._settings.allowed_chat_apps
+            and "telegram" not in candidate.allowed_chat_apps
+        ):
+            try:
+                permission_token_path("telegram-keyboard").unlink(missing_ok=True)
+            except OSError as error:
+                self._show_error(error)
         self._settings = candidate
         if self._configure_tts is not None:
             self._configure_tts(candidate.tts, candidate.tts_languages)

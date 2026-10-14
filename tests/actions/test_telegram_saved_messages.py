@@ -70,6 +70,7 @@ def test_other_actions_delegate_without_keyboard_input(
     ("target", "identity", "ready", "error"),
     [
         ("Ali", (DESKTOP_ID, 12), True, "unsupported_chat"),
+        ("Saved Massage", (DESKTOP_ID, 12), True, "unsupported_chat"),
         ("Saved Messages", (DESKTOP_ID, 12), False, "screen_access_required"),
         ("Saved Messages", None, True, "telegram_not_active"),
         ("Saved Messages", ("browser.desktop", 12), True, "telegram_not_active"),
@@ -128,6 +129,33 @@ def test_shortcut_outcome_requires_fresh_verified_chat_header(
     assert result.outcome is outcome
     assert result.error_code == error
     assert verifier.calls == ([(DESKTOP_ID, 12)] if returncode == 0 and stdout else [])
+
+
+@pytest.mark.parametrize(
+    ("verified", "outcome", "error"),
+    [
+        (False, ActionOutcome.UNKNOWN, "chat_unverified"),
+        (True, ActionOutcome.CONFIRMED, None),
+    ],
+)
+def test_observed_stt_spelling_still_requires_verified_saved_messages_header(
+    verified: bool,
+    outcome: ActionOutcome,
+    error: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "SHORTCUT_DISPATCHED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(verified=verified)
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.OPEN_CHAT, "Saved Massages", "telegram")
+    )
+
+    assert result.outcome is outcome
+    assert result.error_code == error
+    assert verifier.calls == [(DESKTOP_ID, 12)]
 
 
 def test_keyboard_timeout_never_claims_success(monkeypatch: pytest.MonkeyPatch) -> None:

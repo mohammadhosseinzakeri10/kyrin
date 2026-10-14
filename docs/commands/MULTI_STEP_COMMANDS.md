@@ -37,30 +37,35 @@ rejects a duplicate plan. The runner executes one step at a time and stops
 after a denied, unsupported, failed, unknown, or confirmation-required step.
 Earlier completed steps are not rolled back.
 
-For the current Linux launcher, only `OPEN_APP` is supported. With a policy
-that advertises that capability, `Open Telegram and open Alice chat` submits
-the Telegram launch first; the second step returns an explicit unsupported-chat
-notice. A successful `gio launch` reports `LAUNCH_ACCEPTED`, not proof that a
-window opened. If a future executor supports chat navigation, the runner will
-require a fresh foreground-app observation immediately before a supported
-`OPEN_CHAT` step. Without an observer, or if focus differs, it stops. This
-avoids navigating the wrong application even if an earlier launch succeeded.
+The Ubuntu application now supports more actions than the initial launcher
+diagnostic described here. Its only supported chat target is Telegram's
+`Saved Messages`, subject to separate permission, a fresh matching foreground
+window, temporary keyboard access, and verification of the opened header.
+`Open Telegram and open Alice chat` may complete the first step but cannot
+open Alice's chat; the second step reports an unsupported target. A successful
+`gio launch` alone reports `LAUNCH_ACCEPTED`, not proof that a window opened.
+The runner requires a fresh foreground-app observation immediately before a
+supported `OPEN_CHAT` step. Without an observer, or if focus differs, it
+stops. See `docs/actions/TELEGRAM_CHAT_NAVIGATION_DESIGN.md`.
 
-The live microphone diagnostic remains a **dry run by default**. An explicit
-`--execute-actions` flag plus `--launch-app` bindings now connect final plan
-steps to the Ubuntu launcher. Only bound `OPEN_APP` steps can execute; chat
-steps still return an unsupported notice. `ActionPlanRunner` is tested using a
-fake executor, and the diagnostic's action dispatch is tested without hardware.
-See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`. The selected experimental
-Kitten voice is not wired into the product.
+The separate live microphone diagnostic remains a **dry run by default**. An
+explicit `--execute-actions` flag plus `--launch-app` bindings connect final
+plan steps to its limited Ubuntu launcher. Only bound `OPEN_APP` steps can
+execute in that diagnostic; chat steps still return an unsupported notice.
+This diagnostic limit does not describe the installed Qt application's
+permission-gated `Saved Messages` action. `ActionPlanRunner` is tested using
+a fake executor, and the diagnostic's action dispatch is tested without
+hardware.
+See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`. Voice-output selection is
+managed separately in `docs/responses/TTS_MODEL_MANAGEMENT.md`.
 
 ## Deliberate limits
 
 - Site navigation such as `Open Chrome and go to Google` has no action kind or
   executor yet. The entire utterance asks for repetition; Chrome is not opened
   as a fragment of an unrecognized command.
-- Chat discovery and navigation are not implemented. The spoken contact name
-  must not be treated as a verified match.
+- General chat discovery and navigation are not implemented. The narrowly
+  scoped `Saved Messages` action does not verify arbitrary contact names.
 - A launch request may be accepted before the app is visibly open. Dependent
   chat navigation waits for a fresh foreground observation when supported.
 - The parser supports a small set of exact English forms. Multilingual plans,

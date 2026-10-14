@@ -10,6 +10,7 @@ from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.commands.models import CommandKind
 
 _HELPER = Path(__file__).with_name("telegram_portal_helper.py")
+_SAVED_MESSAGES_TARGETS = frozenset({"saved messages", "saved massages"})
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
 
 
@@ -45,7 +46,8 @@ class TelegramSavedMessagesExecutor:
             return self._delegate.execute(request)
         if (
             intent.app != "telegram"
-            or " ".join(intent.target.casefold().split()) != "saved messages"
+            or " ".join(intent.target.casefold().split())
+            not in _SAVED_MESSAGES_TARGETS
         ):
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="unsupported_chat"

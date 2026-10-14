@@ -1,6 +1,6 @@
-"""Session-only GNOME screen permission control."""
+"""User control for a remembered GNOME screen permission."""
 
-from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QLabel,
@@ -37,7 +37,7 @@ class ScreenAccessPage(QWidget):
         layout.addWidget(self.caption)
         layout.addSpacing(24)
         self.enabled_checkbox = QCheckBox()
-        self.enabled_checkbox.setAccessibleName("Screen access for this session")
+        self.enabled_checkbox.setAccessibleName("Remember screen access")
         layout.addWidget(self.enabled_checkbox)
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -67,6 +67,10 @@ class ScreenAccessPage(QWidget):
         self.translate()
         self.enabled_checkbox.setEnabled(access is not None and access.available)
         self._changed(access.granted if access is not None else False)
+        if access is not None and access.available and access.remembered:
+            QTimer.singleShot(
+                0, lambda: access.request_session() if access.remembered else None
+            )
 
     def translate(self) -> None:
         text = self._translations.text

@@ -151,10 +151,10 @@ ENGLISH: dict[str, str] = {
     "app_unavailable": "Unavailable",
     "screen_heading": "Screen access",
     "screen_caption": (
-        "Allow KYRIN to read the active window only while this app session is open. "
-        "GNOME will ask for permission once; no image is saved."
+        "Allow KYRIN to read the active window on request. GNOME asks once and "
+        "remembers your choice until you turn it off here. No image is saved."
     ),
-    "screen_enable": "Allow screen access for this session",
+    "screen_enable": "Remember screen access",
     "screen_active": "Screen access is active. Turn this off to revoke it now.",
     "screen_off": "Screen access is off.",
     "screen_waiting": "Waiting for GNOME permission…",

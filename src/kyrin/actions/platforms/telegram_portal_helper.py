@@ -1,4 +1,4 @@
-"""One-shot Telegram Saved Messages shortcut via a non-persistent portal grant.
+"""One-shot Telegram Saved Messages shortcut with remembered portal consent.
 
 This diagnostic never sends text or pointer input. Run with system Python so
 Ubuntu's Gio bindings are available. It closes the remote-desktop session on
@@ -8,11 +8,20 @@ every exit path and reports only whether the fixed shortcut was dispatched.
 import json
 import subprocess
 import sys
-from time import sleep
+from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 from uuid import uuid4
 
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
+
+# This helper uses Ubuntu's system Python for GI even when KYRIN runs in a venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from kyrin.app.permission_token import (  # noqa: E402
+    permission_token_path,
+    read_opaque_token,
+    save_opaque_token,
+)
 
 BUS = "org.freedesktop.portal.Desktop"
 OBJECT = "/org/freedesktop/portal/desktop"
@@ -24,6 +33,7 @@ SHELL_OBJECT = "/org/kyrin/ActiveApp"
 SHELL_INTERFACE = "org.kyrin.ActiveApp"
 CONTROL = 0xFFE3
 ZERO = ord("0")
+TOKEN_PATH = permission_token_path("telegram-keyboard")
 
 
 def _request(
@@ -121,6 +131,18 @@ def _focused_identity() -> tuple[str, int] | None:
     return app_id, pid
 
 
+def _wait_for_expected_focus(expected: tuple[str, int], timeout_s: float = 10) -> bool:
+    """Proceed promptly after the portal closes, but only for stable Telegram focus."""
+    deadline = monotonic() + timeout_s
+    while monotonic() < deadline:
+        if _focused_identity() == expected:
+            sleep(0.15)
+            if _focused_identity() == expected:
+                return True
+        sleep(min(0.2, max(0.0, deadline - monotonic())))
+    return False
+
+
 def _key(
     connection: Gio.DBusConnection, session: str, symbol: int, pressed: bool
 ) -> None:
@@ -158,13 +180,14 @@ def main() -> int:
         if created is None:
             return 1
         session = created["session_handle"]
+        remembered = read_opaque_token(TOKEN_PATH)
+        options = {"types": GLib.Variant("u", 1), "persist_mode": GLib.Variant("u", 2)}
+        if remembered is not None:
+            options["restore_token"] = GLib.Variant("s", remembered)
         selected = _request(
             connection,
             "SelectDevices",
-            (
-                session,
-                {"types": GLib.Variant("u", 1), "persist_mode": GLib.Variant("u", 0)},
-            ),
+            (session, options),
             8000,
         )
         if selected is None:
@@ -172,9 +195,23 @@ def main() -> int:
         started = _request(connection, "Start", (session, "", {}), 30000)
         if started is None or started.get("devices", 0) & 1 == 0:
             return 1
+        replacement = started.get("restore_token")
+        if isinstance(replacement, str):
+            try:
+                save_opaque_token(TOKEN_PATH, replacement)
+            except (OSError, ValueError) as exc:
+                print(f"Could not remember keyboard permission: {exc}", file=sys.stderr)
+        elif remembered is not None:
+            # An old restore token may have been consumed. Never reuse it.
+            try:
+                TOKEN_PATH.unlink(missing_ok=True)
+            except OSError as exc:
+                print(
+                    f"Could not clear old keyboard permission: {exc}",
+                    file=sys.stderr,
+                )
         print("KEYBOARD_GRANTED focus_telegram_within=10s", flush=True)
-        sleep(10)
-        if _focused_identity() != expected:
+        if not _wait_for_expected_focus(expected):
             print("FOCUS_CHANGED", flush=True)
             return 2
         _key(connection, session, CONTROL, True)

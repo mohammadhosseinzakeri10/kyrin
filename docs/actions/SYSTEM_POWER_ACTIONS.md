@@ -60,9 +60,11 @@ any system-power request. Audio was initially inaudible because the system's
 default output was a digital sink; selecting the TSCO Bluetooth headset made
 Speech Dispatcher audible. Product playback follows the operating system's
 selected output. A supervised end-to-end check inside the installed KYRIN
-application, including spoken input, has not yet been performed. Automated
-tests cover policy, timeout, mixed voice/click
-confirmation, rejected ambiguous replies, stale IDs, echo guard, the separate
+application, including spoken input, was subsequently completed with the
+inert safe-preview backend described below. This does not validate a real
+operating-system power request. Automated tests cover policy, timeout,
+mixed voice/click confirmation, rejected ambiguous replies, stale IDs,
+echo guard, the separate
 Qt window without a microphone session, and the exact non-forced GNOME calls.
 Spoken **input** remains
 available whenever the microphone/STT session is running; click confirmation

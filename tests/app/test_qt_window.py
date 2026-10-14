@@ -20,6 +20,7 @@ from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
 from kyrin.app.events import SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
+from kyrin.app.permission_token import permission_token_path, save_opaque_token
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.translations import ENGLISH, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
@@ -896,8 +897,9 @@ def test_failed_startup_save_restores_previous_registration(
 
 
 def test_actions_page_saves_only_explicitly_selected_app(
-    application: QApplication, tmp_path: Path
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "local-data"))
     directory = tmp_path / "data/applications"
     directory.mkdir(parents=True)
     for name in ("Telegram", "Browser"):
@@ -941,6 +943,12 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert saved.allowed_close_apps == ("telegram",)
         assert saved.wake_aliases == ("kayrin", "کایرین من")
         assert "1 allowed apps" in window.action_label.text()
+        token_path = permission_token_path("telegram-keyboard")
+        save_opaque_token(token_path, "remembered-keyboard")
+        window.actions_page.telegram_chat_checkbox.setChecked(False)
+        window.apply_button.click()
+        assert store.load().allowed_chat_apps == ()
+        assert not token_path.exists()
     finally:
         window._timer.stop()
         window.deleteLater()
