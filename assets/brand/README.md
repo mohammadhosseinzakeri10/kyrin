@@ -4,6 +4,7 @@ KYRIN is the project name. Kailarin is the parent brand. All public copy is in E
 
 ## Artwork
 
+- `hero-motion.gif`: the six-second looping banner with subtle accretion light and star motion.
 - `hero-still.webp`: the approved KYRIN banner with the black-hole K emblem, the Kailarin endorsement, and the line “An evolving AI desktop agent.”
 - `horizons.svg`: the three planned product directions, with English text alternatives in the project README.
 
@@ -11,4 +12,4 @@ The hero is concept artwork, not a screenshot of working product functionality. 
 
 ## Accessibility
 
-The banner is static. Its dark background remains legible in both light and dark GitHub themes. Essential project information is also available as normal text below the banner, and a direct artwork link remains in the README footer.
+The README displays the still banner for visitors who request reduced motion. The animated GIF contains the same text and composition. Its dark background remains legible in both light and dark GitHub themes. Essential project information is also available as normal text below the banner, and a direct artwork link remains in the README footer.
