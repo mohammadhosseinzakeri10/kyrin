@@ -5,7 +5,11 @@ from threading import Event
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from kyrin.actions.telegram_verification import saved_messages_header_visible
+from kyrin.actions.telegram_verification import (
+    ChatSearchMatch,
+    chat_header_visible,
+    unique_search_result,
+)
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.text_reader import IdentifiedWindowText
@@ -15,8 +19,10 @@ from kyrin.vision.text_reader import IdentifiedWindowText
 class _Request:
     app_id: str | None
     pid: int | None
+    target: str | None = None
+    search: bool = False
     finished: Event = field(default_factory=Event)
-    result: bool = False
+    result: bool | ChatSearchMatch | None = None
 
 
 class QtChatVerifier(QObject):
@@ -41,19 +47,28 @@ class QtChatVerifier(QObject):
 
     def ready(self) -> bool:
         """Require current screen permission before requesting keyboard input."""
-        return self._ask(_Request(None, None), timeout_s=2)
+        return self._ask(_Request(None, None), timeout_s=2) is True
 
-    def verify(self, app_id: str, pid: int) -> bool:
+    def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
         """Return false for an uncertain, stale, or missing chat header."""
-        return self._ask(_Request(app_id, pid), timeout_s=18)
+        return self._ask(_Request(app_id, pid, target), timeout_s=18) is True
 
-    def _ask(self, request: _Request, *, timeout_s: float) -> bool:
+    def find_search_result(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchMatch | None:
+        """Return one exact visible result without authorizing a click."""
+        result = self._ask(_Request(app_id, pid, target, search=True), timeout_s=18)
+        return result if isinstance(result, ChatSearchMatch) else None
+
+    def _ask(
+        self, request: _Request, *, timeout_s: float
+    ) -> bool | ChatSearchMatch | None:
         if QThread.currentThread() == self.thread():
-            return False
+            return None
         self.requested.emit(request)
         if not request.finished.wait(timeout_s):
             request.finished.set()
-            return False
+            return None
         return request.result
 
     @Slot(object)
@@ -81,12 +96,22 @@ class QtChatVerifier(QObject):
         pending = self._pending
         if pending is None:
             return
-        valid = isinstance(observation, IdentifiedWindowText) and (
-            pending.app_id is not None
+        result: bool | ChatSearchMatch | None = None
+        if (
+            isinstance(observation, IdentifiedWindowText)
+            and pending.app_id is not None
             and pending.pid is not None
-            and saved_messages_header_visible(observation, pending.app_id, pending.pid)
-        )
-        self._finish(valid)
+            and pending.target is not None
+        ):
+            if pending.search:
+                result = unique_search_result(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+            else:
+                result = chat_header_visible(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+        self._finish(result)
 
     def _failed(self, _reason: str) -> None:
         self._finish(False)
@@ -95,9 +120,9 @@ class QtChatVerifier(QObject):
         if not granted:
             self._finish(False)
 
-    def _finish(self, result: bool) -> None:
+    def _finish(self, result: bool | ChatSearchMatch | None) -> None:
         pending = self._pending
         self._pending = None
         if pending is not None:
-            pending.result = result and not pending.finished.is_set()
+            pending.result = result if not pending.finished.is_set() else None
             pending.finished.set()

@@ -35,7 +35,7 @@ KEY = ActionKey(2, 7)
 TELEGRAM = CommandIntent(CommandKind.OPEN_APP, "telegram")
 
 
-def test_chat_failure_explains_current_limit_and_missing_screen_access() -> None:
+def test_chat_failure_explains_unsupported_name_and_missing_screen_access() -> None:
     intent = CommandIntent(CommandKind.OPEN_CHAT, "save message", "telegram")
     unsupported = ActionFeedback(
         KEY,
@@ -54,7 +54,7 @@ def test_chat_failure_explains_current_limit_and_missing_screen_access() -> None
         "en",
     )
     assert ResponsePresenter("en").present(unsupported).text == (
-        "Only Saved Messages is supported for now."
+        "That chat name or app is not supported."
     )
     assert "Screen Access" in ResponsePresenter("en").present(access).text
 

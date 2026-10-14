@@ -13,6 +13,7 @@ PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from kyrin.actions.telegram_verification import ChatSearchMatch
 from kyrin.app.qt.chat_verifier import QtChatVerifier
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
@@ -94,3 +95,41 @@ def test_verifier_uses_ui_thread_and_requires_current_grant(
     access.changed.emit(False)
     assert not _call_from_worker(app, verifier.ready)
     assert not _call_from_worker(app, lambda: verifier.verify("telegram.desktop", 123))
+
+
+def test_search_result_is_only_returned_for_unique_left_pane_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    access = Access()
+    reader = Reader(
+        IdentifiedWindowText(
+            "telegram.desktop",
+            123,
+            OcrResult(
+                (RecognizedText("Alice", TextBox(70, 220, 90, 24), 0.91),),
+                "eng",
+                OcrDevice.CPU,
+                "fake",
+            ),
+            (1600, 900),
+        )
+    )
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, access), cast(ScreenTextReader, reader)
+    )
+    result: list[ChatSearchMatch | None] = []
+
+    def work() -> bool:
+        result.append(verifier.find_search_result("telegram.desktop", 123, "Alice"))
+        return True
+
+    assert _call_from_worker(app, work)
+    assert result[0] is not None
+    assert result[0].top == 220
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_search_result("telegram.desktop", 123, "Bob") is None,
+    )

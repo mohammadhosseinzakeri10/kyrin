@@ -52,7 +52,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "cancelled": "انجام این کار لغو شد.",
         "unsupported": "این بخش از فرمان هنوز پشتیبانی نمی‌شود.",
         "unsupported_chat": "هنوز نمی‌توانم چت را باز کنم.",
-        "unsupported_chat_target": "فعلاً فقط چت Saved Messages پشتیبانی می‌شود.",
+        "unsupported_chat_target": "نام یا برنامهٔ این چت پشتیبانی نمی‌شود.",
+        "chat_search_uncertain": (
+            "یک نتیجهٔ یکتا و دقیق برای این چت پیدا نکردم؛ لطفاً نام کامل‌تر را بگویید."
+        ),
         "screen_access_required": "برای بررسی چت، دسترسی صفحه را در برنامه فعال کنید.",
         "telegram_not_active": (
             "تلگرام فعال نیست؛ لطفاً آن را جلو بیاورید و دوباره بگویید."
@@ -142,7 +145,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "cancelled": "That action was cancelled.",
         "unsupported": "I can't perform this step yet.",
         "unsupported_chat": "I can't open chats yet.",
-        "unsupported_chat_target": "Only Saved Messages is supported for now.",
+        "unsupported_chat_target": "That chat name or app is not supported.",
+        "chat_search_uncertain": (
+            "I couldn't find one exact chat result. Please say a more specific name."
+        ),
         "screen_access_required": "Enable Screen Access in KYRIN to verify the chat.",
         "telegram_not_active": (
             "Telegram is not active. Bring it forward and try again."
@@ -267,6 +273,7 @@ class ResponsePresenter:
                 "telegram_not_active",
                 "telegram_focus_changed",
                 "chat_unverified",
+                "chat_search_uncertain",
                 "no_window",
                 "multiple_windows",
                 "unavailable",

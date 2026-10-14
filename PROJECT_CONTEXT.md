@@ -3698,3 +3698,22 @@ restoration latency.
 A same-user malicious
 process can still read local user files or replace a user-installed extension;
 these remembered grants are not a boundary against such a process.
+
+## 116. Telegram chat permission revocation and bounded search navigation
+
+The owner turned off `Allow Telegram chats` in the installed app and saved the
+setting. A read-only check showed `allowed_chat_apps` empty and the remembered
+Telegram keyboard token gone. In a live microphone check, a recognized
+`open_chat: save the messages` request ended with reason `unsupported`; no
+chat opened. This verifies the app action gate while the permission is off.
+
+The next chat-navigation slice is being implemented in the worktree. It keeps
+the fixed Saved Messages shortcut and adds a conservative search path for
+other names: type a bounded name without Enter, require the same exact OCR
+result in the left pane twice, request one session-only pointer grant, check
+the focused Telegram ID/PID and window/pointer geometry before clicking that
+result, then verify the exact chat title in a fresh image. The owner approved
+the pointer grant for Telegram with a system consent prompt. The installed
+OCR data remains English-only, so unrecognized or ambiguous names must stop
+without a click. This new slice has deterministic tests but still needs a
+GNOME extension reload and live owner validation before being called complete.

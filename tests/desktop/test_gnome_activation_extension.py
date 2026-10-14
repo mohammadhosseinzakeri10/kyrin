@@ -30,6 +30,8 @@ let fullscreen = false;
 const window = {
     minimized: false,
     get_stable_sequence: () => 17,
+    get_pid: () => 42,
+    get_frame_rect: () => ({x: 100, y: 50, width: 1600, height: 900}),
     can_minimize: () => true,
     can_maximize: () => true,
     can_close: () => true,
@@ -79,7 +81,7 @@ const Gio = {DBus: {session: {}}, DBusExportedObject: {
 const global = {display: {
     get_current_time_roundtrip: () => 456,
     get_focus_window: () => focus,
-}};
+}, get_pointer: () => [500, 300, 0]};
 """
 
 _CASES = """
@@ -105,6 +107,9 @@ focus = null;
 if (extension.ActivateExistingApp('telegram.desktop') !== 'multiple_windows')
     throw new Error('ambiguous activation was accepted');
 focus = window;
+if (JSON.stringify(extension.GetActiveWindowAndPointer()) !==
+    JSON.stringify(['telegram.desktop', 42, 100, 50, 1600, 900, 500, 300]))
+    throw new Error('focused window geometry or pointer was incorrect');
 if (extension.ActivateExistingApp('telegram.desktop') !== 'requested')
     throw new Error('focused app window was not selected');
 windows = 1;

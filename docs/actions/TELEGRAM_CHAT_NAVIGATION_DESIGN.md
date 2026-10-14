@@ -66,14 +66,20 @@ foreground. Say `Open chat Saved Messages` once. Record the final `Heard`,
 Recognition diagnostics, and confirm visually whether the chat opened. No
 message should be typed or sent in this check.
 
-The broader `OPEN_CHAT` behavior for arbitrary contacts remains a separate
-slice: establish a dependable search entry point, inspect results, reject zero
-or multiple exact matches, select one verified result, and verify the opened
-header. A recognized name anywhere in an image is not proof that it is a chat
-result. Search result location and target identity must be established before
-selection. Missing OCR language data, uncertain layout, changed focus, or
-revoked permission must stop the action and request clarification or report
-failure.
+The next bounded `OPEN_CHAT` slice for other names uses a Telegram search
+shortcut and types at most 64 permitted characters without Enter. A fresh
+OCR read must find one exact target in the left results pane below search;
+a second read must return the same box and window identity. Only then does a
+separate, session-only pointer portal grant allow a click. The helper compares
+the focused Telegram desktop ID/PID, the window frame to the OCR image size,
+and the resulting cursor position before pressing the left button. A fresh
+OCR read must then confirm the exact target in the upper chat header. No text
+is sent as a message. If a match is absent or ambiguous, the search layout is
+uncertain, the pointer grant is denied, or focus changes, the action stops.
+The owner approved the new pointer scope with system consent. This slice has
+deterministic tests and awaits extension reload and live validation; it does
+not claim general multilingual chat navigation, because installed OCR data is
+currently English-only.
 
 ## Ubuntu input boundary
 
@@ -86,7 +92,8 @@ opaque restore token with mode 0600 in KYRIN's local data. Each successful
 `Start` replaces the previous single-use token. If the backend refuses
 restoration or returns no replacement, KYRIN asks again and does not assume
 permission. Disabling Telegram chats in Desktop Actions deletes KYRIN's local
-restore token. Each action still gets a short-lived session that is closed
+keyboard restore token. The pointer grant is never remembered. Each action
+still gets a short-lived session that is closed
 afterward. The portal controls the desktop keyboard, not one named window;
 KYRIN must check the Telegram desktop ID and PID before each short input
 sequence and verify the result afterwards. A focus change between a check and

@@ -1,4 +1,4 @@
-"""Bounded Telegram Saved Messages action over a permission-aware keyboard helper."""
+"""Permission-aware Telegram chat navigation with fresh visual verification."""
 
 import subprocess
 from collections.abc import Callable
@@ -7,6 +7,7 @@ from typing import Protocol
 
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.telegram_verification import ChatSearchMatch
 from kyrin.commands.models import CommandKind
 
 _HELPER = Path(__file__).with_name("telegram_portal_helper.py")
@@ -17,11 +18,15 @@ WindowIdentityReader = Callable[[], tuple[str, int] | None]
 class ChatVerifier(Protocol):
     def ready(self) -> bool: ...
 
-    def verify(self, app_id: str, pid: int) -> bool: ...
+    def find_search_result(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchMatch | None: ...
+
+    def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool: ...
 
 
 class TelegramSavedMessagesExecutor:
-    """Handle one chat target; leave ordinary app launches to the delegate."""
+    """Keep Saved Messages fast; search other chats only with bounded input."""
 
     def __init__(
         self,
@@ -44,11 +49,7 @@ class TelegramSavedMessagesExecutor:
         intent = request.intent
         if intent.kind is not CommandKind.OPEN_CHAT:
             return self._delegate.execute(request)
-        if (
-            intent.app != "telegram"
-            or " ".join(intent.target.casefold().split())
-            not in _SAVED_MESSAGES_TARGETS
-        ):
+        if intent.app != "telegram":
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="unsupported_chat"
             )
@@ -61,13 +62,28 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="telegram_not_active"
             )
+        target = " ".join(intent.target.split())
+        if target.casefold() in _SAVED_MESSAGES_TARGETS:
+            return self._open_saved_messages(request, identity)
+        if not 1 <= len(target) <= 64 or any(
+            not (char.isalnum() or char in " -_.'@") for char in target
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="unsupported_chat"
+            )
+        return self._open_searched_chat(request, identity, target)
+
+    def _run_helper(
+        self, identity: tuple[str, int], *args: str
+    ) -> subprocess.CompletedProcess[str] | None:
         try:
-            completed = subprocess.run(
+            return subprocess.run(
                 [
                     self._system_python,
                     str(self._helper_path),
                     identity[0],
                     str(identity[1]),
+                    *args,
                 ],
                 capture_output=True,
                 text=True,
@@ -75,6 +91,13 @@ class TelegramSavedMessagesExecutor:
                 timeout=65,
             )
         except OSError, subprocess.TimeoutExpired:
+            return None
+
+    def _open_saved_messages(
+        self, request: ActionRequest, identity: tuple[str, int]
+    ) -> ActionResult:
+        completed = self._run_helper(identity)
+        if completed is None:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
@@ -86,7 +109,7 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
-        if not self._verifier.verify(*identity):
+        if not self._verifier.verify(*identity, "Saved Messages"):
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
             )
@@ -94,4 +117,56 @@ class TelegramSavedMessagesExecutor:
             request.key,
             ActionOutcome.CONFIRMED,
             observed_active_app="telegram",
+        )
+
+    def _open_searched_chat(
+        self, request: ActionRequest, identity: tuple[str, int], target: str
+    ) -> ActionResult:
+        searched = self._run_helper(identity, "search", target)
+        if (
+            searched is None
+            or searched.returncode != 0
+            or "SEARCH_TYPED" not in searched.stdout
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
+            )
+        match = self._verifier.find_search_result(*identity, target)
+        if match is None:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="chat_search_uncertain"
+            )
+        if self._verifier.find_search_result(*identity, target) != match:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="chat_search_uncertain"
+            )
+        clicked = self._run_helper(
+            identity,
+            "click",
+            *(
+                str(value)
+                for value in (
+                    match.left,
+                    match.top,
+                    match.width,
+                    match.height,
+                    match.image_width,
+                    match.image_height,
+                )
+            ),
+        )
+        if (
+            clicked is None
+            or clicked.returncode != 0
+            or "CHAT_RESULT_CLICKED" not in clicked.stdout
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
+            )
+        if not self._verifier.verify(*identity, target):
+            return ActionResult(
+                request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
+            )
+        return ActionResult(
+            request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
         )

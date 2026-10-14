@@ -14,6 +14,16 @@ const INTERFACE_XML = `<node>
       <arg name="app_id" type="s" direction="out"/>
       <arg name="pid" type="u" direction="out"/>
     </method>
+    <method name="GetActiveWindowAndPointer">
+      <arg name="app_id" type="s" direction="out"/>
+      <arg name="pid" type="u" direction="out"/>
+      <arg name="x" type="i" direction="out"/>
+      <arg name="y" type="i" direction="out"/>
+      <arg name="width" type="i" direction="out"/>
+      <arg name="height" type="i" direction="out"/>
+      <arg name="pointer_x" type="i" direction="out"/>
+      <arg name="pointer_y" type="i" direction="out"/>
+    </method>
     <method name="HasAppWindow">
       <arg name="appId" type="s" direction="in"/>
       <arg name="presence" type="s" direction="out"/>
@@ -113,6 +123,21 @@ export default class KyrinActiveAppExtension extends Extension {
         const app = Shell.WindowTracker.get_default().get_window_app(window);
         const pid = window.get_pid();
         return [app?.get_id() ?? '', pid > 0 ? pid : 0];
+    }
+
+    GetActiveWindowAndPointer() {
+        const window = global.display.get_focus_window();
+        if (window === null)
+            return ['', 0, 0, 0, 0, 0, 0, 0];
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        const pid = window.get_pid();
+        const rect = window.get_frame_rect();
+        const [pointerX, pointerY] = global.get_pointer();
+        return [
+            app?.get_id() ?? '', pid > 0 ? pid : 0,
+            rect.x, rect.y, rect.width, rect.height,
+            Math.round(pointerX), Math.round(pointerY),
+        ];
     }
 
     HasAppWindow(appId) {
