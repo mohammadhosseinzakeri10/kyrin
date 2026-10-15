@@ -64,8 +64,12 @@ same intended chat. That target followed the generic Telegram search path,
 which typed the phrase into search but stopped with `chat_search_uncertain`
 before clicking any result. The exact observed phrase now resolves to the
 Saved Messages shortcut, with the existing permission, focused-window, and
-fresh header verification checks. A live retest after restarting KYRIN is
-still needed.
+fresh header verification checks. After restarting KYRIN, the owner reported
+that the chat opened. The microphone diagnostic showed
+`open_chat: save the messages` and `Action result: confirmed`, with 1,500 ms
+from final transcript to result in that run. This validates the reported
+variant in the owner's session; it is not a general chat-name recognition
+result.
 
 For a repeatable product-path check, start listening in the installed KYRIN
 control center, enable remembered screen access, and keep Telegram in the

@@ -23,7 +23,11 @@
 > accepted only `saved messages` and `saved massages`; generic search typed the
 > phrase and safely stopped at `chat_search_uncertain`. The exact observed
 > phrase is now a shortcut alias. Permission, focus, and OCR header checks
-> remain required. A restarted desktop microphone retest is pending.
+> remain required. In the restarted desktop microphone retest, the owner
+> reported that Saved Messages opened. The diagnostic showed
+> `open_chat: save the messages` with `Action result: confirmed` (1,500 ms
+> from final transcript to result). The Terminal-only picker was also
+> owner-validated.
 
 > **TTS catalog consolidation (2026-10-13):** The owner clarified that all TTS
 > families should share the project's `models/local/by-model/tts/` root, with
