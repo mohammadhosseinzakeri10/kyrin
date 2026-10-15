@@ -120,13 +120,48 @@ def _interpret(
     )
 
 
-def test_model_handles_a_phrase_not_covered_by_fast_rules(tmp_path: Path) -> None:
+@pytest.mark.parametrize("phrase", ("Kindly open Telegram", "Gently open Telegram"))
+def test_model_handles_a_phrase_not_covered_by_fast_rules(
+    tmp_path: Path, phrase: str
+) -> None:
     model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
-    result = _interpret(_interpreter(tmp_path, model), "Kindly open Telegram")
+    result = _interpret(_interpreter(tmp_path, model), phrase)
     assert isinstance(result, ReadyCommand)
     assert result.intent.kind is CommandKind.OPEN_APP
     assert result.intent.target == "telegram"
     assert model.calls == 1
+
+
+def test_new_explicit_command_replaces_pending_app_question(tmp_path: Path) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Browser"))
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("telegram", "Telegram"),), confirmation=True
+    )
+    result = _interpreter(tmp_path, model).interpret(
+        "Kindly open Browser",
+        language="en",
+        context=CommandContext(),
+        pending=pending,
+    )
+    assert result == ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "browser"))
+    assert model.calls == 1
+    assert model.confirmation_calls == 0
+
+
+def test_new_command_cannot_use_the_old_pending_app_as_its_target(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("telegram", "Telegram"),), confirmation=True
+    )
+    result = _interpreter(tmp_path, model).interpret(
+        "Kindly open Browser",
+        language="en",
+        context=CommandContext(),
+        pending=pending,
+    )
+    assert not isinstance(result, ReadyCommand)
 
 
 def test_old_utterance_cannot_supply_a_new_action_target(tmp_path: Path) -> None:
@@ -173,10 +208,6 @@ def test_unrecognizable_stt_cannot_invent_visual_studio_code(
     ("source", "operation", "target", "language"),
     [
         (
-            "Kindly close Telegram",
-            RequestedOperation.OPEN_APP, "Telegram", "en",
-        ),
-        (
             "Kindly open Telegram",
             RequestedOperation.OPEN_APP, "Browser", "en",
         ),
@@ -201,6 +232,26 @@ def test_existing_fast_command_does_not_wait_for_model(tmp_path: Path) -> None:
     result = _interpret(_interpreter(tmp_path, model), "Open Telegram")
     assert isinstance(result, ReadyCommand)
     assert model.calls == 0
+
+
+@pytest.mark.parametrize("phrase", ("Kindly close Telegram", "Gently close Telegram"))
+def test_explicit_polite_close_does_not_depend_on_model(
+    tmp_path: Path, phrase: str
+) -> None:
+    model = FakeModel(UnderstandingResult(UnderstandingStatus.NOT_COMMAND))
+    result = _interpret(_interpreter(tmp_path, model), phrase)
+    assert result == ReadyCommand(
+        CommandIntent(CommandKind.CLOSE_APP_WINDOW, "telegram")
+    )
+    assert model.calls == 0
+
+
+def test_negated_polite_close_never_executes(tmp_path: Path) -> None:
+    model = FakeModel(_ready(RequestedOperation.CLOSE_APP_WINDOW, "Telegram"))
+    result = _interpret(
+        _interpreter(tmp_path, model), "Kindly do not close Telegram"
+    )
+    assert not isinstance(result, ReadyCommand)
 
 
 def test_model_failure_fails_closed(tmp_path: Path) -> None:

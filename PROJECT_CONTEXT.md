@@ -1,11 +1,94 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-15.
+> Updated: 2026-10-16.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **Gently command live retest (2026-10-16):** After the correction, the owner
+> observed `Gently open Calculator` -> `open_app: calculator`, confirmed in
+> 6431 ms onset-to-result (1602 ms final-to-result), and
+> `Gently close calculator` -> `close_app_window: calculator`, confirmed in
+> 2426 ms onset-to-result (214 ms final-to-result). Neither asked for extra
+> app confirmation. This validates the `Gently` open and close paths live;
+> replacing an already pending app question with a fresh command has only
+> deterministic test coverage so far. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`.
+
+> **Polite command live retest (2026-10-16):** After the correction, the owner
+> observed `Kindly open calculator` -> `open_app: calculator`, confirmed in
+> 6485 ms onset-to-result (1635 ms final-to-result), followed by
+> `Kindly close calculator` -> `close_app_window: calculator`, confirmed in
+> 2545 ms onset-to-result (209 ms final-to-result). This validates the
+> `Kindly` close change on the live desktop. `Gently open` was subsequently
+> retested live; the pending app-question replacement has not been. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`.
+
+> **Fresh command after app confirmation (2026-10-15):** The owner observed
+> `Gently open calculator` -> `confirm_app`, then `Kindly open calculator` ->
+> no action. The operation evidence profile did not accept `Gently` as a
+> prefix; while an app-name clarification was pending, a new model-assisted
+> explicit command was not interpreted. The evidence profile now accepts
+> `Gently`, and a new explicit operation replaces a pending app-name question
+> while still requiring model proposal, source-operation verification, and
+> target grounding. Deterministic tests pass; updated desktop microphone
+> behavior is pending owner validation. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`.
+
+> **Polite close live correction (2026-10-15):** A continuous
+> `Kindly open calculator` succeeded in 4298 ms onset-to-result (1645 ms
+> final-to-result). The owner then got no action for `Gently close calculator`
+> and `repeat_command` twice for `Kindly close calculator`. Direct window
+> grammar recognized `Please` but not these two prefixes, leaving them to
+> the selected model; its internal result is not logged, so the precise model
+> failure is unknown. The grammar now accepts `Kindly` and `Gently` before
+> exact-name window commands. Permission checks remain downstream. Focused
+> tests pass; owner live retest on the updated process is pending. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`.
+
+> **Live latency follow-up split at `Kindly` (2026-10-15):** Three attempted
+> repeats finalized `Kindly` or `Kintily.` as a standalone no-action segment,
+> followed by `Open Calculator` twice and `Close Calculator` once. All three
+> actions were confirmed; their own onset-to-result times were 1990, 702, and
+> 731 ms. These times omit the first segment and do not retest the 7206 ms
+> model-assisted utterance. The text log alone cannot attribute the split to
+> speaker pause, speech endpoint detection, or STT behavior. No segmentation
+> threshold or fragment-joining change is justified yet. The owner recalls a
+> possible very short pause after `Kindly`, but its duration was not measured. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`.
+
+> **Live model-assisted command pilot (2026-10-15):** The owner said
+> `Kindly open Calculator`, which direct rules treat as `NotACommand` in the
+> saved catalog. The active model-assisted path yielded `open_app: calculator`
+> and `confirmed`. Speech onset to result was 7206 ms; final text to result
+> was 1692 ms. A single sample cannot identify the source of the 5514 ms
+> pre-final delay. Three negated attempts, two transcribed with `Currently`
+> instead of `Kindly`, requested no action. See
+> `docs/commands/LIVE_COMMAND_BASELINE_FA.md`. No behavior fix is indicated
+> by these results; latency needs a warmed repeat before attribution.
+
+> **Live command baseline, round one (2026-10-15):** The owner ran the eight
+> current-machine cases in `docs/commands/LIVE_COMMAND_BASELINE_FA.md`, outside
+> the chat flow. Open, minimize, restore, and close Calculator all reached the
+> expected intent with `confirmed` action feedback. Their mean speech-onset
+> to result was 2316 ms (four observations); mean final-text to result was
+> 226 ms. Three negated-open utterances and one ordinary sentence produced no
+> action, including one STT variant `Do not open, calculate her.`. `Open Terminal`
+> requested an operation and `Cancel` ended it without action. These cases
+> primarily exercise direct rules; model-assisted understanding needs a
+> separate live case. No code correction was indicated by this first round.
+
+> **Voice output control and power prompt interruption (2026-10-15):** The
+> owner requested a global TTS switch. The Voice Output page now saves
+> `tts_enabled` in settings schema 11; old settings default to enabled. The
+> shared `ResponseSpeaker` suppresses voice while disabled and interrupts an
+> active announcement when turned off. Visual prompts, STT, and command actions
+> remain independent. Power-stage voice now replaces queued speech and stops
+> active local-model playback when the stage changes. Focused deterministic
+> tests pass; an owner listening retest of the new stage timing and switch is
+> pending.
 
 > **Shutdown and packaging follow-up (2026-10-15):** An in-process CPU TTS
 > generation can hold the model lock. Desktop shutdown now waits at most two
@@ -4113,8 +4196,9 @@ playback. `SystemPowerFlow` exposes whether a confirmation prompt is still
 current. The desktop power announcement wires these checks for the two active
 confirmation stages. This prevents
 audio that finishes preparing after a stage change from speaking on the next
-screen; it does not claim zero TTS preparation latency or stop speech that
-has already begun playing. Focused tests cover both skip points.
+screen; it does not claim zero TTS preparation latency. A later change now
+stops active local-model playback when a new power stage replaces the prompt.
+Focused tests cover both skip points.
 
 In the follow-up, the owner heard only a shortened final-stage announcement
 through the phrase `Power off`, even while remaining silent. This matched an

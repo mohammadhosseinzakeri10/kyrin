@@ -129,6 +129,14 @@ class ModelAssistedInterpreter:
                 # app identity to close confirmation). Never restore the old
                 # question because a model reply is slow or unavailable.
                 return direct
+            if isinstance(pending, PendingAppClarification) and (
+                self._source_operations.extract(text, language=language).operations
+            ):
+                # A new explicit command replaces an older app-name question.
+                # It still passes through normal model, source, and target checks.
+                return self.interpret(
+                    text, language=language, context=context, pending=None
+                )
             if (
                 isinstance(pending, PendingAppClarification)
                 and pending.confirmation

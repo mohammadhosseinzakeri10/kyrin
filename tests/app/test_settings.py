@@ -64,7 +64,7 @@ def test_selected_gpu_is_saved_without_claiming_it_is_available(tmp_path: Path) 
     store.save(settings)
 
     assert store.load() == settings
-    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 10
+    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 11
     assert store.path.stat().st_mode & 0o077 == 0
 
 
@@ -80,6 +80,7 @@ def test_registered_app_aliases_round_trip_and_v9_starts_empty(tmp_path: Path) -
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 9
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().app_spoken_aliases == ()
 
@@ -97,10 +98,12 @@ def test_registered_app_aliases_reject_invalid_or_duplicate_entries(
     with pytest.raises(ValueError, match="unique registered IDs"):
         AppSettings(app_spoken_aliases=(item, item))
     with pytest.raises(ValueError, match="unique registered IDs"):
-        AppSettings(app_spoken_aliases=(
-            item,
-            AppSpokenAliases("other.desktop", ("ويرايشگر",)),
-        ))
+        AppSettings(
+            app_spoken_aliases=(
+                item,
+                AppSpokenAliases("other.desktop", ("ويرايشگر",)),
+            )
+        )
 
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
@@ -123,6 +126,7 @@ def test_ocr_package_selection_round_trips_and_v8_uses_default(tmp_path: Path) -
     document["schema_version"] = 8
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().ocr is None
 
@@ -141,8 +145,27 @@ def test_local_tts_selection_round_trips_and_legacy_settings_use_system_voice(
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().tts == TtsSelection()
+
+
+def test_voice_output_switch_round_trips_and_v10_defaults_to_on(tmp_path: Path) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(tts_enabled=False))
+    assert not store.load().tts_enabled
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 10
+    del document["tts_enabled"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert store.load().tts_enabled
+
+    store.save(AppSettings())
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["tts_enabled"] = "false"
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(SettingsError, match="tts_enabled must be a boolean"):
+        store.load()
 
 
 def test_tts_rejects_invalid_voice_and_gpu_system_voice(tmp_path: Path) -> None:
@@ -177,6 +200,7 @@ def test_persian_tts_route_round_trips_and_v7_migrates(tmp_path: Path) -> None:
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().tts_languages == ()
 
@@ -197,6 +221,7 @@ def test_command_model_selection_round_trips_and_old_schema_stays_off(
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert store.load().command_model is None
 
@@ -218,12 +243,12 @@ def test_unsupported_version_and_wrong_types_are_rejected(tmp_path: Path) -> Non
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
     document = json.loads(store.path.read_text(encoding="utf-8"))
-    document["schema_version"] = 11
+    document["schema_version"] = 12
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="schema version"):
         store.load()
 
-    document["schema_version"] = 10
+    document["schema_version"] = 11
     document["listening_enabled"] = 1
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="boolean"):
@@ -292,6 +317,7 @@ def test_version_one_settings_migrate_with_chat_permission_off(tmp_path: Path) -
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     del document["allowed_chat_apps"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
@@ -318,6 +344,7 @@ def test_version_two_settings_migrate_with_no_custom_wake_aliases(
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     del document["wake_aliases"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
@@ -339,6 +366,7 @@ def test_legacy_settings_do_not_enable_window_or_close_permissions(
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     del document["allowed_window_apps"]
     del document["allowed_close_apps"]
     del document["system_power_enabled"]
@@ -360,6 +388,7 @@ def test_version_four_never_enables_power_permission(tmp_path: Path) -> None:
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
+    del document["tts_enabled"]
     del document["system_power_enabled"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert not store.load().system_power_enabled

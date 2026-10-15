@@ -63,7 +63,8 @@ _OPEN_NAMED_APP_EN = re.compile(
 )
 _OPEN_ASR_SPELLING = re.compile(r"^(اوپن|اپن|أوبین|opend) (.+)$")
 _WINDOW_COMMAND_EN = re.compile(
-    r"^(?:please )?(restore|show|bring back|minimize|hide|close|exit|quit) "
+    r"^(?:(?:please|kindly|gently) )?"
+    r"(restore|show|bring back|minimize|hide|close|exit|quit) "
     r"(?:the )?(.+?)(?: window)?$"
 )
 _WINDOW_COMMAND_FA = re.compile(

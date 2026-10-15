@@ -70,6 +70,16 @@ dialogue now labels these stages explicitly. The owner also heard repeated
 speech in the first run; unclear power replies now display a text-only reminder
 instead of creating another spoken prompt. PipeWire barge-in remains enabled.
 
+The desktop Voice Output page now has a saved **Play spoken responses** switch.
+It defaults to on for existing settings. Turning it off and applying settings
+interrupts the current announcement and suppresses subsequent voice, while
+visual responses and microphone command processing continue. Turning it back
+on restores voice using the selected engine and language routes. The switch is
+enforced by the shared `ResponseSpeaker`, including system-power prompts.
+Power-stage announcements replace the previous announcement in the queue and
+interrupt active local-model playback, so the next stage does not wait for the
+previous stage's audio to finish. A physical listening retest is still needed.
+
 ## Running
 
 The existing `scripts/audio/check_live_speech.py --mode commands` invocation

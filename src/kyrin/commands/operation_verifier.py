@@ -143,7 +143,7 @@ class RuleBasedOperationEvidence:
         clauses: list[str] = []
         for clause in _EN_SPLIT.split(text):
             clause = clause.strip(" .!?\t")
-            clause = re.sub(r"^(?:please|kindly)\s+", "", clause)
+            clause = re.sub(r"^(?:please|kindly|gently)\s+", "", clause)
             if not clause:
                 return OperationEvidence(reason="incomplete_clause")
             match = _EN_ACTION.match(clause)

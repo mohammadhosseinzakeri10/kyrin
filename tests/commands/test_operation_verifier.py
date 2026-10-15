@@ -31,6 +31,7 @@ def proposed(*operations: RequestedOperation) -> UnderstandingResult:
     ("text", "language", "operations"),
     [
         ("Open Telegram.", "en", (RequestedOperation.OPEN_APP,)),
+        ("Gently open Telegram.", "en", (RequestedOperation.OPEN_APP,)),
         ("Kairin, please close Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),
         ("Exit Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),
         ("Quit Telegram", "en", (RequestedOperation.CLOSE_APP_WINDOW,)),

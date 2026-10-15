@@ -105,10 +105,9 @@ def _source_checkout_model_root(module_file: Path | None = None) -> Path | None:
     """Find development models only when this module runs from a source tree."""
     module = (module_file or Path(__file__)).resolve()
     root = module.parents[4]
-    if (
-        (root / "src/kyrin/app/qt/main.py").resolve() == module
-        and (root / "pyproject.toml").is_file()
-    ):
+    if (root / "src/kyrin/app/qt/main.py").resolve() == module and (
+        root / "pyproject.toml"
+    ).is_file():
         return root / "models/local/by-model"
     return None
 
@@ -220,9 +219,7 @@ def main() -> int:
         / "runtimes/stt/omnilingual-asr/bin/python"
     )
     omnilingual_python = (
-        installed_omnilingual_python
-        if installed_omnilingual_python.is_file()
-        else None
+        installed_omnilingual_python if installed_omnilingual_python.is_file() else None
     )
     try:
         model_library.cleanup_incomplete_imports()
@@ -235,21 +232,24 @@ def main() -> int:
         settings.tts_languages if settings is not None else (),
     )
     speaker = ResponseSpeaker(synthesizer, on_error=events.publish)
+    speaker.set_enabled(settings.tts_enabled if settings is not None else True)
     current_tts = (
         settings.tts if settings is not None else TtsSelection(),
         settings.tts_languages if settings is not None else (),
     )
 
     def configure_tts(
-        selection: TtsSelection, routes: tuple[TtsLanguageRoute, ...]
+        selection: TtsSelection, routes: tuple[TtsLanguageRoute, ...], enabled: bool
     ) -> None:
         nonlocal current_tts
+        speaker.set_enabled(enabled)
         if (selection, routes) != current_tts:
             speaker.interrupt()
             synthesizer.configure(selection, routes)
             current_tts = (selection, routes)
 
     app.aboutToQuit.connect(lambda: _close_speech(speaker, synthesizer))
+
     def publish_power(prompt: PowerPrompt) -> None:
         events.publish(prompt)
         if prompt.stage in (
@@ -276,20 +276,18 @@ def main() -> int:
             return power_flow.is_current_prompt(prompt)
 
         still_current = (
-            current
-            if prompt.stage in (PowerStage.FIRST, PowerStage.SECOND)
-            else None
+            current if prompt.stage in (PowerStage.FIRST, PowerStage.SECOND) else None
         )
         _announce_power(
             prompt,
             speaker,
             events.publish,
             speak=(
-                lambda text, language: synthesizer.speak_if_current(
-                    text, language, current
+                lambda text, language: (
+                    synthesizer.speak_if_current(text, language, current)
+                    if still_current is not None
+                    else None
                 )
-                if still_current is not None
-                else None
             ),
             still_current=still_current,
         )
@@ -297,6 +295,8 @@ def main() -> int:
     power_flow.set_announcement(announce_power)
 
     def preview_tts(text: str, language: str, selection: TtsSelection) -> bool:
+        if not speaker.is_enabled:
+            return False
         return speaker.submit(
             PresentedResponse(
                 None,

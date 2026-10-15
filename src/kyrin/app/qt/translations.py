@@ -21,6 +21,7 @@ ENGLISH: dict[str, str] = {
     "command_models": "Command Understanding",
     "tts": "Voice Output",
     "tts_heading": "Voice output",
+    "tts_enabled": "Play spoken responses",
     "tts_caption": (
         "Choose an installed offline voice. KYRIN never downloads voice models. "
         "Place a supported extracted model in your local TTS folder or browse "

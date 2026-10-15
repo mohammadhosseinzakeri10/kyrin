@@ -18,7 +18,7 @@ from kyrin.app.settings import (
 )
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 class SettingsError(ValueError):
@@ -132,6 +132,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("ocr")
     if version >= 10:
         fields.add("app_spoken_aliases")
+    if version >= 11:
+        fields.add("tts_enabled")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -288,6 +290,9 @@ def _parse_settings(document: object) -> AppSettings:
             ocr=ocr,
             tts=tts,
             tts_languages=tts_languages,
+            tts_enabled=(
+                _boolean(root["tts_enabled"], "tts_enabled") if version >= 11 else True
+            ),
             action_execution_enabled=_boolean(
                 root["action_execution_enabled"], "action_execution_enabled"
             ),
@@ -343,6 +348,7 @@ def _document(settings: AppSettings) -> dict[str, object]:
             }
         ),
         "tts": _tts_document(settings.tts),
+        "tts_enabled": settings.tts_enabled,
         "tts_languages": [
             {"language": route.language, "selection": _tts_document(route.selection)}
             for route in settings.tts_languages

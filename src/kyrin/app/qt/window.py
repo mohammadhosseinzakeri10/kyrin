@@ -132,7 +132,9 @@ class ControlWindow(QWidget):
         model_library: ModelLibrary | None = None,
         suggested_command_store: Path | None = None,
         tts_model_root: Path | None = None,
-        configure_tts: Callable[[TtsSelection, tuple[TtsLanguageRoute, ...]], None]
+        configure_tts: Callable[
+            [TtsSelection, tuple[TtsLanguageRoute, ...], bool], None
+        ]
         | None = None,
         preview_tts: Callable[[str, str, TtsSelection], bool] | None = None,
         ui_translations: UiTranslations,
@@ -304,6 +306,7 @@ class ControlWindow(QWidget):
             settings.tts if settings is not None else TtsSelection(),
             model_root=tts_model_root or Path.home() / ".local/share/kyrin/models/tts",
             routes=settings.tts_languages if settings is not None else (),
+            enabled=settings.tts_enabled if settings is not None else True,
             preview=preview_tts,
         )
         self.pages.addWidget(self.tts_page)
@@ -313,9 +316,7 @@ class ControlWindow(QWidget):
             button.clicked.connect(
                 lambda checked=False, selected=action: self._start_power(selected)
             )
-        self.actions_page.power_preview_button.clicked.connect(
-            self._preview_power
-        )
+        self.actions_page.power_preview_button.clicked.connect(self._preview_power)
         self.pages.addWidget(self.actions_page)
 
         self.screen_access_page = ScreenAccessPage(
@@ -514,13 +515,16 @@ class ControlWindow(QWidget):
 
     def _clear_conversation_memory(self) -> None:
         t = self._translations.text
-        if QMessageBox.question(
-            self,
-            t("conversation_memory_clear_title"),
-            t("conversation_memory_clear_question"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                t("conversation_memory_clear_title"),
+                t("conversation_memory_clear_question"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         try:
             history = SqliteConversationHistory(default_history_path())
@@ -528,7 +532,7 @@ class ControlWindow(QWidget):
                 history.clear()
             finally:
                 history.close()
-        except (OSError, ValueError, sqlite3.Error):
+        except OSError, ValueError, sqlite3.Error:
             self.feedback_label.setText(t("conversation_memory_unavailable"))
             return
         self.feedback_label.setText(t("conversation_memory_cleared"))
@@ -538,7 +542,7 @@ class ControlWindow(QWidget):
             dialog = ArchivedMemoryDialog(
                 default_history_path(), self._translations.text, self
             )
-        except (OSError, ValueError, sqlite3.Error):
+        except OSError, ValueError, sqlite3.Error:
             self.feedback_label.setText(
                 self._translations.text("conversation_memory_unavailable")
             )
@@ -695,6 +699,7 @@ class ControlWindow(QWidget):
             ocr=ocr,
             tts=self.tts_page.selection(),
             tts_languages=self.tts_page.language_routes(),
+            tts_enabled=self.tts_page.voice_enabled(),
             action_execution_enabled=actions_enabled,
             system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
@@ -732,7 +737,9 @@ class ControlWindow(QWidget):
             or self.command_model_page.has_unsaved_changes(self._settings.command_model)
             or self.screen_access_page.has_unsaved_changes(self._settings.ocr)
             or self.tts_page.has_unsaved_changes(
-                self._settings.tts, self._settings.tts_languages
+                self._settings.tts,
+                self._settings.tts_languages,
+                self._settings.tts_enabled,
             )
         )
 
@@ -774,7 +781,9 @@ class ControlWindow(QWidget):
             )
             self.screen_access_page.translate()
         if self._configure_tts is not None:
-            self._configure_tts(candidate.tts, candidate.tts_languages)
+            self._configure_tts(
+                candidate.tts, candidate.tts_languages, candidate.tts_enabled
+            )
         self.models_page.set_current_selection(candidate.stt)
         self._update_action_label()
         self.feedback_label.setText(self._translations.text("saved"))

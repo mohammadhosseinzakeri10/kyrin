@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -154,7 +155,10 @@ class _VoiceEditor(QWidget):
             else ()
         )
         self._use_named_voice = backend in {
-            "speech-dispatcher", "kitten", "chatterbox", "qwen3tts"
+            "speech-dispatcher",
+            "kitten",
+            "chatterbox",
+            "qwen3tts",
         } or bool(named_kokoro)
         # Model discovery must work from the default system-voice state too.
         self.voice.setVisible(self._use_named_voice)
@@ -318,6 +322,7 @@ class TtsPage(QWidget):
         *,
         model_root: Path,
         routes: tuple[TtsLanguageRoute, ...] = (),
+        enabled: bool = True,
         preview: Callable[[str, str, TtsSelection], bool] | None = None,
     ) -> None:
         super().__init__()
@@ -331,6 +336,9 @@ class TtsPage(QWidget):
         self.caption = QLabel()
         self.caption.setWordWrap(True)
         layout.addWidget(self.caption)
+        self.enabled_checkbox = QCheckBox()
+        self.enabled_checkbox.setChecked(enabled)
+        layout.addWidget(self.enabled_checkbox)
         self.tabs = QTabWidget()
         self.tabs.setMinimumHeight(500)
         layout.addWidget(self.tabs)
@@ -406,6 +414,9 @@ class TtsPage(QWidget):
     def selection(self) -> TtsSelection:
         return self._editors["en"].selection()
 
+    def voice_enabled(self) -> bool:
+        return self.enabled_checkbox.isChecked()
+
     def language_routes(self) -> tuple[TtsLanguageRoute, ...]:
         return tuple(
             TtsLanguageRoute(language, editor.selection())
@@ -417,10 +428,12 @@ class TtsPage(QWidget):
         self,
         current: TtsSelection,
         routes: tuple[TtsLanguageRoute, ...] = (),
+        enabled: bool = True,
     ) -> bool:
         try:
             return (
-                self._editors["en"].draft() != current
+                self.voice_enabled() != enabled
+                or self._editors["en"].draft() != current
                 or tuple(
                     TtsLanguageRoute(language, editor.draft())
                     for language, editor in self._editors.items()
@@ -435,6 +448,7 @@ class TtsPage(QWidget):
         t = self._translations.text
         self.title.setText(t("tts_heading"))
         self.caption.setText(t("tts_caption"))
+        self.enabled_checkbox.setText(t("tts_enabled"))
         self.add_button.setText(t("tts_add_language"))
         self.remove_button.setText(t("tts_remove_language"))
         for editor in self._editors.values():

@@ -144,6 +144,8 @@ def test_final_only_backend_can_produce_command_without_partials() -> None:
         ("Show Telegram", CommandKind.RESTORE_APP),
         ("Minimize Telegram", CommandKind.MINIMIZE_APP),
         ("Close Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("Kindly close Telegram", CommandKind.CLOSE_APP_WINDOW),
+        ("Gently close Telegram", CommandKind.CLOSE_APP_WINDOW),
         ("Exit Telegram", CommandKind.CLOSE_APP_WINDOW),
         ("Quit Telegram", CommandKind.CLOSE_APP_WINDOW),
         ("Please hide Telegram", CommandKind.MINIMIZE_APP),

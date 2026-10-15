@@ -78,12 +78,74 @@ def test_stale_queued_prompt_is_not_spoken_after_stage_changes() -> None:
         speaker.close()
 
 
+def test_replacing_prompt_interrupts_old_voice_and_starts_new_one() -> None:
+    class InterruptibleSynthesizer:
+        def __init__(self) -> None:
+            self.started = Event()
+            self.interrupted = Event()
+            self.calls: list[str] = []
+
+        def speak(self, text: str, language: str) -> None:
+            self.calls.append(text)
+            if text == "First":
+                self.started.set()
+                assert self.interrupted.wait(2)
+
+        def interrupt(self) -> None:
+            self.interrupted.set()
+
+    backend = InterruptibleSynthesizer()
+    speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
+    first = PresentedResponse(None, None, "First", ResponseChannel.TEXT_AND_VOICE, "en")
+    second = PresentedResponse(
+        None, None, "Second", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    try:
+        assert speaker.replace(first)
+        assert backend.started.wait(2)
+        assert speaker.replace(second)
+        assert speaker.wait_until_idle(2)
+        assert backend.calls == ["First", "Second"]
+    finally:
+        speaker.close()
+
+
+def test_disabling_voice_interrupts_playback_and_ignores_later_speech() -> None:
+    class InterruptibleSynthesizer:
+        def __init__(self) -> None:
+            self.started = Event()
+            self.interrupted = Event()
+            self.calls: list[str] = []
+
+        def speak(self, text: str, language: str) -> None:
+            self.calls.append(text)
+            self.started.set()
+            assert self.interrupted.wait(2)
+
+        def interrupt(self) -> None:
+            self.interrupted.set()
+
+    backend = InterruptibleSynthesizer()
+    speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
+    response = PresentedResponse(
+        None, None, "Prompt", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    try:
+        assert speaker.submit(response)
+        assert backend.started.wait(2)
+        speaker.set_enabled(False)
+        assert speaker.wait_until_idle(2)
+        assert speaker.submit(response)
+        assert speaker.replace(response)
+        assert backend.calls == ["Prompt"]
+    finally:
+        speaker.close()
+
+
 def test_preview_speaks_with_its_own_selection_without_changing_normal_voice() -> None:
     backend = BlockingSynthesizer()
     speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
-    response = PresentedResponse(
-        0, 1, "Preview", ResponseChannel.TEXT_AND_VOICE, "en"
-    )
+    response = PresentedResponse(0, 1, "Preview", ResponseChannel.TEXT_AND_VOICE, "en")
     preview_calls: list[tuple[str, str]] = []
     try:
         assert speaker.submit(

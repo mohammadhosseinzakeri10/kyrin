@@ -107,6 +107,7 @@ class ResponseSpeaker:
             ]
         ] = Queue(maxsize=max_pending)
         self._generation = 0
+        self._enabled = True
         self._speaking = False
         self._active = Event()
         self._idle = Event()
@@ -122,6 +123,11 @@ class ResponseSpeaker:
     def is_active(self) -> bool:
         return self._active.is_set()
 
+    @property
+    def is_enabled(self) -> bool:
+        with self._lock:
+            return self._enabled
+
     def submit(
         self,
         response: PresentedResponse,
@@ -135,6 +141,8 @@ class ResponseSpeaker:
         with self._lock:
             if self._closed.is_set():
                 return False
+            if not self._enabled:
+                return True
             self._active.set()
             self._idle.clear()
             try:
@@ -156,29 +164,36 @@ class ResponseSpeaker:
         with self._lock:
             if self._closed.is_set():
                 return False
-            self._generation += 1
-            self._clear_pending()
-            interrupt = getattr(self._synthesizer, "interrupt", None)
-            if callable(interrupt):
-                interrupt()
+            if not self._enabled:
+                self._interrupt_locked()
+                return True
+            self._interrupt_locked()
             self._active.set()
             self._idle.clear()
-            self._queue.put_nowait(
-                (self._generation, response, speak, still_current)
-            )
+            self._queue.put_nowait((self._generation, response, speak, still_current))
         return True
 
     def interrupt(self) -> None:
         """Stop an obsolete announcement without replacing it."""
         with self._lock:
-            self._generation += 1
-            self._clear_pending()
-            interrupt = getattr(self._synthesizer, "interrupt", None)
-            if callable(interrupt):
-                interrupt()
-            if not self._speaking:
-                self._active.clear()
-                self._idle.set()
+            self._interrupt_locked()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Apply the saved voice preference and stop speech when turned off."""
+        with self._lock:
+            self._enabled = enabled
+            if not enabled:
+                self._interrupt_locked()
+
+    def _interrupt_locked(self) -> None:
+        self._generation += 1
+        self._clear_pending()
+        interrupt = getattr(self._synthesizer, "interrupt", None)
+        if callable(interrupt):
+            interrupt()
+        if not self._speaking:
+            self._active.clear()
+            self._idle.set()
 
     def _clear_pending(self) -> None:
         while True:

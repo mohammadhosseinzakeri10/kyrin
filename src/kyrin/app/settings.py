@@ -147,6 +147,7 @@ class AppSettings:
     ocr: OcrSelection | None = None
     tts: TtsSelection = TtsSelection()
     tts_languages: tuple[TtsLanguageRoute, ...] = ()
+    tts_enabled: bool = True
     action_execution_enabled: bool = False
     system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
@@ -176,6 +177,8 @@ class AppSettings:
             raise ValueError("ocr must be a model selection or null")
         if not isinstance(self.tts, TtsSelection):
             raise ValueError("tts must be a voice selection")
+        if type(self.tts_enabled) is not bool:
+            raise ValueError("tts_enabled must be a boolean")
         if (
             not isinstance(self.tts_languages, tuple)
             or not all(
@@ -245,10 +248,13 @@ class AppSettings:
             )
             or len({item.platform_id for item in self.app_spoken_aliases})
             != len(self.app_spoken_aliases)
-            or len({
-                _spoken_alias_key(alias)
-                for item in self.app_spoken_aliases
-                for alias in item.aliases
-            }) != sum(len(item.aliases) for item in self.app_spoken_aliases)
+            or len(
+                {
+                    _spoken_alias_key(alias)
+                    for item in self.app_spoken_aliases
+                    for alias in item.aliases
+                }
+            )
+            != sum(len(item.aliases) for item in self.app_spoken_aliases)
         ):
             raise ValueError("spoken app aliases require unique registered IDs")
