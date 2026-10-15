@@ -12,7 +12,9 @@ from kyrin.actions.telegram_verification import ChatSearchMatch
 from kyrin.commands.models import CommandKind
 
 _HELPER = Path(__file__).with_name("telegram_portal_helper.py")
-_SAVED_MESSAGES_TARGETS = frozenset({"saved messages", "saved massages"})
+_SAVED_MESSAGES_TARGETS = frozenset(
+    {"saved messages", "saved massages", "save the messages"}
+)
 _SEARCH_SETTLE_SECONDS = 3.0
 _SEARCH_POLL_SECONDS = 0.2
 WindowIdentityReader = Callable[[], tuple[str, int] | None]

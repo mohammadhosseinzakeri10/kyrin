@@ -154,7 +154,9 @@ def test_shortcut_outcome_requires_fresh_verified_chat_header(
         (True, ActionOutcome.CONFIRMED, None),
     ],
 )
+@pytest.mark.parametrize("target", ["Saved Massages", "Save the messages"])
 def test_observed_stt_spelling_still_requires_verified_saved_messages_header(
+    target: str,
     verified: bool,
     outcome: ActionOutcome,
     error: str | None,
@@ -166,7 +168,7 @@ def test_observed_stt_spelling_still_requires_verified_saved_messages_header(
     monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
     verifier = Verifier(verified=verified)
     result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
-        _request(CommandKind.OPEN_CHAT, "Saved Massages", "telegram")
+        _request(CommandKind.OPEN_CHAT, target, "telegram")
     )
 
     assert result.outcome is outcome

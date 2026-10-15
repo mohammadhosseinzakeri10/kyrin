@@ -17,6 +17,14 @@
 > the application model library fallback. This path check is not a complete
 > portable package or installed-environment validation.
 
+> **Telegram Saved Messages live correction (2026-10-15):** The owner confirmed
+> the Terminal-only picker worked, then heard `Open chat, save the messages`.
+> KYRIN parsed `open_chat: save the messages`, but the Saved Messages shortcut
+> accepted only `saved messages` and `saved massages`; generic search typed the
+> phrase and safely stopped at `chat_search_uncertain`. The exact observed
+> phrase is now a shortcut alias. Permission, focus, and OCR header checks
+> remain required. A restarted desktop microphone retest is pending.
+
 > **TTS catalog consolidation (2026-10-13):** The owner clarified that all TTS
 > families should share the project's `models/local/by-model/tts/` root, with
 > one folder per family and model. Kokoro v1.0 was moved there, its archive to

@@ -59,6 +59,14 @@ short fragments in that run produced no action. The reported final-text-to-
 result interval was 16,849 ms; this single run includes the temporary input
 permission and OCR path and does not isolate their individual costs.
 
+In a later owner test, STT produced `open_chat: save the messages` for the
+same intended chat. That target followed the generic Telegram search path,
+which typed the phrase into search but stopped with `chat_search_uncertain`
+before clicking any result. The exact observed phrase now resolves to the
+Saved Messages shortcut, with the existing permission, focused-window, and
+fresh header verification checks. A live retest after restarting KYRIN is
+still needed.
+
 For a repeatable product-path check, start listening in the installed KYRIN
 control center, enable remembered screen access, and keep Telegram in the
 foreground. Say `Open chat Saved Messages` once. Record the final `Heard`,
