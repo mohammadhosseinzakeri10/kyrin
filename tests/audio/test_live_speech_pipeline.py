@@ -268,6 +268,23 @@ def test_external_stop_ends_stream_and_releases_capture() -> None:
     assert source.stop_count >= 1
 
 
+def test_stop_interrupts_cancellable_stt_engine() -> None:
+    class CancellableEngine(Engine):
+        cancelled = False
+
+        def cancel_pending_inference(self) -> None:
+            self.cancelled = True
+
+    source = Source([])
+    engine = CancellableEngine(Session())
+    pipeline = LiveSpeechPipeline(source, FORMAT, Detector([]), engine)
+
+    pipeline.stop()
+
+    assert source.stop_count == 1
+    assert engine.cancelled
+
+
 def test_failed_stt_session_close_is_unsafe_for_recovery() -> None:
     class BrokenSession(Session):
         def close(self) -> None:

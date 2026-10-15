@@ -11,6 +11,7 @@ from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
     CommandResolution,
+    ResponseChannel,
     ResponseKind,
     ResponseRequest,
 )
@@ -236,6 +237,7 @@ def test_phonetic_app_proposal_needs_target_then_operation(tmp_path: Path) -> No
     first = coordinator.observe(_final(0, "VTorain"))
     assert isinstance(first[1], ResponseRequest)
     assert first[1].kind is ResponseKind.CONFIRM_APP
+    assert first[1].channel is ResponseChannel.TEXT_ONLY
     second = coordinator.observe(_final(1, "yes"))
     assert second[0] == CommandResolution(1, None, language="en")
     assert isinstance(second[1], ResponseRequest)
@@ -248,7 +250,7 @@ def test_phonetic_app_proposal_needs_target_then_operation(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("phrase", ("Close VTorrain", "Close V2 Rain", "Exit V2 Rain"))
-def test_uncertain_close_target_requires_app_and_action_confirmation(
+def test_uncertain_close_target_needs_one_action_confirmation(
     tmp_path: Path, phrase: str
 ) -> None:
     directory = tmp_path / "applications"
@@ -263,14 +265,11 @@ def test_uncertain_close_target_requires_app_and_action_confirmation(
     first = coordinator.observe(_final(0, phrase))
     assert first[0] == CommandResolution(0, None, language="en")
     assert isinstance(first[1], ResponseRequest)
-    assert first[1].kind is ResponseKind.CONFIRM_APP
+    assert first[1].kind is ResponseKind.CONFIRM_ACTION
     second = coordinator.observe(_final(1, "yes"))
-    assert second[0] == CommandResolution(1, None, language="en")
-    assert isinstance(second[1], ResponseRequest)
-    assert second[1].kind is ResponseKind.CONFIRM_ACTION
-    assert coordinator.observe(_final(2, "yes")) == (
+    assert second == (
         CommandResolution(
-            2, CommandIntent(CommandKind.CLOSE_APP_WINDOW, "v2rayn"), language="en"
+            1, CommandIntent(CommandKind.CLOSE_APP_WINDOW, "v2rayn"), language="en"
         ),
     )
 

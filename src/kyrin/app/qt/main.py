@@ -4,7 +4,7 @@ import os
 import shutil
 import sys
 import sysconfig
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, QTimer
@@ -17,6 +17,7 @@ from kyrin.app.model_library import (
     ModelLibraryError,
     linux_model_library_path,
 )
+from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.platforms.ubuntu import UbuntuSessionFactory, standard_stt_openers
 from kyrin.app.platforms.xdg_startup import (
     DESKTOP_FILE_ID,
@@ -52,8 +53,14 @@ from kyrin.responses.speech import (
     ResponseSpeaker,
     SpeechSynthesisError,
 )
-from kyrin.system_power.flow import InertPowerBackend, PowerPrompt, SystemPowerFlow
+from kyrin.system_power.flow import (
+    InertPowerBackend,
+    PowerPrompt,
+    PowerStage,
+    SystemPowerFlow,
+)
 from kyrin.system_power.gnome import GnomePowerBackend
+from kyrin.tts.models import TtsLanguageRoute
 from kyrin.tts.runtime import ConfiguredSpeechSynthesizer
 from kyrin.vision.ocr.contracts import OcrOptions
 
@@ -85,15 +92,70 @@ def _activate_window(window: ControlWindow) -> None:
     window.activateWindow()
 
 
-def _tts_model_root(development_root: Path, installed_root: Path) -> Path:
+def _tts_model_root(development_root: Path | None, installed_root: Path) -> Path:
     """Use the organized source-checkout catalog, retaining packaged fallback."""
-    return development_root if development_root.is_dir() else installed_root
+    return (
+        development_root
+        if development_root is not None and development_root.is_dir()
+        else installed_root
+    )
+
+
+def _source_checkout_model_root(module_file: Path | None = None) -> Path | None:
+    """Find development models only when this module runs from a source tree."""
+    module = (module_file or Path(__file__)).resolve()
+    root = module.parents[4]
+    if (
+        (root / "src/kyrin/app/qt/main.py").resolve() == module
+        and (root / "pyproject.toml").is_file()
+    ):
+        return root / "models/local/by-model"
+    return None
 
 
 def _gnome_observer(
     app_ids: Mapping[str, str], catalog: XdgDesktopAppCatalog
 ) -> ActiveAppObserver:
     return GnomeShellActiveAppObserver(app_ids, catalog=catalog)
+
+
+def _announce_power(
+    prompt: PowerPrompt,
+    speaker: ResponseSpeaker,
+    on_error: Callable[[SpeechSynthesisError], None],
+    *,
+    speak: Callable[[str, str], None] | None = None,
+    still_current: Callable[[], bool] | None = None,
+) -> None:
+    response = PresentedResponse(
+        None,
+        None,
+        prompt.speech_text or prompt.text,
+        ResponseChannel.TEXT_AND_VOICE,
+        "en",
+    )
+    if not speaker.replace(response, speak=speak, still_current=still_current):
+        on_error(SpeechSynthesisError("Voice output is busy"))
+
+
+def _close_speech(
+    speaker: ResponseSpeaker, synthesizer: ConfiguredSpeechSynthesizer
+) -> None:
+    """Cancel pending voice and release model workers before leaving Qt."""
+    speaker.interrupt()
+    released = True
+    try:
+        released = synthesizer.close() is not False
+    finally:
+        if released:
+            speaker.close()
+        else:
+            try:
+                speaker.close(timeout_s=1)
+            except SpeechSynthesisError:
+                # The daemon speech thread still owns its CPU model. The
+                # process is exiting, so the OS will reclaim that memory.
+                pass
 
 
 def main() -> int:
@@ -139,12 +201,28 @@ def main() -> int:
     server = _whisper_server_path("KYRIN_WHISPER_SERVER", "whisper-server")
     gpu_server = _whisper_server_path("KYRIN_WHISPER_GPU_SERVER", "whisper-server-gpu")
     model_library = ModelLibrary(linux_model_library_path())
+    development_models = _source_checkout_model_root()
     development_command_store = (
-        Path(__file__).resolve().parents[4]
-        / "models/local/by-model/command-understanding/ollama"
+        development_models / "command-understanding/ollama"
+        if development_models is not None
+        else None
     )
     development_tts_root = (
-        Path(__file__).resolve().parents[4] / "models/local/by-model/tts"
+        development_models / "tts" if development_models is not None else None
+    )
+    omnilingual_root = (
+        development_models / "stt/omnilingual-asr"
+        if development_models is not None
+        else None
+    )
+    installed_omnilingual_python = (
+        linux_model_library_path().parents[1]
+        / "runtimes/stt/omnilingual-asr/bin/python"
+    )
+    omnilingual_python = (
+        installed_omnilingual_python
+        if installed_omnilingual_python.is_file()
+        else None
     )
     try:
         model_library.cleanup_incomplete_imports()
@@ -157,10 +235,33 @@ def main() -> int:
         settings.tts_languages if settings is not None else (),
     )
     speaker = ResponseSpeaker(synthesizer, on_error=events.publish)
-    app.aboutToQuit.connect(speaker.close)
+    current_tts = (
+        settings.tts if settings is not None else TtsSelection(),
+        settings.tts_languages if settings is not None else (),
+    )
+
+    def configure_tts(
+        selection: TtsSelection, routes: tuple[TtsLanguageRoute, ...]
+    ) -> None:
+        nonlocal current_tts
+        if (selection, routes) != current_tts:
+            speaker.interrupt()
+            synthesizer.configure(selection, routes)
+            current_tts = (selection, routes)
+
+    app.aboutToQuit.connect(lambda: _close_speech(speaker, synthesizer))
+    def publish_power(prompt: PowerPrompt) -> None:
+        events.publish(prompt)
+        if prompt.stage in (
+            PowerStage.CHECKING,
+            PowerStage.SUBMITTING,
+            PowerStage.FINISHED,
+        ):
+            speaker.interrupt()
+
     power_flow = SystemPowerFlow(
         GnomePowerBackend(),
-        events.publish,
+        publish_power,
         enabled=bool(
             settings
             and settings.action_execution_enabled
@@ -171,15 +272,27 @@ def main() -> int:
     power_flow.set_voice_ready(lambda: not speaker.is_active)
 
     def announce_power(prompt: PowerPrompt) -> None:
-        response = PresentedResponse(
-            None,
-            None,
-            prompt.speech_text or prompt.text,
-            ResponseChannel.TEXT_AND_VOICE,
-            "en",
+        def current() -> bool:
+            return power_flow.is_current_prompt(prompt)
+
+        still_current = (
+            current
+            if prompt.stage in (PowerStage.FIRST, PowerStage.SECOND)
+            else None
         )
-        if not speaker.submit(response):
-            events.publish(SpeechSynthesisError("Voice output is busy"))
+        _announce_power(
+            prompt,
+            speaker,
+            events.publish,
+            speak=(
+                lambda text, language: synthesizer.speak_if_current(
+                    text, language, current
+                )
+                if still_current is not None
+                else None
+            ),
+            still_current=still_current,
+        )
 
     power_flow.set_announcement(announce_power)
 
@@ -237,7 +350,9 @@ def main() -> int:
     )
     factory = UbuntuSessionFactory(
         stt_openers=standard_stt_openers(
-            whisper_server_path=server, whisper_gpu_server_path=gpu_server
+            whisper_server_path=server,
+            whisper_gpu_server_path=gpu_server,
+            omnilingual_python=omnilingual_python,
         ),
         on_event=events.publish,
         microphones=microphones,
@@ -250,6 +365,7 @@ def main() -> int:
         focused_window=focused_window,
         system_power=power_flow,
         response_speaker=speaker,
+        echo_cancellation_factory=PipeWireEchoCancellation,
         visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
     controller = ApplicationController(factory, power_flow)
@@ -261,14 +377,20 @@ def main() -> int:
         events,
         whisper_server_available=server is not None,
         whisper_gpu_server_available=gpu_server is not None,
+        omnilingual_python=omnilingual_python,
+        omnilingual_root=omnilingual_root,
         model_library=model_library,
         suggested_command_store=(
-            development_command_store if development_command_store.is_dir() else None
+            development_command_store
+            if development_command_store is not None
+            and development_command_store.is_dir()
+            else None
         ),
         tts_model_root=_tts_model_root(
-            development_tts_root, linux_model_library_path().parent / "tts"
+            development_tts_root,
+            linux_model_library_path().parent / "tts",
         ),
-        configure_tts=synthesizer.configure,
+        configure_tts=configure_tts,
         preview_tts=preview_tts,
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),

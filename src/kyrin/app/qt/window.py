@@ -63,7 +63,7 @@ from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
 from kyrin.runtime.latency import SpeechActionLatency
 from kyrin.stt.device import ComputeDevice, DevicePreference
-from kyrin.stt.errors import DeviceUnavailableError
+from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import PowerAction, PowerPrompt, PowerStage
 
@@ -101,6 +101,8 @@ _STATE_KEYS = {
 def _friendly_error(error: Exception, text: Callable[[str], str]) -> str:
     if isinstance(error, DeviceUnavailableError):
         return text("error_device")
+    if isinstance(error, SpeechToTextError):
+        return str(error)
     if isinstance(error, MicrophoneError):
         return text("error_microphone")
     if isinstance(error, FileNotFoundError):
@@ -125,6 +127,8 @@ class ControlWindow(QWidget):
         *,
         whisper_server_available: bool,
         whisper_gpu_server_available: bool = False,
+        omnilingual_python: Path | None = None,
+        omnilingual_root: Path | None = None,
         model_library: ModelLibrary | None = None,
         suggested_command_store: Path | None = None,
         tts_model_root: Path | None = None,
@@ -147,6 +151,7 @@ class ControlWindow(QWidget):
         self._microphones = microphones
         self._whisper_server_available = whisper_server_available
         self._whisper_gpu_server_available = whisper_gpu_server_available
+        self._omnilingual_python = omnilingual_python
         self._active_stt_device: ComputeDevice | None = None
         self._pending_settings: AppSettings | None = None
         self._quitting = False
@@ -282,6 +287,7 @@ class ControlWindow(QWidget):
             cpu_runtime_available=whisper_server_available,
             gpu_runtime_available=whisper_gpu_server_available,
             current_selection=settings.stt if settings is not None else None,
+            omnilingual_root=omnilingual_root,
         )
         self.models_page.selected.connect(self._select_library_model)
         self.pages.addWidget(self.models_page)
@@ -591,9 +597,15 @@ class ControlWindow(QWidget):
 
     def _browse_model(self) -> None:
         backend = self.backend_combo.currentData()
-        if backend == "vosk":
+        if backend in ("vosk", "omnilingual"):
+            title = (
+                "omnilingual_directory"
+                if backend == "omnilingual"
+                else "vosk_directory"
+            )
             path = QFileDialog.getExistingDirectory(
-                self, self._translations.text("vosk_directory")
+                self,
+                self._translations.text(title),
             )
         else:
             path, _ = QFileDialog.getOpenFileName(
@@ -626,6 +638,14 @@ class ControlWindow(QWidget):
                 raise ValueError(self._translations.text("vosk_missing"))
             if backend == "whisper" and not path.is_file():
                 raise ValueError(self._translations.text("whisper_missing"))
+            if backend == "omnilingual":
+                from kyrin.stt.backends.omnilingual import model_files
+
+                model_files(path)
+                if self._omnilingual_python is None:
+                    raise ValueError(
+                        self._translations.text("omnilingual_runtime_missing")
+                    )
             if backend == "vosk" and device is DevicePreference.GPU:
                 raise DeviceUnavailableError(self._translations.text("models_vosk_cpu"))
             if backend == "vosk" and self.language_edit.text().strip() == "auto":
@@ -681,6 +701,7 @@ class ControlWindow(QWidget):
             allowed_chat_apps=self.actions_page.selected_chat_apps(),
             allowed_window_apps=self.actions_page.selected_window_apps(),
             allowed_close_apps=self.actions_page.selected_close_apps(),
+            app_spoken_aliases=self.actions_page.selected_spoken_aliases(),
             wake_aliases=tuple(
                 alias.strip()
                 for alias in self.wake_aliases_edit.text().split(",")

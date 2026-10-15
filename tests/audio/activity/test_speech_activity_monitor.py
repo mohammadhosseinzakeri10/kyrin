@@ -151,6 +151,28 @@ def test_confirmation_duration_rounds_up_to_whole_windows() -> None:
     assert monitor.process(window()).transition is SpeechTransition.STARTED
 
 
+def test_640_ms_mid_sentence_gap_only_pauses_short_threshold() -> None:
+    decisions = [True, *([False] * 64), True]
+    short = SpeechActivityMonitor(
+        SequenceVad(decisions), start_confirm_ms=10, pause_confirm_ms=384
+    )
+    long = SpeechActivityMonitor(
+        SequenceVad(decisions), start_confirm_ms=10, pause_confirm_ms=800
+    )
+
+    short_transitions = [
+        frame.transition for frame in short.observe(window() for _ in decisions)
+    ]
+    long_transitions = [
+        frame.transition for frame in long.observe(window() for _ in decisions)
+    ]
+
+    assert short_transitions.count(SpeechTransition.PAUSED) == 1
+    assert short_transitions.count(SpeechTransition.STARTED) == 2
+    assert long_transitions.count(SpeechTransition.PAUSED) == 0
+    assert long_transitions.count(SpeechTransition.STARTED) == 1
+
+
 def test_monitor_rejects_invalid_windows_and_config() -> None:
     vad = SequenceVad([])
     monitor = SpeechActivityMonitor(vad)

@@ -1,6 +1,7 @@
 """Typed, platform-neutral preferences for the future KYRIN application."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,12 @@ from kyrin.tts.models import (
 )
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]*\Z")
+
+
+def _spoken_alias_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = normalized.replace("ي", "ی").replace("ك", "ک")
+    return " ".join(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +101,36 @@ class AllowedApp:
 
 
 @dataclass(frozen=True, slots=True)
+class AppSpokenAliases:
+    """User spellings for one registered app, independent of action permission."""
+
+    platform_id: str
+    aliases: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.platform_id, str)
+            or not 1 <= len(self.platform_id.strip()) <= 1024
+            or any(ord(char) < 32 for char in self.platform_id)
+        ):
+            raise ValueError("spoken app aliases require a registered app ID")
+        if (
+            not isinstance(self.aliases, tuple)
+            or not 1 <= len(self.aliases) <= 12
+            or any(
+                not isinstance(alias, str)
+                or not 1 <= len(alias.strip()) <= 64
+                or any(ord(char) < 32 for char in alias)
+                or not _spoken_alias_key(alias)
+                for alias in self.aliases
+            )
+            or len({_spoken_alias_key(alias) for alias in self.aliases})
+            != len(self.aliases)
+        ):
+            raise ValueError("spoken app aliases must be unique short phrases")
+
+
+@dataclass(frozen=True, slots=True)
 class AppSettings:
     """Saved intent, distinct from the actual running/listening state.
 
@@ -117,6 +154,7 @@ class AppSettings:
     allowed_window_apps: tuple[str, ...] = ()
     allowed_close_apps: tuple[str, ...] = ()
     wake_aliases: tuple[str, ...] = ()
+    app_spoken_aliases: tuple[AppSpokenAliases, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.listening_enabled) is not bool:
@@ -198,3 +236,19 @@ class AppSettings:
             != len(self.wake_aliases)
         ):
             raise ValueError("wake aliases must be unique short phrases")
+        if (
+            not isinstance(self.app_spoken_aliases, tuple)
+            or len(self.app_spoken_aliases) > 256
+            or any(
+                not isinstance(item, AppSpokenAliases)
+                for item in self.app_spoken_aliases
+            )
+            or len({item.platform_id for item in self.app_spoken_aliases})
+            != len(self.app_spoken_aliases)
+            or len({
+                _spoken_alias_key(alias)
+                for item in self.app_spoken_aliases
+                for alias in item.aliases
+            }) != sum(len(item.aliases) for item in self.app_spoken_aliases)
+        ):
+            raise ValueError("spoken app aliases require unique registered IDs")

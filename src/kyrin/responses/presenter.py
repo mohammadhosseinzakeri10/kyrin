@@ -19,9 +19,13 @@ _TEXT: dict[str, dict[str, str]] = {
         "choose_chat_app_pair": "چت {target} را در {first} باز کنم یا {second}؟",
         "confirm_app": "منظورتان برنامهٔ {target} است؟",
         "choose_app_or_chat": (
-            "منظورتان برنامهٔ {target} است یا یک چت؟ لطفاً بگویید «برنامه» یا «چت»."
+            "منظورتان کدام است؟ ۱. برنامهٔ {target}؛ ۲. چت. "
+            "نام گزینه یا شمارهٔ آن را بگویید."
         ),
         "choose_app": "کدام برنامه را می‌خواهید؟ {options} شماره یا نام را بگویید.",
+        "choose_app_to_close": (
+            "کدام برنامه را ببندم؟ {options} شماره یا نام را بگویید."
+        ),
         "choose_operation": (
             "برای {target} چه کنم؟ {options} شماره را بگویید یا «خیر» بگویید."
         ),
@@ -115,9 +119,13 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "confirm_app": "Did you mean the {target} app?",
         "choose_app_or_chat": (
-            "Do you mean the {target} app or a chat? Please say app or chat."
+            "Do you mean the {target} app or a chat? "
+            "1. App. 2. Chat. Say app, chat, or the option number."
         ),
         "choose_app": "Which app do you mean? {options} Say its number or name.",
+        "choose_app_to_close": (
+            "Which app should I close? {options} Say its number or name."
+        ),
         "choose_operation": (
             "What should I do with {target}? {options} Say a number or no."
         ),
@@ -314,7 +322,12 @@ class ResponsePresenter:
                 return messages["choose_app_duplicate"].format(
                     target=event.app_candidates[0]
                 )
-            return messages[event.kind.value].format(
+            template = (
+                "choose_app_to_close"
+                if event.operation_candidates == (CommandKind.CLOSE_APP_WINDOW,)
+                else event.kind.value
+            )
+            return messages[template].format(
                 options=("؛ " if language == "fa" else "; ").join(
                     f"{index}. {name}"
                     for index, name in enumerate(event.app_candidates, start=1)

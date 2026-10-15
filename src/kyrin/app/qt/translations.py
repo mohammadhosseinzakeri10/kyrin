@@ -79,8 +79,11 @@ ENGLISH: dict[str, str] = {
     "speech_language": "Speech language code",
     "speech_language_help": (
         "Use a language code such as en or fa. Whisper multilingual models also "
-        "accept auto; Vosk requires a specific language model."
+        "accept auto; Omnilingual LLM models work better with a language code; "
+        "Vosk requires a specific language model."
     ),
+    "omnilingual_directory": "Select an Omnilingual ASR model folder",
+    "omnilingual_runtime_missing": "Omnilingual ASR runtime is not installed.",
     "vosk_language_required": "Vosk needs a specific language code, such as en.",
     "wake_aliases": "Other spellings of KYRIN (comma-separated)",
     "device": "Run model on",
@@ -144,6 +147,12 @@ ENGLISH: dict[str, str] = {
     "allow_window_close": "Allow KYRIN to close a window of selected apps",
     "allow_system_power": "Allow two-step system power requests (off by default)",
     "actions_search": "Search installed apps…",
+    "app_spoken_aliases": "Other spoken names for the selected app",
+    "app_spoken_aliases_placeholder": "Separate names with commas",
+    "app_spoken_aliases_help": (
+        "Names help recognition; they do not grant permission to control an app. "
+        "Choose any listed app, including an unchecked one."
+    ),
     "actions_select_visible": "Select all shown",
     "actions_clear_visible": "Clear shown",
     "actions_selected": "selected",

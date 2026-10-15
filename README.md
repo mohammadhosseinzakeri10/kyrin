@@ -44,6 +44,10 @@ audio is not stored by that feature.
 
 Vosk currently runs on CPU. Whisper can use CPU or a separately installed
 CUDA runtime on supported NVIDIA hardware; the same weights serve both. A
+local Omnilingual ASR runtime can use one of six separately stored v2
+checkpoints through an isolated Python worker. Its model comparison and
+current hardware limits are documented in
+[local speech model comparison](docs/stt/LOCAL_MODEL_COMPARISON_FA.md). A
 local Ollama command model can assist the live interpreter behind independent
 source-text and action-permission checks. The interpreter is still bounded:
 automatic language detection, arbitrary phrasing, and general multilingual

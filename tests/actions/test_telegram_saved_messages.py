@@ -1,6 +1,7 @@
 """The Telegram shortcut stays behind permission, focus, and OCR checks."""
 
 import subprocess
+from itertools import cycle
 from pathlib import Path
 
 import pytest
@@ -177,6 +178,15 @@ def test_other_chat_requires_unique_result_before_pointer_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
+    elapsed = [0.0]
+
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.monotonic", lambda: elapsed[0]
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
@@ -198,6 +208,89 @@ def test_other_chat_requires_unique_result_before_pointer_input(
             "Alice",
         ]
     ]
+    assert elapsed[0] == pytest.approx(telegram._SEARCH_SETTLE_SECONDS)
+
+
+def test_other_chat_waits_for_two_stable_search_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    elapsed = [0.0]
+    matches = iter(
+        [
+            None,
+            ChatSearchMatch(70, 220, 90, 24, 1600, 900),
+            ChatSearchMatch(72, 219, 91, 24, 1600, 900),
+        ]
+    )
+
+    class DelayedVerifier(Verifier):
+        def find_search_result(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchMatch | None:
+            self.calls.append((app_id, pid, target))
+            return next(matches)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, "SEARCH_TYPED" if len(calls) == 1 else "CHAT_RESULT_CLICKED", ""
+        )
+
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.monotonic", lambda: elapsed[0]
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = DelayedVerifier()
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.OPEN_CHAT, "Alice", "telegram")
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert len(calls) == 2
+    assert calls[1][-7:] == ["click", "72", "219", "91", "24", "1600", "900"]
+    assert verifier.calls == [(DESKTOP_ID, 12, "Alice")] * 4
+
+
+def test_other_chat_never_clicks_when_search_result_moves_between_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    elapsed = [0.0]
+    results = cycle(
+        (
+            ChatSearchMatch(70, 220, 90, 24, 1600, 900),
+            ChatSearchMatch(70, 280, 90, 24, 1600, 900),
+        )
+    )
+    calls: list[list[str]] = []
+
+    class MovingVerifier(Verifier):
+        def find_search_result(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchMatch | None:
+            return next(results)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "SEARCH_TYPED", "")
+
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.monotonic", lambda: elapsed[0]
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), MovingVerifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.OPEN_CHAT, "Alice", "telegram")
+    )
+    assert result.outcome is ActionOutcome.FAILED
+    assert result.error_code == "chat_search_uncertain"
+    assert len(calls) == 1
 
 
 def test_other_chat_clicks_only_the_verified_box_and_checks_header(

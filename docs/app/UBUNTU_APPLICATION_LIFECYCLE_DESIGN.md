@@ -98,6 +98,14 @@ The startup sequence is:
 5. On stop or quit, request runtime stop and release owned resources in order.
    A failed stop must be visible rather than reported as success.
 
+The session cleanup attempts every owned resource even if an earlier close
+fails. If an STT session may still be active after a failed capture stop, the
+factory does not close the engine through its normal session contract. For
+backends with an isolated child process, it instead cancels pending inference
+and stops that child before reporting the stop failure. A backend without
+isolated cancellation can still require process exit to reclaim memory after
+an unrecoverable native-thread failure.
+
 A bad model, missing microphone, or unavailable requested GPU must leave the
 application controllable. The app must not silently switch an explicit GPU
 request to CPU. AUTO may select CPU when that is the only supported and usable
@@ -358,6 +366,28 @@ point also connects the existing active-app observer and visual-status sink to
 the live session. Missing GNOME integration leaves the control window usable;
 it does not loosen action permissions. Neither adapter is a requirement for
 other desktop environments or future operating-system implementations.
+
+## Model resource lifetime when settings change
+
+Applying settings stops the listening session and waits for its cleanup before
+starting another. STT engines own their runtime or worker and close it at the
+session boundary. The private Ollama command server explicitly asks Ollama to
+unload the selected model, then terminates its process. The Qt application's
+TTS synthesizer outlives a listening session because previews remain available;
+changing its selection or language routes now interrupts queued speech and
+retires every cached TTS model before a new voice model is loaded. Isolated TTS
+workers terminate their processes when retired. Quit interrupts pending speech,
+stops any active isolated TTS worker, releases cached models, and then joins
+the speech thread before the Qt process exits. The operating system reclaims
+the remaining in-process RAM and GPU context when that process exits. KYRIN
+terminates only subprocesses it created for the active session or voice model.
+
+Future model adapters should expose an idempotent `close()` and give the
+component that loads a model responsibility for calling it on replacement and
+shutdown. A worker process gives a stronger operating-system memory-release
+boundary than dropping an in-process model reference. In-process CPU Sherpa
+models are removed from KYRIN's cache on a switch, but the Python/native
+allocator may retain some pages in the application's resident memory.
 
 ## Whisper CPU and GPU runtime selection
 

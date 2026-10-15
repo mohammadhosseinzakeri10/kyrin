@@ -1,4 +1,4 @@
-"""Record one consented command prompt into a local, Git-ignored WAV file.
+"""Record one consented speech prompt into a local, Git-ignored WAV file.
 
 This diagnostic never starts the microphone merely by importing the module or
 showing --help. Run it once per prompt ID after the speaker is ready.
@@ -24,7 +24,14 @@ TEMPLATE = DATA_ROOT / "manifest.template.csv"
 MULTILINGUAL_TEMPLATE = DATA_ROOT / "manifest.multilingual.template.csv"
 GERMAN_TEMPLATE = DATA_ROOT / "manifest.german.template.csv"
 SAFETY_TEMPLATE = DATA_ROOT / "manifest.safety.template.csv"
-TEMPLATES = (TEMPLATE, MULTILINGUAL_TEMPLATE, GERMAN_TEMPLATE, SAFETY_TEMPLATE)
+NEUTRAL_TEMPLATE = DATA_ROOT / "manifest.neutral.template.csv"
+TEMPLATES = (
+    TEMPLATE,
+    MULTILINGUAL_TEMPLATE,
+    GERMAN_TEMPLATE,
+    SAFETY_TEMPLATE,
+    NEUTRAL_TEMPLATE,
+)
 SPEAKER_ID_PATTERN = re.compile(r"speaker-[a-z0-9][a-z0-9_-]{0,31}")
 
 
@@ -163,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             MULTILINGUAL_TEMPLATE: "manifest.multilingual.csv",
             GERMAN_TEMPLATE: "manifest.german.csv",
             SAFETY_TEMPLATE: "manifest.safety.csv",
+            NEUTRAL_TEMPLATE: "manifest.neutral.csv",
         }
         manifest = DATA_ROOT / manifest_names[template]
         if (

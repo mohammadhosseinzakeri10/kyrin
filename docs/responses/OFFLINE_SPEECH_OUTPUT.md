@@ -14,7 +14,9 @@ speaker's intent from arbitrary STT errors.
 
 `ResponsePresenter` converts the response request into localized text and a
 requested channel. Persian and English messages currently exist. The live
-`commands` diagnostic always prints that text. For `TEXT_AND_VOICE`,
+`commands` diagnostic always prints that text. Unclear-command repetition and
+approximate app-name clarification use `TEXT_ONLY`, so the user can immediately
+repeat or answer without waiting for a spoken prompt. For `TEXT_AND_VOICE`,
 `ResponseSpeaker` also queues it for `SpeechDispatcherSynthesizer`. The backend
 runs Ubuntu's local `spd-say` with the `espeak-ng` output module, the response
 language, and `--wait` so playback completion is observable. It uses no network
@@ -36,9 +38,37 @@ does not, the text remains visible and a warning reports the incomplete voice.
 for a short trailing interval with silence of the same format and length.
 Microphone acquisition stays open. The guard sits outside `MicrophoneInput`,
 so capture, VAD, STT, command interpretation, and TTS remain separate.
-Speech from the user during KYRIN's spoken reply is also suppressed; this
-diagnostic does not support interrupting its own voice (barge-in). The guard
+Speech from the user during KYRIN's other spoken replies is also suppressed;
+this diagnostic does not support interrupting its own voice (barge-in). The guard
 does not provide acoustic echo cancellation for every speaker/microphone setup.
+
+The Ubuntu desktop application now tries a temporary PipeWire WebRTC
+echo-cancellation source when the default microphone is selected. PipeWire
+removes output from the default speaker monitor before the audio reaches VAD
+and STT. While that source is available, KYRIN keeps capturing user speech
+through its own voice playback. The source exists only for the listening
+session and is removed on shutdown. If PipeWire tools or the source are
+unavailable, or an explicit microphone is selected, the existing playback
+guard stays active. This path does not change the desktop's default devices.
+Its real acoustic performance depends on the selected microphone, speaker,
+room, and PipeWire routing and needs an owner speech-over-playback test.
+
+On desktop exit, the synthesizer interrupts playback and stops an active
+isolated model worker. If in-process CPU generation still holds the model lock,
+shutdown waits at most two seconds for that lock. It does not close a model
+while generation is using it. The response speaker then gets a one-second
+join deadline and the exiting process reclaims its remaining CPU memory.
+Normal model switches still retire cached models once generation finishes.
+This exceptional path has a deterministic blocked-generation test; an actual
+stalled hardware runtime has not been induced on the owner's machine.
+
+For system-power confirmation, a live safe-preview test initially appeared to
+advance without user speech. The follow-up diagnostic showed `[BLANK_AUDIO]`,
+and the new button still said `Continue`: this was the initial checking screen
+changing to the first confirmation stage, not an accepted voice reply. The
+dialogue now labels these stages explicitly. The owner also heard repeated
+speech in the first run; unclear power replies now display a text-only reminder
+instead of creating another spoken prompt. PipeWire barge-in remains enabled.
 
 ## Running
 

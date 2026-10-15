@@ -10,6 +10,7 @@ import wave
 from pathlib import Path
 
 from kyrin.audio.activity.silero_vad import SileroVad
+from kyrin.stt.backends.omnilingual import OmnilingualEngine
 from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import SpeechToTextEngine
@@ -22,20 +23,29 @@ from kyrin.stt.path_comparison import compare_item
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--backend", choices=("whisper", "vosk"), required=True)
+    parser.add_argument(
+        "--backend", choices=("whisper", "vosk", "omnilingual"), required=True
+    )
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--language", required=True, help="engine language or auto")
     parser.add_argument("--whisper-server", type=Path)
+    parser.add_argument(
+        "--runtime-python",
+        type=Path,
+        default=Path(__file__).resolve().parents[2]
+        / "local-data/kyrin/runtimes/stt/omnilingual-asr/bin/python",
+    )
     parser.add_argument("--device", choices=("cpu", "gpu"), default="cpu")
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--chunk-ms", type=int, default=20)
+    parser.add_argument("--pause-confirm-ms", type=int, default=384)
     parser.add_argument(
         "--case-id", action="append", help="limit to one or more manifest IDs"
     )
     parser.add_argument("--output", type=Path, help="new JSON file; never overwritten")
     args = parser.parse_args(argv)
-    if args.threads <= 0 or args.chunk_ms <= 0:
-        parser.error("threads and chunk-ms must be positive")
+    if args.threads <= 0 or args.chunk_ms <= 0 or args.pause_confirm_ms <= 0:
+        parser.error("threads, chunk-ms, and pause-confirm-ms must be positive")
     if args.backend == "whisper" and args.whisper_server is None:
         parser.error("Whisper requires --whisper-server")
     if args.backend == "vosk" and args.device != "cpu":
@@ -61,15 +71,27 @@ def main(argv: list[str] | None = None) -> int:
                 threads=args.threads,
                 compute_device=ComputeDevice(args.device),
             )
-        else:
+        elif args.backend == "vosk":
             engine = VoskEngine(args.model_path, language=args.language)
+        else:
+            engine = OmnilingualEngine(
+                args.runtime_python,
+                args.model_path,
+                language=args.language,
+                device=DevicePreference(args.device),
+            )
         try:
             options = SpeechToTextOptions(
                 device=DevicePreference(args.device), language_hint=args.language
             )
             results = [
                 compare_item(
-                    engine, SileroVad, case, options=options, chunk_ms=args.chunk_ms
+                    engine,
+                    SileroVad,
+                    case,
+                    options=options,
+                    chunk_ms=args.chunk_ms,
+                    pause_confirm_ms=args.pause_confirm_ms,
                 )
                 for case in cases
             ]
@@ -88,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": str(args.model_path),
         "device": args.device,
         "engine_language": args.language,
+        "pause_confirm_ms": args.pause_confirm_ms,
         "results": results,
     }
     if args.output is not None:

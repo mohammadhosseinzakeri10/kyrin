@@ -88,7 +88,7 @@ def test_observed_unsupported_door_phrase_does_not_become_an_action() -> None:
         update(0, "Kairin please open door", TranscriptStatus.FINAL)
     ) == (
         CommandResolution(0, None),
-        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_ONLY),
     )
 
 
@@ -350,7 +350,7 @@ def test_unfinished_or_unknown_command_requests_repetition_only_on_final() -> No
         ResponseRequest(
             0,
             ResponseKind.REPEAT_COMMAND,
-            ResponseChannel.TEXT_AND_VOICE,
+            ResponseChannel.TEXT_ONLY,
         ),
     )
 
@@ -368,7 +368,7 @@ def test_dropped_negation_prefix_requests_repetition_without_authorizing() -> No
         update(0, "to open telegram", TranscriptStatus.FINAL)
     ) == (
         CommandResolution(0, None),
-        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_ONLY),
     )
     assert coordinator.observe(
         update(1, "do not open telegram", TranscriptStatus.FINAL)
@@ -380,7 +380,7 @@ def test_short_or_addressed_unclear_final_requests_repetition(phrase: str) -> No
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
         CommandResolution(0, None),
-        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_AND_VOICE),
+        ResponseRequest(0, ResponseKind.REPEAT_COMMAND, ResponseChannel.TEXT_ONLY),
     )
 
 

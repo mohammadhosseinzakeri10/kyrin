@@ -58,6 +58,10 @@ class PowerConfirmationDialog(QDialog):
         self.action_label = QLabel()
         self.action_label.setObjectName("PowerActionTitle")
         layout.addWidget(self.action_label)
+        self.stage_label = QLabel()
+        self.stage_label.setObjectName("PowerStageLabel")
+        self.stage_label.setStyleSheet("color: #bcb3e6;")
+        layout.addWidget(self.stage_label)
         self.message = QLabel()
         self.message.setObjectName("PowerConfirmationMessage")
         self.message.setTextFormat(Qt.TextFormat.PlainText)
@@ -89,6 +93,13 @@ class PowerConfirmationDialog(QDialog):
         self.action_label.setText(
             ("SAFE PREVIEW · " if prompt.preview else "")
             + _ACTION_LABELS[prompt.action]
+        )
+        self.stage_label.setText(
+            {
+                PowerStage.CHECKING: "Checking · no confirmation yet",
+                PowerStage.FIRST: "Confirmation 1 of 2",
+                PowerStage.SECOND: "Final confirmation 2 of 2",
+            }[prompt.stage]
         )
         self.message.setText(prompt.text)
         self.voice_warning.hide()

@@ -27,6 +27,7 @@ from kyrin.app.model_library import (
 from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import SttSelection
+from kyrin.stt.backends.omnilingual import MODEL_NAMES, model_files
 from kyrin.stt.device import ComputeDevice, DevicePreference
 
 
@@ -48,6 +49,7 @@ class ModelLibraryPage(QWidget):
         cpu_runtime_available: bool,
         gpu_runtime_available: bool,
         current_selection: SttSelection | None,
+        omnilingual_root: Path | None = None,
     ) -> None:
         super().__init__()
         self._library = library
@@ -55,6 +57,7 @@ class ModelLibraryPage(QWidget):
         self._cpu_runtime_available = cpu_runtime_available
         self._gpu_runtime_available = gpu_runtime_available
         self._current_selection = current_selection
+        self._omnilingual_root = omnilingual_root
         self._busy = False
         self._events = _ImportEvents(self)
         self._events.completed.connect(self._import_completed)
@@ -143,6 +146,25 @@ class ModelLibraryPage(QWidget):
 
     def _models(self) -> tuple[InstalledModel, ...]:
         models = self._library.list_models() if self._library is not None else ()
+        if self._omnilingual_root is not None:
+            for name in MODEL_NAMES:
+                folder = self._omnilingual_root / name
+                try:
+                    model_files(folder)
+                except FileNotFoundError, ValueError, OSError:
+                    continue
+                models = (
+                    *models,
+                    InstalledModel(
+                        name,
+                        name,
+                        "omnilingual",
+                        "en" if "_LLM_" in name else "auto",
+                        folder,
+                        frozenset({ComputeDevice.CPU, ComputeDevice.GPU}),
+                        "",
+                    ),
+                )
         current = self._current_selection
         if current is not None and all(
             model.model_path != current.model_path for model in models

@@ -69,6 +69,8 @@ class ChatterboxMultilingualTTS:
         assert second.tolist() == [0.25, -0.25]
     finally:
         worker.close()
+        worker.close()
+    assert worker._process.poll() is not None
 
 
 def test_isolated_runtime_accepts_normal_venv_python_symlink(

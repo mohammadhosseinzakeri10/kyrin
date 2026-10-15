@@ -9,6 +9,7 @@ from typing import cast
 from kyrin.app.settings import (
     AllowedApp,
     AppSettings,
+    AppSpokenAliases,
     CommandModelSelection,
     OcrSelection,
     SttSelection,
@@ -17,7 +18,7 @@ from kyrin.app.settings import (
 )
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class SettingsError(ValueError):
@@ -129,6 +130,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("tts_languages")
     if version >= 9:
         fields.add("ocr")
+    if version >= 10:
+        fields.add("app_spoken_aliases")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -235,6 +238,29 @@ def _parse_settings(document: object) -> AppSettings:
         _string(alias, f"wake_aliases[{index}]")
         for index, alias in enumerate(raw_wake_aliases)
     )
+    spoken_aliases: list[AppSpokenAliases] = []
+    if version >= 10:
+        raw_spoken_aliases = root["app_spoken_aliases"]
+        if not isinstance(raw_spoken_aliases, list):
+            raise SettingsError("app_spoken_aliases must be a list")
+        for index, raw_item in enumerate(raw_spoken_aliases):
+            location = f"app_spoken_aliases[{index}]"
+            item = _object(raw_item, {"platform_id", "aliases"}, location)
+            raw_aliases = item["aliases"]
+            if not isinstance(raw_aliases, list):
+                raise SettingsError(f"{location}.aliases must be a list")
+            try:
+                spoken_aliases.append(
+                    AppSpokenAliases(
+                        _string(item["platform_id"], f"{location}.platform_id"),
+                        tuple(
+                            _string(alias, f"{location}.aliases[{alias_index}]")
+                            for alias_index, alias in enumerate(raw_aliases)
+                        ),
+                    )
+                )
+            except ValueError as exc:
+                raise SettingsError(str(exc)) from exc
     window_apps: tuple[str, ...] = ()
     close_apps: tuple[str, ...] = ()
     if version >= 4:
@@ -275,6 +301,7 @@ def _parse_settings(document: object) -> AppSettings:
             allowed_window_apps=window_apps,
             allowed_close_apps=close_apps,
             wake_aliases=wake_aliases,
+            app_spoken_aliases=tuple(spoken_aliases),
         )
     except ValueError as exc:
         raise SettingsError(str(exc)) from exc
@@ -330,6 +357,10 @@ def _document(settings: AppSettings) -> dict[str, object]:
         "allowed_window_apps": list(settings.allowed_window_apps),
         "allowed_close_apps": list(settings.allowed_close_apps),
         "wake_aliases": list(settings.wake_aliases),
+        "app_spoken_aliases": [
+            {"platform_id": item.platform_id, "aliases": list(item.aliases)}
+            for item in settings.app_spoken_aliases
+        ],
     }
 
 

@@ -2,7 +2,11 @@
 
 import pytest
 
-from scripts.stt.record_command_corpus import DATA_ROOT, recording_destination
+from scripts.stt.record_command_corpus import (
+    DATA_ROOT,
+    prompt_catalog,
+    recording_destination,
+)
 
 
 def test_speaker_recording_uses_distinct_local_path() -> None:
@@ -11,6 +15,12 @@ def test_speaker_recording_uses_distinct_local_path() -> None:
     assert legacy == DATA_ROOT / "recordings/safety-en-01.wav"
     assert second == DATA_ROOT / "recordings/speakers/speaker-02/safety-en-01.wav"
     assert legacy != second
+
+
+def test_neutral_prompts_are_available_for_non_command_recordings() -> None:
+    catalog = prompt_catalog()
+    assert catalog["neutral-en-02"][0] == "Telegram is a messaging app."
+    assert catalog["neutral-fa-02"][0] == "تلگرام یک برنامه پیام‌رسان است."
 
 
 @pytest.mark.parametrize("speaker_id", ["../other", "speaker-02/../x", "owner name"])

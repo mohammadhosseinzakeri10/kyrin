@@ -308,11 +308,16 @@ class DemoCommandInterpreter:
         if isinstance(pending, PendingIntentClarification):
             if phrase in ("no", "cancel", "نه", "خیر", "لغو"):
                 return DeclinedClarification()
-            if phrase in ("app", "the app", "application", "برنامه", "خود برنامه"):
+            selected = choice_index(phrase, 2)
+            if selected == 0 or phrase in (
+                "app", "the app", "application", "برنامه", "خود برنامه"
+            ):
                 return ReadyCommand(
                     CommandIntent(CommandKind.OPEN_APP, pending.app_candidate.app_id)
                 )
-            if phrase in ("chat", "the chat", "conversation", "چت", "گفتگو"):
+            if selected == 1 or phrase in (
+                "chat", "the chat", "conversation", "چت", "گفتگو"
+            ):
                 return self._chat_command(
                     pending.chat_target, context, pending.chat_app
                 )
@@ -328,15 +333,15 @@ class DemoCommandInterpreter:
                 return self._selected_app(pending.candidates[index], pending, context)
             if self._app_name_resolver is not None:
                 reply = self._app_name_resolver.resolve(phrase)
-                selected = tuple(
+                matching_candidates = tuple(
                     candidate
                     for candidate in reply.candidates
                     if candidate.app_id in {item.app_id for item in pending.candidates}
                 )
-                if reply.exact and len(selected) == 1:
-                    return self._selected_app(selected[0], pending, context)
+                if reply.exact and len(matching_candidates) == 1:
+                    return self._selected_app(matching_candidates[0], pending, context)
                 if phrase in ("yes", "ja", "بله", "آره") or (
-                    reply.exact and len(selected) > 1
+                    reply.exact and len(matching_candidates) > 1
                 ):
                     return NeedsClarification(pending)
 
@@ -696,10 +701,6 @@ class DemoCommandInterpreter:
             and candidate.app_id == self._terminal_app_id
         ):
             return self._ask_operation(candidate, context)
-        if pending.operation is CommandKind.CLOSE_APP_WINDOW:
-            return NeedsClarification(
-                PendingActionConfirmation(candidate, pending.operation)
-            )
         return ReadyCommand(CommandIntent(pending.operation, candidate.app_id))
 
     def _ask_operation(

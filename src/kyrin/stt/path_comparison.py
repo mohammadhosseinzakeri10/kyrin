@@ -126,6 +126,7 @@ def compare_item(
     *,
     options: SpeechToTextOptions,
     chunk_ms: int = 20,
+    pause_confirm_ms: int = 384,
 ) -> dict[str, object]:
     """Run two paced passes over the same file; never interpret or execute text.
 
@@ -174,7 +175,12 @@ def compare_item(
 
     live_source = WavReplayInput(item.path, chunk_ms=chunk_ms)
     pipeline = LiveSpeechPipeline(
-        live_source, live_source.format, detector_factory(), engine, options=options
+        live_source,
+        live_source.format,
+        detector_factory(),
+        engine,
+        options=options,
+        pause_confirm_ms=pause_confirm_ms,
     )
     live_updates: list[TranscriptUpdate] = []
     live_final: float | None = None

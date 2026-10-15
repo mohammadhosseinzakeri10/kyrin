@@ -99,8 +99,15 @@ class ResponseSpeaker:
         self._on_error = on_error
         self._tail_s = tail_s
         self._queue: Queue[
-            tuple[PresentedResponse, Callable[[str, str], None] | None]
+            tuple[
+                int,
+                PresentedResponse,
+                Callable[[str, str], None] | None,
+                Callable[[], bool] | None,
+            ]
         ] = Queue(maxsize=max_pending)
+        self._generation = 0
+        self._speaking = False
         self._active = Event()
         self._idle = Event()
         self._idle.set()
@@ -120,6 +127,7 @@ class ResponseSpeaker:
         response: PresentedResponse,
         *,
         speak: Callable[[str, str], None] | None = None,
+        still_current: Callable[[], bool] | None = None,
     ) -> bool:
         """Queue voice without blocking capture; text is displayed by the caller."""
         if response.channel is ResponseChannel.TEXT_ONLY:
@@ -130,25 +138,83 @@ class ResponseSpeaker:
             self._active.set()
             self._idle.clear()
             try:
-                self._queue.put_nowait((response, speak))
+                self._queue.put_nowait(
+                    (self._generation, response, speak, still_current)
+                )
             except Full:
                 return False
         return True
 
+    def replace(
+        self,
+        response: PresentedResponse,
+        *,
+        speak: Callable[[str, str], None] | None = None,
+        still_current: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Interrupt current voice and make this the only pending announcement."""
+        with self._lock:
+            if self._closed.is_set():
+                return False
+            self._generation += 1
+            self._clear_pending()
+            interrupt = getattr(self._synthesizer, "interrupt", None)
+            if callable(interrupt):
+                interrupt()
+            self._active.set()
+            self._idle.clear()
+            self._queue.put_nowait(
+                (self._generation, response, speak, still_current)
+            )
+        return True
+
+    def interrupt(self) -> None:
+        """Stop an obsolete announcement without replacing it."""
+        with self._lock:
+            self._generation += 1
+            self._clear_pending()
+            interrupt = getattr(self._synthesizer, "interrupt", None)
+            if callable(interrupt):
+                interrupt()
+            if not self._speaking:
+                self._active.clear()
+                self._idle.set()
+
+    def _clear_pending(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except Empty:
+                return
+
     def _run(self) -> None:
         while not self._closed.is_set() or not self._queue.empty():
             try:
-                response, speak = self._queue.get(timeout=0.05)
+                generation, response, speak, still_current = self._queue.get(
+                    timeout=0.05
+                )
             except Empty:
                 continue
+            started = False
             try:
-                (speak or self._synthesizer.speak)(response.text, response.language)
+                with self._lock:
+                    current = generation == self._generation and (
+                        still_current is None or still_current()
+                    )
+                    if current:
+                        self._speaking = True
+                if current:
+                    started = True
+                    (speak or self._synthesizer.speak)(response.text, response.language)
             except SpeechSynthesisError as exc:
                 self._on_error(exc)
             finally:
-                if self._tail_s:
+                if started and self._tail_s and generation == self._generation:
                     sleep(self._tail_s)
                 with self._lock:
+                    if started:
+                        self._speaking = False
                     if self._queue.empty():
                         self._active.clear()
                         self._idle.set()
@@ -160,8 +226,10 @@ class ResponseSpeaker:
             raise ValueError("timeout_s must be nonnegative")
         return self._idle.wait(timeout_s)
 
-    def close(self) -> None:
+    def close(self, *, timeout_s: float = 27) -> None:
         """Finish current playback; discard queued voice when the session ends."""
+        if timeout_s < 0:
+            raise ValueError("timeout_s must be nonnegative")
         with self._lock:
             self._closed.set()
             while True:
@@ -170,7 +238,8 @@ class ResponseSpeaker:
                     self._queue.task_done()
                 except Empty:
                     break
-        self._worker.join(timeout=16)
+        # Speech Dispatcher has a 25-second deadline in the desktop adapter.
+        self._worker.join(timeout=timeout_s)
         if self._worker.is_alive():
             raise SpeechSynthesisError("speech worker did not stop")
         self._active.clear()

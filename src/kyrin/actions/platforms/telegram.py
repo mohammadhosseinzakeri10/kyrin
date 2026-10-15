@@ -3,6 +3,7 @@
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Protocol
 
 from kyrin.actions.executor import ActionExecutor
@@ -12,7 +13,25 @@ from kyrin.commands.models import CommandKind
 
 _HELPER = Path(__file__).with_name("telegram_portal_helper.py")
 _SAVED_MESSAGES_TARGETS = frozenset({"saved messages", "saved massages"})
+_SEARCH_SETTLE_SECONDS = 3.0
+_SEARCH_POLL_SECONDS = 0.2
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
+
+
+def _same_search_box(first: ChatSearchMatch, second: ChatSearchMatch) -> bool:
+    """Allow minor OCR box jitter while keeping one result and image size fixed."""
+    return (
+        (first.image_width, first.image_height)
+        == (second.image_width, second.image_height)
+        and all(
+            abs(left - right) <= 5
+            for left, right in zip(
+                (first.left, first.top, first.width, first.height),
+                (second.left, second.top, second.width, second.height),
+                strict=True,
+            )
+        )
+    )
 
 
 class ChatVerifier(Protocol):
@@ -131,12 +150,8 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
-        match = self._verifier.find_search_result(*identity, target)
+        match = self._settled_search_result(identity, target)
         if match is None:
-            return ActionResult(
-                request.key, ActionOutcome.FAILED, error_code="chat_search_uncertain"
-            )
-        if self._verifier.find_search_result(*identity, target) != match:
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="chat_search_uncertain"
             )
@@ -170,3 +185,20 @@ class TelegramSavedMessagesExecutor:
         return ActionResult(
             request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
         )
+
+    def _settled_search_result(
+        self, identity: tuple[str, int], target: str
+    ) -> ChatSearchMatch | None:
+        """Wait briefly for Telegram's results; click only after two matching reads."""
+        deadline = monotonic() + _SEARCH_SETTLE_SECONDS
+        previous: ChatSearchMatch | None = None
+        while monotonic() < deadline:
+            current = self._verifier.find_search_result(*identity, target)
+            if current is not None and previous is not None:
+                if _same_search_box(previous, current):
+                    return current
+            previous = current
+            remaining = deadline - monotonic()
+            if remaining > 0:
+                sleep(min(_SEARCH_POLL_SECONDS, remaining))
+        return None

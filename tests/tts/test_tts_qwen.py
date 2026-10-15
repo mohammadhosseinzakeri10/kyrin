@@ -101,7 +101,10 @@ def test_qwen_uses_offline_loading_and_selected_speaker(
     monkeypatch.setattr(
         tts_runtime,
         "import_module",
-        lambda _: SimpleNamespace(play=lambda *args, **kwargs: calls.append("played")),
+        lambda _: SimpleNamespace(
+            play=lambda *args, **kwargs: calls.append("played"),
+            wait=lambda: None,
+        ),
     )
     choice = TtsSelection("qwen3tts", folder, "5", 1.0, DevicePreference.CPU)
     ConfiguredSpeechSynthesizer(

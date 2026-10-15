@@ -144,6 +144,32 @@ def test_engine_respects_device_and_releases_preloaded_server(
     assert closed == [True]
 
 
+def test_cancel_active_inference_stops_owned_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[bool] = []
+
+    class FakeServer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def transcribe(self, pcm: bytes, language: str) -> str:
+            return ""
+
+        def close(self) -> None:
+            closed.append(True)
+
+    monkeypatch.setattr("kyrin.stt.backends.whisper.WhisperCppServer", FakeServer)
+    engine = WhisperEngine("server", "model")
+    session = engine.open_session(SpeechToTextOptions())
+
+    engine.cancel_pending_inference()
+    session.close()
+    engine.close()
+
+    assert closed == [True]
+
+
 def test_gpu_engine_reports_gpu_and_rejects_cpu_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

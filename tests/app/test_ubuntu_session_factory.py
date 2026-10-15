@@ -17,6 +17,7 @@ from kyrin.app.platforms import ubuntu
 from kyrin.app.settings import (
     AllowedApp,
     AppSettings,
+    AppSpokenAliases,
     CommandModelSelection,
     SttSelection,
 )
@@ -41,6 +42,12 @@ from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.system_power.flow import (
+    InertPowerBackend,
+    PowerAction,
+    PowerStage,
+    SystemPowerFlow,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -176,6 +183,110 @@ def _settings(tmp_path: Path, **changes: object) -> AppSettings:
         allowed_apps=(AllowedApp("telegram", "telegram.desktop"),),
     )
     return replace(base, **changes)
+
+
+def test_power_reply_during_voice_playback_is_accepted_with_echo_cancellation(
+    tmp_path: Path,
+) -> None:
+    class BusySpeaker:
+        def __init__(self) -> None:
+            self.is_active = True
+
+    class ReadyEchoCancellation:
+        closed = False
+
+        def start(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            self.closed = True
+
+    prompts = []
+    flow = SystemPowerFlow(InertPowerBackend(), prompts.append, enabled=True)
+    echo = ReadyEchoCancellation()
+    speaker = BusySpeaker()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        response_speaker=cast(ubuntu.ResponseSpeaker, speaker),
+        system_power=flow,
+        echo_cancellation_factory=lambda: cast(ubuntu.PipeWireEchoCancellation, echo),
+    )
+    settings = _settings(
+        tmp_path,
+        microphone_device_key=None,
+        action_execution_enabled=True,
+        system_power_enabled=True,
+    )
+    with factory(settings):
+        assert flow.start(PowerAction.RESTART)
+        for _ in range(100):
+            if any(prompt.stage is PowerStage.FIRST for prompt in prompts):
+                break
+            Event().wait(0.01)
+        assert flow.on_final_speech("Yes")
+        assert any(prompt.stage is PowerStage.SECOND for prompt in prompts)
+    assert echo.closed
+
+
+def test_cleanup_closes_stt_even_if_echo_cancellation_close_fails(
+    tmp_path: Path,
+) -> None:
+    class FaultyEchoCancellation:
+        def start(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            raise RuntimeError("echo cleanup failed")
+
+    engine = FakeEngine()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: engine},
+        on_event=lambda event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        response_speaker=cast(ubuntu.ResponseSpeaker, object()),
+        echo_cancellation_factory=lambda: cast(
+            ubuntu.PipeWireEchoCancellation, FaultyEchoCancellation()
+        ),
+    )
+    settings = _settings(tmp_path, microphone_device_key=None)
+
+    with pytest.raises(RuntimeError, match="echo cleanup failed"):
+        with factory(settings):
+            pass
+
+    assert engine.closed
+
+
+def test_failed_capture_stop_cancels_owned_inference_without_closing_active_engine(
+    tmp_path: Path,
+) -> None:
+    class CancellableEngine(FakeEngine):
+        cancelled = False
+
+        def cancel_pending_inference(self) -> None:
+            self.cancelled = True
+
+    engine = CancellableEngine()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: engine},
+        on_event=lambda event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+    )
+
+    with pytest.raises(ubuntu.AudioCaptureStopError):
+        with factory(_settings(tmp_path)):
+            raise ubuntu.AudioCaptureStopError("session still active")
+
+    assert engine.cancelled
+    assert not engine.closed
 
 
 def test_dry_run_allows_only_configured_app_without_executing(
@@ -329,6 +440,43 @@ def test_registered_long_app_names_reach_stt_only_if_backend_supports_hints(
     assert seen[1].vocabulary_hints == ()
 
 
+def test_omnilingual_uses_longer_pause_without_changing_other_engines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class CaptureSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            self.factory()
+            yield TranscriptUpdate(0, "", TranscriptStatus.FINAL, "en")
+
+    pauses: list[int] = []
+
+    def pipeline(*args: object, **kwargs: object) -> object:
+        pause = kwargs["pause_confirm_ms"]
+        assert isinstance(pause, int)
+        pauses.append(pause)
+        return object()
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", CaptureSpeechController)
+    monkeypatch.setattr(ubuntu, "LiveSpeechPipeline", pipeline)
+    catalog = _catalog(tmp_path)
+    for backend in ("fake", "omnilingual"):
+        settings = _settings(
+            tmp_path, stt=SttSelection(backend, tmp_path / "model", "en")
+        )
+        factory = ubuntu.UbuntuSessionFactory(
+            stt_openers={backend: lambda selection: FakeEngine()},
+            on_event=lambda event: None,
+            microphones=FakeMicrophones(),
+            source_factory=lambda config: object(),
+            catalog=catalog,
+            detector_factory=lambda: object(),
+        )
+        with factory(settings) as runtime:
+            runtime.run()
+
+    assert pauses == [384, 800]
+
+
 def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -358,6 +506,50 @@ def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
 
     events.clear()
     with factory(_settings(tmp_path)) as runtime:
+        runtime.run()
+    assert not any(isinstance(event, ActionRequest) for event in events)
+
+
+def test_session_uses_saved_aliases_and_unbound_name_collision_abstains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class AliasSpeechController(FakeSpeechController):
+        phrase = "Open my messenger"
+
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, self.phrase, TranscriptStatus.FINAL, "en")
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", AliasSpeechController)
+    events: list[ubuntu.ApplicationEvent] = []
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+    )
+    allowed = _settings(
+        tmp_path,
+        app_spoken_aliases=(
+            AppSpokenAliases("telegram.desktop", ("my messenger",)),
+        ),
+    )
+    with factory(allowed) as runtime:
+        runtime.run()
+    assert [
+        event.intent.target for event in events if isinstance(event, ActionRequest)
+    ] == ["telegram"]
+
+    events.clear()
+    AliasSpeechController.phrase = "Open Browser"
+    collision = replace(
+        allowed,
+        app_spoken_aliases=(
+            AppSpokenAliases("telegram.desktop", ("Browser",)),
+        ),
+    )
+    with factory(collision) as runtime:
         runtime.run()
     assert not any(isinstance(event, ActionRequest) for event in events)
 

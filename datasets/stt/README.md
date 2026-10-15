@@ -101,6 +101,32 @@ consent. The corresponding local `manifest.safety.csv` and recordings are
 Git-ignored. A human must confirm the spoken wording of every accepted clip
 before the reference can be scored; a saved template is not proof of speech.
 
+`manifest.neutral.template.csv` has four ordinary English/Persian sentences,
+including two that mention Telegram without asking KYRIN to do anything.
+The recorder exposes their `neutral-*` IDs. The owner authorized and recorded
+all four prompts on 2026-10-15, then confirmed the exact wording of all four
+repeated captures. The ignored `manifest.neutral.csv` points only to the
+single-utterance crops below. The default 12-command comparison does not
+include these neutral files.
+
+| ID | Interval kept from 20-second repeat |
+| --- | --- |
+| `neutral-en-01` | 1.0–4.5 s |
+| `neutral-en-02` | 1.4–5.5 s |
+| `neutral-fa-01` | 7.5–11.7 s |
+| `neutral-fa-02` | 6.5–12.2 s |
+
+The first short captures in `recordings/neutral-*.wav` clipped or missed the
+utterance at a file edge. They and exploratory result
+`results/local-model-comparison-20261015-071257/` are excluded from accuracy
+claims. Complete 20-second repeats are retained in
+`recordings/speakers/speaker-retry-01/`; the scored crops are in
+`recordings/segments/neutral-*-retry1.wav`. Valid Whisper CPU and Omnilingual
+LLM 300M GPU reports are `results/local-model-comparison-20261015-071734/`
+and `results/local-model-comparison-20261015-071807/`. Both models proposed
+no desktop action for all four ordinary sentences. This one-speaker sample
+is a diagnostic, not a population false-action estimate.
+
 The owner authorized and recorded all four prompts on 2026-10-10. A first
 near-silent English close attempt was rejected; the owner reported missing its
 start cue. The accepted captures are 20 seconds each, with the USB microphone

@@ -28,6 +28,7 @@ class RecognitionPage(QWidget):
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Vosk", "vosk")
         self.backend_combo.addItem("Whisper", "whisper")
+        self.backend_combo.addItem("Omnilingual ASR", "omnilingual")
         self.backend_combo.setAccessibleName("Speech recognition engine")
         form.addRow(label("backend"), self.backend_combo)
 

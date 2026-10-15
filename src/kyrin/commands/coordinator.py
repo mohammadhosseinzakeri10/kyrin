@@ -242,19 +242,29 @@ class CommandCoordinator:
             elif isinstance(interpretation.pending, PendingAppClarification):
                 candidates = interpretation.pending.candidates
                 confirm = interpretation.pending.confirmation
+                close_app = (
+                    interpretation.pending.operation is CommandKind.CLOSE_APP_WINDOW
+                )
                 events.append(
                     ResponseRequest(
                         update.segment_id,
-                        ResponseKind.CONFIRM_APP
-                        if confirm
-                        else ResponseKind.CHOOSE_APP,
-                        ResponseChannel.TEXT_AND_VOICE,
+                        (
+                            ResponseKind.CONFIRM_ACTION
+                            if close_app and confirm
+                            else ResponseKind.CONFIRM_APP
+                            if confirm
+                            else ResponseKind.CHOOSE_APP
+                        ),
+                        ResponseChannel.TEXT_ONLY,
                         stream_id=self._stream_id,
                         target=candidates[0].display_name if confirm else None,
                         app_candidates=(
                             ()
                             if confirm
                             else tuple(item.display_name for item in candidates)
+                        ),
+                        operation_candidates=(
+                            (CommandKind.CLOSE_APP_WINDOW,) if close_app else ()
                         ),
                         language=update.language,
                     )
@@ -354,7 +364,7 @@ class CommandCoordinator:
                 ResponseRequest(
                     update.segment_id,
                     ResponseKind.REPEAT_COMMAND,
-                    ResponseChannel.TEXT_AND_VOICE,
+                    ResponseChannel.TEXT_ONLY,
                     stream_id=self._stream_id,
                     language=update.language,
                 )

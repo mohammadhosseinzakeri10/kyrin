@@ -148,10 +148,10 @@ class SystemPowerFlow:
         with self._lock:
             pending = self._pending
         if pending is not None:
-            # The microphone source is muted throughout KYRIN's own playback.
+            # Without echo cancellation, the microphone source is muted during playback.
             if not self._voice_ready():
                 return True
-            self.respond(pending.request_id, phrase, spoken=True)
+            self.respond(pending.request_id, phrase)
             return True
         action = recognized_power_request(text)
         if action is None:
@@ -182,6 +182,11 @@ class SystemPowerFlow:
     def set_announcement(self, callback: Callable[[PowerPrompt], None] | None) -> None:
         with self._lock:
             self._announcement = callback
+
+    def is_current_prompt(self, prompt: PowerPrompt) -> bool:
+        """Keep a delayed voice announcement tied to its visible confirmation."""
+        with self._lock:
+            return self._pending == prompt
 
     def _emit(self, prompt: PowerPrompt) -> None:
         self._publish(prompt)
@@ -256,7 +261,7 @@ class SystemPowerFlow:
         text = (
             f"{_PHRASES[action]} requested. {warning} "
             "KYRIN cannot verify unsaved files in every app. "
-            "Save your work. Say Yes or click Continue to proceed."
+            "Save your work. Say Yes or Continue, or click Continue to proceed."
         )
         with self._lock:
             if (
@@ -273,7 +278,7 @@ class SystemPowerFlow:
                 True,
                 speech_text=(
                     f"{_PHRASES[action]} requested. {warning} Save your work. "
-                    "Say Yes or choose Continue to proceed."
+                    "Say Yes or Continue to proceed."
                 ),
                 preview=preview,
             )
@@ -281,7 +286,7 @@ class SystemPowerFlow:
             self._deadline = self._clock() + self._timeout_s
         self._emit(prompt)
 
-    def respond(self, request_id: int, answer: str, *, spoken: bool = False) -> bool:
+    def respond(self, request_id: int, answer: str) -> bool:
         answer = _normalize(answer)
         reminder_only = False
         with self._lock:
@@ -295,7 +300,7 @@ class SystemPowerFlow:
                 stage = PowerStage.CANCELLED
                 text = "System action cancelled."
             elif pending.stage is PowerStage.FIRST and answer in (
-                _AFFIRMATIVE if spoken else _AFFIRMATIVE | {"continue"}
+                _AFFIRMATIVE | {"continue"}
             ):
                 stage = PowerStage.SECOND
                 phrase = _PHRASES[pending.action]
@@ -314,7 +319,7 @@ class SystemPowerFlow:
                 # becomes a confirmation or a new power action.
                 phrase = _PHRASES[pending.action]
                 text = "I could not confirm that. " + (
-                    "Say Yes or choose Continue."
+                    "Say Yes or Continue."
                     if pending.stage is PowerStage.FIRST
                     else f"Say '{phrase}' or choose its button."
                 )
@@ -323,15 +328,14 @@ class SystemPowerFlow:
                     pending.action,
                     pending.stage,
                     text,
-                    spoken,
+                    False,
                     phrase if pending.stage is PowerStage.SECOND else None,
                     preview=pending.preview,
                 )
                 self._pending = reminder
                 prompt = reminder
                 stage = pending.stage
-                # A reminder is displayed and may be spoken, but cannot reach
-                # the submitting branch below.
+                # Repetition stays visual and cannot feed another voice loop.
                 reminder_only = True
             if not reminder_only:
                 prompt = PowerPrompt(
@@ -342,6 +346,12 @@ class SystemPowerFlow:
                     stage
                     in (PowerStage.SECOND, PowerStage.CANCELLED, PowerStage.EXPIRED),
                     _PHRASES[pending.action] if stage is PowerStage.SECOND else None,
+                    speech_text=(
+                        f"Final confirmation. Say exactly {_PHRASES[pending.action]}, "
+                        "or click the matching button. You can still cancel."
+                        if stage is PowerStage.SECOND
+                        else None
+                    ),
                     preview=pending.preview,
                 )
                 self._pending = prompt if stage is PowerStage.SECOND else None

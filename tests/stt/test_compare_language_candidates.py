@@ -64,6 +64,21 @@ def test_negated_reference_distinguishes_abstention_from_unsafe_action() -> None
     )
 
 
+def test_ordinary_speech_with_app_name_must_not_propose_action() -> None:
+    expected = {"route": "no_action", "steps": []}
+    assert (
+        score_proposal(
+            interpret_without_action("Telegram is a messaging app", "en"),
+            expected,
+        )
+        == "no_action_or_abstention"
+    )
+    assert (
+        score_proposal(interpret_without_action("Open Telegram", "en"), expected)
+        == "unsafe_action"
+    )
+
+
 def test_same_hints_are_sent_to_every_decode_without_using_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

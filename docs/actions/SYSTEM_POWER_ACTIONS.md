@@ -15,7 +15,7 @@ needs its own verified recognition path before voice power control is enabled.
 `SystemPowerFlow` owns one pending request with a 45-second deadline. Only a
 final transcript can start or advance it. A pending request consumes unrelated
 speech instead of passing it to ordinary command interpretation. The first
-answer is an exact `Yes` or the Continue button. The second is a short,
+answer is `Yes` or `Continue` by voice or the Continue button. The second is a short,
 action-specific phrase shown in the UI or its matching button: `Power off`,
 `Restart computer`, `Log out`, or `Suspend computer`. `Okay` and a second `Yes`
 cannot confirm the final step. Unclear speech keeps the same request and
@@ -23,20 +23,22 @@ deadline and asks for repetition. It cannot switch to another power action.
 Either voice or click may be used at either stage. Cancel, timeout,
 microphone-session shutdown, and permission revocation clear the pending
 request. Stale button events use the request ID and cannot confirm a newer
-request. KYRIN's own speech playback is excluded from microphone input by
-`PlaybackGuardInput`; the flow also rejects spoken confirmation while the
-configured response speaker is active.
+request. During a listening session with PipeWire echo cancellation, spoken
+confirmation can be accepted while KYRIN's response speaker is active.
+Without echo cancellation, `PlaybackGuardInput` and the voice-ready check
+suppress KYRIN's own playback. Unclear replies update the dialog in text only,
+avoiding a voice feedback loop.
 
 The Qt application shows a separate, non-modal confirmation window over the
-desktop. It appears while checking the session warning, then displays both
-confirmation stages. The main settings window is not brought forward. Closing
-the confirmation window cancels the request. Spoken announcements use the
-existing offline Speech Dispatcher adapter at a slower rate, through the
-replaceable `SpeechSynthesizer` contract. One speaker is shared with the
-listening session so microphone input is suppressed during playback. If the
-local speech service is unavailable, text and buttons remain available and a
-voice-output error is shown in the confirmation window. This first product voice is not the previously
-preferred Kitten voice; that voice remains future work.
+desktop. It labels the initial check as "no confirmation yet" and then labels
+the two confirmation stages as 1 of 2 and 2 of 2. The main settings window is
+not brought forward. Closing the confirmation window cancels the request.
+Power prompts are shown and spoken through the shared speech synthesizer.
+With PipeWire echo cancellation, users can answer while the prompt is playing;
+the two required stages remain. The final spoken prompt states the phrase,
+button option, and cancel option. If the user advances before a local TTS model
+finishes generating a stage prompt, that now-obsolete audio is discarded before
+playback rather than speaking over the next screen.
 
 Before the first answer, the GNOME adapter queries `IsInhibited(1)` for logout,
 shutdown, and reboot, or `IsInhibited(4)` for suspend. A reported inhibitor is

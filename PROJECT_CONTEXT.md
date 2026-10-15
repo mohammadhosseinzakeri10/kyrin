@@ -1,11 +1,21 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-14.
+> Updated: 2026-10-15.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **Shutdown and packaging follow-up (2026-10-15):** An in-process CPU TTS
+> generation can hold the model lock. Desktop shutdown now waits at most two
+> seconds for that lock and at most one further second for a still-busy speech
+> thread, leaving its model intact until process exit. Normal isolated-worker
+> shutdown remains explicit. A blocked-generation regression test passes; a
+> real stalled CPU model has not been induced. Development model discovery now
+> requires a verified source-checkout layout, while an installed wheel uses
+> the application model library fallback. This path check is not a complete
+> portable package or installed-environment validation.
 
 > **TTS catalog consolidation (2026-10-13):** The owner clarified that all TTS
 > families should share the project's `models/local/by-model/tts/` root, with
@@ -3784,3 +3794,435 @@ now use the dark theme, and longer guidance labels wrap. Offscreen visual
 checks covered the top and bottom of all nine pages in Persian; deterministic
 geometry tests cover English and Persian at the minimum window size and a
 30-app Desktop Actions list. Live desktop feedback remains open.
+
+## 117. Spark-X2.5 Q8 local startup and exploratory STT correction audit
+
+The owner downloaded the official Spark-X2.5-4B Q8_0 GGUF to
+`models/local/by-model/command-understanding/spark-x2.5-4b/`. The official
+llama.cpp Ubuntu CPU release b11617 was placed under the ignored
+`local-data/kyrin/runtimes/command-understanding/` tree; its archive SHA-256
+matched the GitHub release asset digest. The 4,375,021,152-byte model loaded
+on CPU and generated `Open Telegram` from a short `Open Telegrm` smoke prompt.
+GPU access was unavailable from the sandbox. No live KYRIN model selection,
+action path, or setting changed.
+
+An offline, no-action comparison then reused the saved Whisper `small` automatic
+transcripts from 15 speaker-verified recordings (two speakers, 10 positive and
+five negative commands). The transcript, never the verified spoken reference,
+was supplied to Spark; the reference was used only for scoring. A conservative
+spelling prompt changed none of the 15 texts. An exploratory prompt restricted
+to names already present changed six texts, mostly capitalization, but the
+dry-run rule interpreter still recognized only five of 10 positive intents,
+the same as without correction. Neither variant produced an intent from the
+five negative cases. Crucially, the exploratory prompt shortened
+`مرورگر رو باسکن` to `مرورگر`, deleting the command words and increasing its
+character distance from the verified speech. The five no-intent negative
+results include unreadable transcripts and are not evidence that the model
+understood negation. The second prompt was revised after inspecting the same
+cases, so its result is exploratory, not held-out performance. The two detailed
+reports are in ignored `datasets/stt/results/spark-q8-*-2026-10-14.json` files.
+This experiment does not support adding an unrestricted correction layer to
+the live command path. A future candidate needs independent evidence and a
+validator that rejects changes to operation or negation words before any live
+integration.
+
+## 118. Spark versus selected Qwen 4B command-understanding diagnostic
+
+The next offline comparison used the selected local `qwen3.5:4b` GGUF and
+Spark-X2.5-4B Q8_0 with the same llama.cpp b11617 CPU runtime, six threads,
+4,096-token context, zero temperature, JSON schema, and shared benchmark
+instructions. Native chat templates differed by model. The prompt was refined
+once on the separate `en-open-telegram` pilot to state that action routes must
+not carry nonempty uncertainty. No desktop executor, live setting, or
+microphone was involved. The scored set contained the 15 previously verified
+speech clips' saved Whisper `small` automatic transcripts plus nine designed
+negation, ambiguity, and app-versus-system scope cases. It is a small
+development diagnostic, not representative accuracy evidence or a test of
+the exact live Ollama adapter prompt.
+
+Whisper's saved language names were initially passed to the models directly.
+The live `WhisperCppServer.transcribe_auto` normalizes these to ISO codes, so
+the 15 speech cases were rerun for both models with that same mapping; the
+initial full-name-language report remains exploratory. In the corrected
+speech comparison, Spark returned valid proposal JSON for 13/15 and exactly
+matched reference route and steps for 2/15, both clear English Telegram opens.
+Qwen returned valid JSON for 13/15 and exactly matched 5/15. Among the 10
+positive speech references, these are 2/10 and 5/10 correct action proposals.
+None of the five negative speech cases produced a valid execute proposal;
+unreadable negatives still count as abstentions, not proven understanding.
+
+Across all 24 cases (using the nine unchanged designed-case results), Spark
+had 18 valid outputs, four exact route-and-step matches, and one valid unsafe
+proposal. For `Do not open Telegram; open the browser instead`, it proposed
+opening the browser *and closing Telegram*, although no close was requested.
+Its source-operation verifier rejected the extra operation. Several other
+Spark outputs were invalid, including a system-restart step with an app target
+for `Restart Telegram`; the decoder rejected those before any action. Qwen
+had 21 valid outputs, eight exact matches, and no valid unsafe proposal in
+this set; three invalid responses also failed closed. The fixed-catalog,
+source-grounded replay yielded one correct resolved proposal for Spark and
+four for Qwen on the 15 speech cases, with zero unsafe resolved proposals for
+either. That boundary deliberately abstains on unsupported languages and
+negated clauses, so these counts are not end-to-end live success rates.
+
+The median wall time per isolated CPU invocation was about 12.4 seconds for
+Spark and 10.5 seconds for Qwen; each invocation reloaded its model, so these
+are not warmed serving latencies. Detailed ignored reports and prompts are
+under `datasets/commands/results/spark-vs-qwen4b-*-2026-10-14.*`. The
+experiment does not support replacing the selected Qwen 4B model with Spark
+or enabling Spark for live actions. The independent source, target, and
+permission checks remain necessary for any future candidate.
+
+## 119. Portable installed-app vocabulary for post-STT recovery
+
+The owner clarified a product requirement for the proposed post-STT word
+recovery: app names must be discovered dynamically from each user's registered
+applications and relevant saved settings. A vocabulary copied from this
+development machine or limited to Telegram and browsers would not satisfy the
+cross-platform product goal. Recognition of a registered app name and
+authorization to operate that app are separate decisions. The correction stage
+may consider all registered names as candidates, while the existing bindings,
+action policy, and confirmation checks continue to govern actions. The original
+STT text must remain available; uncertain name matches are suggestions, not
+silent changes to command operations or negation.
+
+The repository already has a platform-neutral `AppCatalog` contract and
+`InstalledApp` metadata. The current `CatalogSpokenAppResolver`, however,
+indexes only explicitly bound applications. Ubuntu populates it through XDG
+desktop entries and supplies reviewed Telegram/browser aliases in code.
+`AllowedApp.desktop_id` is Ubuntu-specific, and no other OS catalog adapter is
+present yet. A future platform adapter must supply its own registered-app
+catalog and binding mechanism without changing the portable matching policy.
+Per-user spoken aliases, if introduced, belong in settings keyed to stable app
+identity, with validation for collisions and stale registrations. The earlier
+fixed STT vocabulary-hint experiment did not justify pushing the full catalog
+into the recognizer prompt; the proposed use is downstream candidate matching.
+
+## 120. Dynamic registered-app name matching and user aliases implemented
+
+The owner approved implementation with cross-user and cross-platform design as
+the primary constraint. The platform-neutral `CatalogSpokenAppResolver` now
+indexes every `InstalledApp` returned by its injected `AppCatalog`, including
+unbound apps. It still returns only explicitly bound apps to command callers.
+An exact name collision with an unbound app abstains; a sufficiently near
+unbound app also blocks fuzzy suggestions. This avoids "correcting" speech to
+a different permitted application merely because the intended installed app
+was not allowlisted. Approximate permitted candidates retain the existing
+explicit clarification flow. Raw STT text, operation checks, action policy,
+and executor authorization are unchanged.
+
+`AppSpokenAliases` stores bounded per-user alternate names keyed by catalog
+platform ID, independently of action permission. Settings schema 10 reads
+versions 1-9 with empty aliases and strictly validates new entries. Ubuntu
+session composition supplies these aliases to the portable resolver. The Qt
+Desktop Actions page lets users select a listed application and edit its
+spoken names even when the application is unchecked for control. Stale aliases
+remain keyed by platform ID and are ignored while that ID is absent.
+`InstalledApp.alternate_names` also carries localized labels supplied by a
+platform catalog; XDG reads registered `Name[...]` values without a manual
+machine vocabulary.
+The small reviewed Telegram/browser aliases remain for existing behavior;
+registered names and user aliases provide dynamic vocabulary for other apps.
+No model weight, new dependency, or universal transcript rewrite was added.
+
+The implementation is live in the existing Ubuntu product path. Windows,
+macOS, and mobile runtime adapters remain future work, as they were before
+this change; the matching code requires only the `AppCatalog` protocol and
+has a non-XDG test catalog. Focused settings, resolver, Ubuntu composition,
+and Qt tests passed. Full-suite behavior and live microphone performance need
+separate verification if claimed later.
+
+## 121. Installed Ubuntu app refreshed and real-catalog dry run
+
+On 2026-10-15, the owner approved the next activation step. The managed menu
+and autostart launchers both pointed to this checkout's
+`.venv/bin/kyrin-desktop`; the virtual environment used an editable install
+with its import path at this checkout's `src/`. No reinstall was needed. The
+running desktop process was stopped and relaunched in the same graphical user
+session. The replacement process stayed running and created its single-instance
+control socket. Its log contained a nonfatal host-portal app-ID registration
+warning. The saved settings loaded with action execution enabled, 65 allowed
+bindings, zero custom spoken aliases, and listening disabled. This step did
+not change permissions, settings, or start the microphone.
+
+A no-action dry run against the machine's current XDG catalog found 145
+registered apps, 65 bound app IDs, and 80 unbound registrations. Exact
+`Telegram`, `تلگرام`, `Visual Studio Code`, and `Firefox` resolved to their
+configured IDs. Approximate `Visual Studio Cod` produced only a suggestion.
+An exact sample unbound app name returned no command candidate. This confirms
+the editable installation and actual catalog integration for these examples;
+it does not replace a coordinated live microphone test or measure recognition
+quality across users and operating systems.
+
+The existing 15 verified Whisper-auto transcript cases were also replayed
+through the bounded interpreter with the current user catalog and settings,
+without microphone or actions. Four of ten reference action cases produced
+an action intent, three produced a response request, and none of five
+reference no-action cases produced an intent. The user's settings have no
+generic `browser` binding, so clear `Open browser` examples ask the user to
+choose from permitted browsers. These counts are exploratory and reflect
+the current settings and saved STT outputs, not new STT accuracy or live
+microphone performance.
+
+## 122. Close-Claude clarification loop diagnosed and fixed
+
+The owner reported live English transcripts in which `Close.` was followed by
+`Cloud`, then several `Yes.` replies left the request at `confirm_app`. The
+fragment buffer can combine the first two transcripts within its four-second
+window. Replaying them with the registered Claude app showed that the rules
+correctly move from app-identity clarification to a separate close-action
+confirmation on the first `Yes.`, and produce `close_app_window` on the
+second. The model-assisted wrapper had instead sent that first reply back to
+the confirmation model because it treated every `NeedsClarification` as the
+same pending question. If that model was unavailable, it restored the old
+`confirm_app` state indefinitely. Its question also incorrectly said `Open`
+for a pending close request.
+
+`ModelAssistedInterpreter` now preserves a rules-produced transition to a
+different pending clarification, accepts completed or declined rule outcomes
+directly, and does not classify an explicit new operation as a yes/no reply to
+an older app question. Its app-identity question is operation-neutral.
+Regression tests cover `Close.` / `Cloud` / `Yes.` / `Yes.` and a new
+`Close the code` command during an older clarification. The command, desktop,
+and app test groups passed (511 tests, excluding the two host-socket tests
+that cannot run in the sandbox); lint and type checks on changed files passed.
+The editable desktop app was restarted with the fix and its host process was
+confirmed running. No live microphone retest has yet confirmed the spoken
+flow. Short or misrecognized STT outputs such as `Close.`, `Load.`, and
+`Open Kailin.` remain a separate recognition/fragmentation issue.
+
+## 123. One confirmation for an approximate close target
+
+The owner tested the fixed clarification flow with OnlyOffice and found the
+two separate yes/no turns unnecessarily repetitive: `Close only Office` asked
+first whether OnlyOffice was the intended app and then whether to close it.
+The chosen behavior is one explicit, action-bearing confirmation. For a
+single approximate target, KYRIN now asks whether to close the named app; a
+single yes confirms both the app candidate and close action. A no declines it.
+For several candidates, KYRIN asks which app to close, and the selection
+completes that close request. Exact close requests and the separate Terminal
+and numbered-window confirmation paths retain their existing rules. The
+allowlist and action gate still check the final intent before execution.
+Command, desktop, app, and response tests passed after this change. The
+editable desktop process was restarted in the graphical session with the new
+code. Live microphone behavior still requires the owner's retest.
+
+## 124. Silent recognition clarifications and provisional PipeWire barge-in
+
+The owner asked that an unclear or misspelled speech result not trigger a
+spoken announcement, because reading the on-screen response is faster than
+waiting for TTS. `REPEAT_COMMAND` and `PendingAppClarification` responses now
+use `TEXT_ONLY`; action confirmation unrelated to name correction retains its
+previous channel. The presenter still shows the localized question.
+
+The owner also asked to speak while KYRIN's voice is playing and reported
+separate loudspeaker and microphone hardware. The existing `PlaybackGuardInput`
+silenced all microphone chunks during TTS and therefore prevented barge-in.
+PipeWire's bundled echo-cancel module is available on this Ubuntu host. A
+temporary Ubuntu-session adapter now creates a virtual WebRTC echo-cancelled
+source in monitor mode when the default microphone is selected. A separate
+`PipeWireEchoInput` reads its 16 kHz mono PCM. The app bypasses the playback
+guard only while this source is active; if module setup is unavailable or a
+nondefault microphone is explicitly selected, it retains the guard. No global
+audio defaults are changed and no new package is downloaded. The module and
+capture process are stopped with the listening session.
+
+The temporary source was created and one 20 ms chunk was read on the owner's
+machine without storing the audio. Focused unit tests and command/response/app
+tests passed (559 tests). The editable desktop process was restarted with the
+new code; saved listening remains disabled and the selected microphone is the
+default. This proves wiring and capture availability, not acoustic echo
+suppression or recognition quality while a person talks over TTS. The latter
+requires a live user test. Other operating systems need their own echo-cancel
+adapters or can retain the conservative playback guard.
+
+## 125. Power prompts no longer block spoken confirmation
+
+The owner observed that power-off and restart confirmations still required
+waiting for the spoken prompt to finish. The separate system-power flow had a
+`voice_ready` check based solely on the response speaker's active state, even
+when the Ubuntu listening session used the new PipeWire echo-cancelled source.
+The desktop application presents system-power prompts in text/dialog form and
+speaks them through the response speaker. While the echo-cancelled source is active, the
+flow accepts final spoken replies during KYRIN voice playback; without
+that source, the existing playback guard and voice-ready check remain. Spoken
+`Continue` is accepted at the first stage alongside `Yes`, matching the button
+label and updated prompt. The second stage still requires the exact displayed
+action phrase or matching button. No change was made to the two-stage safety
+requirement or the underlying GNOME power backend. Focused tests cover the
+echo-cancelled active-speaker path and spoken `Continue`.
+The initial change mistakenly removed the system-power TTS announcement. It
+was restored after the owner reported silent prompts. The live power dialog
+and simultaneous microphone response still need the owner's retest;
+automated tests did not issue a real operating-system power request.
+One prior desktop process had been terminated outside the normal shutdown
+path and left its temporary PipeWire module and recorder running. Those exact
+orphaned processes were removed without touching the current listening
+session. The AEC adapter now detects and removes only stale KYRIN-named
+sources whose embedded desktop PID is no longer a running KYRIN process when
+the next listening session starts; ownership and executable identity are
+checked before terminating associated processes.
+
+## 126. Live preview exposed an ambiguous checking screen and repeated speech
+
+During an owner-run live safe preview, the dialog appeared to advance without
+speech and the prompt repeated several times. An immediate conservative guard
+was tried, but a follow-up report showed only `[BLANK_AUDIO]` in the STT
+diagnostic and the dialog's button still read `Continue`. This means the
+visible transition was the automatic `CHECKING` → `FIRST` progression after
+the inert backend returned, not a confirmed `FIRST` → `SECOND` voice reply.
+The temporary power-only guard was removed so PipeWire barge-in remains
+available. The dialog now explicitly labels checking as "no confirmation yet"
+and the confirmation stages as 1 of 2 and 2 of 2.
+
+Unclear power replies now update the dialog without submitting another spoken
+reminder; this prevents a possible TTS/recognition feedback loop. The second
+owner-run preview no longer reported repeated speech, but its stage report was
+initially ambiguous. Focused tests cover the stage labels, active-speaker
+reply path, and text-only reminders. A further owner-run safe preview is needed
+to verify acoustic barge-in with the distinct stage labels. Neither run sent
+an operating-system power request.
+
+## 127. Discard late power-stage speech
+
+The owner confirmed that the clearly labelled safe preview did not advance on
+its own. They then observed a voice timing issue: the first spoken prompt
+played, the next confirmation screen was initially silent, and its audio was
+heard only after they had answered that screen. The selected offline TTS is
+`kokoro` on GPU. The earlier prompt had finished before they said `Continue`,
+so its playback was not holding the queue. A plausible cause is model speech
+generation finishing after the stage had changed; this remains an inference,
+not an instrumented timing measurement.
+
+`ResponseSpeaker` now accepts an optional stage-validity callback and skips a
+queued prompt if its stage is obsolete. `ConfiguredSpeechSynthesizer` checks
+the same callback again after model generation, immediately before audio
+playback. `SystemPowerFlow` exposes whether a confirmation prompt is still
+current. The desktop power announcement wires these checks for the two active
+confirmation stages. This prevents
+audio that finishes preparing after a stage change from speaking on the next
+screen; it does not claim zero TTS preparation latency or stop speech that
+has already begun playing. Focused tests cover both skip points.
+
+In the follow-up, the owner heard only a shortened final-stage announcement
+through the phrase `Power off`, even while remaining silent. This matched an
+intentional shortening of `speech_text`, not proven audio truncation. The
+spoken final-stage message now includes the button and cancel options shown
+in the dialog. The full audio still needs an owner listening retest.
+
+## 128. Omnilingual ASR v2 local integration
+
+The owner downloaded six Meta Omnilingual ASR v2 checkpoints under
+`models/local/by-model/stt/omnilingual-asr/`, with one folder and tokenizer copy
+per model. KYRIN now lists these folders individually in the STT model library
+and offers `Omnilingual ASR` in Speech Recognition. The selected checkpoint is
+loaded in place through a Python 3.12 worker because the main application uses
+Python 3.14 and upstream `omnilingual-asr` currently requires `<3.14`. The
+worker uses local fairseq2 asset cards and sends final transcripts to the
+existing turn-aware STT boundary; it does not download checkpoint duplicates.
+The isolated runtime and its caches are under `local-data/`, with upstream
+package version 0.2.0 and compatible Torch, torchaudio, NumPy, and PyArrow
+versions. Setup and limitations are in `docs/stt/OMNILINGUAL_ASR_FA.md`.
+
+On this machine, `omniASR_CTC_300M_v2` loaded from the project folder and
+transcribed two existing English recordings on CPU. One returned an incorrect
+Ethiopic-script transcript; the other returned Latin-script text with CER
+0.263 on that single reference. These are smoke results, not an accuracy
+benchmark. The other five checkpoints and GPU inference have not been run.
+An offscreen Qt check listed all six local models, 84 focused tests passed,
+and the desktop process was restarted with the new engine code. The owner
+has not yet confirmed the visible selector or tried live microphone input.
+
+## 129. Local Omnilingual versus Whisper speech benchmark
+
+The owner approved implementing the next speech-to-command measurement step.
+The generic STT evaluator now reports word error rate as well as character
+error rate, supports the local Whisper adapter, and can write a new JSON
+report. A sequential comparison tool runs each model/language pair in an
+isolated subprocess, checks available CPU RAM or GPU VRAM before loading,
+and records per-file text, elapsed time, model load time, and peak child RSS.
+For GPU, it samples total card memory use and records the delta from the
+pre-run baseline. A separate diagnostic scores only speaker-verified command
+references with the bounded demo interpreter; it never reaches ActionGate or
+an OS executor. The WAV replay comparison tool also accepts Omnilingual.
+
+On the current development workstation, 12 existing, locally consented,
+single-speaker WAV files (four English, eight Persian) were scored on CPU.
+Whisper small had CER 0 on the four English files and 0.151 on the eight
+Persian files. Omnilingual CTC 300M scored 0.576 English and 0.078 Persian;
+CTC 1B scored 0.593 English and 0.108 Persian; LLM 300M scored 0.034
+English and 0.030 Persian. The CPU memory admission rule skipped CTC 3B,
+LLM 1B, and LLM 3B; their model integrity or accuracy has not been inferred
+from that skip. A GPU run of LLM 300M produced the same transcripts and
+scoring for this small corpus, with mean unpaced per-file processing around
+0.29 s English and 0.26 s Persian, excluding model load and recorded-speed
+capture. The later GPU-monitored repeat measured about 0.25 s English and
+0.27 s Persian per file. The CPU Persian mean for that model was 8.59 s per file. The
+speaker-verified command subset yielded three correct positive English
+proposals for Whisper small and two correct positive Persian proposals for
+LLM 300M, with the tested negative utterances producing no action proposal.
+No desktop action was executed. One Persian negation with LLM 300M and one
+English close command with Whisper also retained exact reference text through
+the paced VAD/STT replay path. A repeated GPU run observed roughly 3.6 GiB
+more total card memory used at peak than before each LLM 300M subprocess;
+this is a sampled device-wide delta, not exact per-process VRAM. This is a
+small development comparison, not a
+population accuracy estimate or a live microphone validation. Full method,
+reports, limitations, and commands are in
+`docs/stt/LOCAL_MODEL_COMPARISON_FA.md`.
+
+On 2026-10-15 the owner separately authorized four ordinary-speech microphone
+recordings and confirmed the exact wording of all four 20-second repeats.
+Four earlier short captures with utterances at file edges were excluded from
+scoring. The ignored `manifest.neutral.csv` points to one complete crop from
+each repeat. Whisper small on CPU scored 0.019 CER / 0.10 WER for the two
+English clips and 0.040 CER / 0.20 WER for the two Persian clips. Omnilingual
+LLM 300M on GPU scored 0.019 / 0.10 English and 0 / 0 Persian. The bounded
+interpreter proposed no action for all four neutral clips from either model.
+These are single-speaker diagnostics, not a false-action rate estimate.
+Paced VAD/STT WAV replay retained the same output as direct STT for neutral
+English `neutral-en-02` with Whisper and Persian `neutral-fa-01` with
+Omnilingual. For Persian `neutral-fa-02`, direct Omnilingual STT was exact,
+but VAD split the utterance into two starts and the live-path transcript
+misrecognized the Telegram word; the bounded interpreter still proposed no
+action. The VAD-positive runs were roughly 1.06–1.89 s and 2.53–4.99 s in
+the crop, leaving about 640 ms of non-speech. The generic 384 ms pause
+threshold ended the first turn at 2.24 s. Replaying the same WAV with an
+800 ms threshold kept one turn and yielded the exact reference text. Two
+verified Persian safety commands, one affirmative and one negated, also
+remained exact with 800 ms. Ubuntu composition now passes 800 ms to
+`LiveSpeechPipeline` for an Omnilingual selection only; other backends retain
+384 ms. The tradeoff is up to roughly 416 ms later finalization after silence
+and possible merging of separate utterances less than 800 ms apart. Actual
+microphone use inside the running desktop app and multiple-speaker behavior
+remain untested.
+Appending one second of silence to the problematic WAV confirmed that the
+800 ms setting still produces one start and one pause in a continuing stream,
+with an exact live-path transcript; it is not relying on end-of-file flush.
+
+## 130. Duplicate Google Chrome registrations caused repeat_command
+
+The owner reported three live `open google chrome` transcripts in English,
+each followed by `No action requested` and `repeat_command`. STT had produced
+the correct words. The current XDG catalog contains both
+`google-chrome.desktop` and `com.google.Chrome.desktop`, each labeled
+`Google Chrome` and each launching `/usr/bin/google-chrome-stable`. Only the
+first registration is in the owner's allowed bindings. The spoken-name
+resolver intentionally abstained on a duplicate registered label when one
+registration was unbound; the bounded rule interpreter therefore returned
+`UnrecognizedCommand`, which the coordinator presented as `repeat_command`.
+The selected command model was not the cause: an exact rules result precedes
+model interpretation.
+
+The owner explicitly chose the existing allowed `google-chrome.desktop` as
+the target for `Open Google Chrome`. The portable resolver now treats a single
+user-assigned spoken name equal to that entry's own display name as a choice
+among duplicate registrations. It does not let a name assigned to a different
+app override an existing catalog name; multiple user assignments stay
+ambiguous. The owner's ignored local settings now record `Google Chrome` as
+an alias on `google-chrome.desktop`, preserving all other settings. A dry run
+with the real catalog and saved settings produced `OPEN_APP` targeting
+`google-chrome` without executing the action. Focused resolver, settings, and
+Ubuntu composition tests cover the fix. The running desktop process must
+restart before it reads the changed code and settings; a live voice retest
+has not yet been observed.

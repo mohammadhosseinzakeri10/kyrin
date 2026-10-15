@@ -3,7 +3,7 @@
 import logging
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
@@ -29,6 +29,7 @@ from kyrin.actions.platforms.telegram import (
 from kyrin.actions.window_control import WindowControlExecutor
 from kyrin.app.controller import RuntimeSession
 from kyrin.app.events import ApplicationEvent, SttDeviceReady
+from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.settings import AppSettings, CommandModelSelection, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
@@ -75,7 +76,7 @@ from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import SpeechSessionController, SpeechSessionEnded
 from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
-from kyrin.stt.contracts import SpeechToTextEngine
+from kyrin.stt.contracts import CancellableSpeechToTextEngine, SpeechToTextEngine
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.system_power.flow import PowerBackend, PowerPrompt, SystemPowerFlow
@@ -100,6 +101,7 @@ def standard_stt_openers(
     *,
     whisper_server_path: Path | None = None,
     whisper_gpu_server_path: Path | None = None,
+    omnilingual_python: Path | None = None,
 ) -> dict[str, EngineOpener]:
     """Use the existing offline adapters; no model or server is downloaded."""
 
@@ -142,7 +144,23 @@ def standard_stt_openers(
             raise FileNotFoundError("Whisper CPU or GPU runtime is not installed")
         return open_on(whisper_server_path, ComputeDevice.CPU)
 
-    return {"vosk": open_vosk, "whisper": open_whisper}
+    def open_omnilingual(selection: SttSelection) -> SpeechToTextEngine:
+        from kyrin.stt.backends.omnilingual import OmnilingualEngine
+
+        if omnilingual_python is None:
+            raise FileNotFoundError("Omnilingual ASR runtime is not installed")
+        return OmnilingualEngine(
+            omnilingual_python,
+            selection.model_path,
+            language=selection.language,
+            device=selection.device,
+        )
+
+    return {
+        "vosk": open_vosk,
+        "whisper": open_whisper,
+        "omnilingual": open_omnilingual,
+    }
 
 
 def _microphone_source(configuration: MicrophoneConfiguration) -> AudioInput:
@@ -204,6 +222,7 @@ class UbuntuSessionFactory:
         power_backend_factory: Callable[[], PowerBackend] = GnomePowerBackend,
         system_power: SystemPowerFlow | None = None,
         command_server_factory: CommandServerFactory = _command_server,
+        echo_cancellation_factory: Callable[[], PipeWireEchoCancellation] | None = None,
     ) -> None:
         self._stt_openers = dict(stt_openers)
         self._on_event = on_event
@@ -224,6 +243,7 @@ class UbuntuSessionFactory:
         self._power_backend_factory = power_backend_factory
         self._system_power = system_power
         self._command_server_factory = command_server_factory
+        self._echo_cancellation_factory = echo_cancellation_factory
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
@@ -263,6 +283,10 @@ class UbuntuSessionFactory:
                         "browser": ("مرورگر",),
                     }.items()
                     if app_id in platform_ids.values()
+                },
+                registered_aliases={
+                    item.platform_id: item.aliases
+                    for item in settings.app_spoken_aliases
                 },
             )
             if platform_ids
@@ -362,6 +386,7 @@ class UbuntuSessionFactory:
         engine = opener(selection)
         safe_to_close_engine = True
         speaker: ResponseSpeaker | None = self._response_speaker
+        echo_cancel: PipeWireEchoCancellation | None = None
         power_flow: SystemPowerFlow | None = None
         command_server: AbstractContextManager[str] | None = None
         history: SqliteConversationHistory | None = None
@@ -433,6 +458,19 @@ class UbuntuSessionFactory:
             )
             if speaker is None and self._synthesizer is not None:
                 speaker = ResponseSpeaker(self._synthesizer, on_error=self._on_event)
+            if (
+                speaker is not None
+                and settings.microphone_device_key is None
+                and self._echo_cancellation_factory is not None
+            ):
+                candidate = self._echo_cancellation_factory()
+                if candidate.start():
+                    echo_cancel = candidate
+                else:
+                    _LOGGER.warning(
+                        "PipeWire echo cancellation unavailable; "
+                        "playback guard remains active"
+                    )
 
             def show_response(response: PresentedResponse) -> None:
                 self._on_event(response)
@@ -447,11 +485,22 @@ class UbuntuSessionFactory:
                 configuration = self._microphones.resolve(
                     settings.microphone_device_key
                 )
-                source = self._source_factory(configuration)
-                guarded = PlaybackGuardInput(source, speaker) if speaker else source
+                echo_source = echo_cancel.input() if echo_cancel is not None else None
+                source = (
+                    echo_source
+                    if echo_source is not None
+                    else self._source_factory(configuration)
+                )
+                guarded = (
+                    source
+                    if echo_cancel is not None or speaker is None
+                    else PlaybackGuardInput(source, speaker)
+                )
                 return LiveSpeechPipeline(
                     guarded,
-                    configuration.audio_format,
+                    echo_source.audio_format
+                    if echo_source is not None
+                    else configuration.audio_format,
                     detector,
                     engine,
                     options=SpeechToTextOptions(
@@ -463,6 +512,12 @@ class UbuntuSessionFactory:
                             and engine.capabilities.supports_vocabulary_hints
                             else ()
                         ),
+                    ),
+                    # Omnilingual infers complete utterances. A 640 ms pause
+                    # inside a verified Persian sentence split it at the
+                    # generic 384 ms boundary and corrupted the first word.
+                    pause_confirm_ms=(
+                        800 if selection.backend == "omnilingual" else 384
                     ),
                     on_compute_device=lambda device: self._on_event(
                         SttDeviceReady(device)
@@ -536,14 +591,18 @@ class UbuntuSessionFactory:
                 enabled=settings.action_execution_enabled
                 and settings.system_power_enabled
             )
-            power_flow.set_voice_ready(lambda: speaker is None or not speaker.is_active)
+            power_flow.set_voice_ready(
+                lambda: echo_cancel is not None
+                or speaker is None
+                or not speaker.is_active
+            )
             if self._system_power is not None and self._response_speaker is None:
                 power_flow.set_announcement(
                     lambda prompt: show_response(
                         PresentedResponse(
                             None,
                             None,
-                            prompt.text,
+                            prompt.speech_text or prompt.text,
                             ResponseChannel.TEXT_AND_VOICE,
                             "en",
                         )
@@ -613,21 +672,32 @@ class UbuntuSessionFactory:
             yield runtime
         except AudioCaptureStopError:
             # The native STT worker may still own the model after a failed
-            # capture stop. Match the terminal diagnostic's safety boundary.
+            # capture stop. Terminate an owned child process without closing
+            # an engine whose session may still be active in another thread.
             safe_to_close_engine = False
+            if isinstance(engine, CancellableSpeechToTextEngine):
+                engine.cancel_pending_inference()
             raise
         finally:
-            if history is not None:
-                history.close()
-            if command_server is not None:
-                command_server.__exit__(None, None, None)
-            if self._system_power is not None and power_flow is not None:
-                power_flow.cancel()
-                if self._response_speaker is None:
-                    power_flow.set_announcement(None)
-            try:
-                if speaker is not None and speaker is not self._response_speaker:
-                    speaker.close()
-            finally:
+            # ExitStack runs every callback even when an earlier close fails.
+            # Register in reverse order so the STT engine remains last.
+            with ExitStack() as cleanup:
                 if safe_to_close_engine:
-                    engine.close()
+                    cleanup.callback(engine.close)
+                if speaker is not None and speaker is not self._response_speaker:
+                    cleanup.callback(speaker.close)
+                if self._system_power is not None:
+                    cleanup.callback(
+                        self._system_power.set_voice_ready,
+                        lambda: speaker is None or not speaker.is_active,
+                    )
+                if echo_cancel is not None:
+                    cleanup.callback(echo_cancel.close)
+                if self._system_power is not None and power_flow is not None:
+                    if self._response_speaker is None:
+                        cleanup.callback(power_flow.set_announcement, None)
+                    cleanup.callback(power_flow.cancel)
+                if command_server is not None:
+                    cleanup.callback(command_server.__exit__, None, None, None)
+                if history is not None:
+                    cleanup.callback(history.close)

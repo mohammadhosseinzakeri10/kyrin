@@ -31,11 +31,21 @@ def _read_app(path: Path, platform_id: str) -> tuple[InstalledApp, bool] | None:
     name = entry.get("Name", "").strip()
     if not name:
         return None
+    alternate_names = tuple(
+        dict.fromkeys(
+            value.strip()
+            for key, value in entry.items()
+            if key.startswith("name[")
+            and key.endswith("]")
+            and value.strip()
+            and value.strip() != name
+        )
+    )
     menu_visible = entry.get("NoDisplay", "false").lower() != "true" and bool(
         entry.get("Exec", "").strip()
     )
     categories = tuple(item for item in entry.get("Categories", "").split(";") if item)
-    return InstalledApp(platform_id, name, categories), menu_visible
+    return InstalledApp(platform_id, name, categories, alternate_names), menu_visible
 
 
 class XdgDesktopAppCatalog:

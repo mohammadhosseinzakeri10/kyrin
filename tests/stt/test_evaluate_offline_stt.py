@@ -9,6 +9,7 @@ import pytest
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
+from kyrin.stt.backends.whisper import WhisperSession
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, SpeechToTextOptions
 from kyrin.stt.evaluation import (
@@ -91,6 +92,7 @@ def test_manifest_and_generic_stream_scoring(tmp_path: Path) -> None:
 
     assert result.transcript == "تلگرام را باز کن"
     assert result.cer == 0
+    assert result.wer == 0
     assert result.first_partial_seconds is not None
     assert result.first_final_seconds is not None
     assert result.audio_seconds > 0
@@ -98,13 +100,40 @@ def test_manifest_and_generic_stream_scoring(tmp_path: Path) -> None:
     assert engine.options is not None and engine.options.language_hint == "fa"
     summary = summarize((result,))
     assert summary["cer"] == 0
+    assert summary["wer"] == 0
     assert summary["files"] == 1
+
+
+def test_evaluation_seals_a_turn_aware_model(tmp_path: Path) -> None:
+    audio_path = tmp_path / "sample.wav"
+    write_wav(audio_path)
+    received: list[int] = []
+
+    class TurnEngine:
+        capabilities = SpeechToTextCapabilities(
+            frozenset({ComputeDevice.CPU}), frozenset({"fa"}), False, False
+        )
+
+        def open_session(self, options: SpeechToTextOptions) -> WhisperSession:
+            def infer(pcm: bytes, language: str) -> str:
+                received.append(len(pcm))
+                return "تلگرام را باز کن"
+
+            return WhisperSession(infer, "fa", lambda: None, emit_partials=False)
+
+        def close(self) -> None:
+            pass
+
+    result = evaluate_item(TurnEngine(), load_item(audio_path), realtime=False)
+    assert result.transcript == "تلگرام را باز کن"
+    assert received and received[0] > 0
 
 
 def test_normalization_and_edit_distance_are_explicit() -> None:
     assert normalize_text("  كايرين‌، باز كُن! ") == "کایرین باز کُن"
     assert edit_distance("abc", "adc") == 1
     assert edit_distance("", "abc") == 3
+    assert edit_distance(["open", "telegram"], ["close", "telegram"]) == 1
 
 
 def test_wav_rate_is_converted_to_engine_format(tmp_path: Path) -> None:
@@ -121,6 +150,23 @@ def test_wav_rate_is_converted_to_engine_format(tmp_path: Path) -> None:
     assert result.cer == 0
     assert result.audio_seconds == pytest.approx(0.04, abs=0.002)
     assert engine.session.closed
+
+
+def test_word_error_rate_counts_whole_words(tmp_path: Path) -> None:
+    path = tmp_path / "sample.wav"
+    write_wav(path)
+    manifest = tmp_path / "corpus.csv"
+    manifest.write_text(
+        "id,path,language,reference\nfa-1,sample.wav,fa,تلگرام باز کن\n",
+        encoding="utf-8",
+    )
+
+    result = evaluate_item(FakeEngine(), load_corpus(manifest)[0], realtime=False)
+
+    assert result.reference_words == 3
+    assert result.word_edit_distance == 1
+    assert result.wer == pytest.approx(1 / 3)
+    assert result.cer != result.wer
 
 
 def load_item(path: Path) -> CorpusItem:

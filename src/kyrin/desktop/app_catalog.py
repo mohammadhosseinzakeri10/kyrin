@@ -11,6 +11,7 @@ class InstalledApp:
     platform_id: str
     display_name: str
     categories: tuple[str, ...] = ()
+    alternate_names: tuple[str, ...] = ()
 
 
 class AppCatalog(Protocol):

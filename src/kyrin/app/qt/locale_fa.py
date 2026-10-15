@@ -68,8 +68,11 @@ PERSIAN: dict[str, str] = {
     "speech_language": "کد زبان گفتار",
     "speech_language_help": (
         "از کدی مانند en یا fa استفاده کنید. مدل چندزبانهٔ Whisper مقدار auto "
-        "را هم می‌پذیرد؛ Vosk به مدل زبان مشخص نیاز دارد."
+        "را هم می‌پذیرد؛ Omnilingual ASR برای مدل‌های LLM با کد زبان دقیق‌تر است؛ "
+        "Vosk به مدل زبان مشخص نیاز دارد."
     ),
+    "omnilingual_directory": "پوشهٔ مدل Omnilingual ASR را انتخاب کنید",
+    "omnilingual_runtime_missing": "محیط اجرای Omnilingual ASR نصب نشده است.",
     "vosk_language_required": "برای Vosk کد زبان مشخصی مانند en لازم است.",
     "wake_aliases": "املاهای دیگر KYRIN (با ویرگول جدا کنید)",
     "device": "پردازش مدل با",
@@ -137,6 +140,12 @@ PERSIAN: dict[str, str] = {
         "اجازهٔ درخواست‌های برق سیستم با تأیید دومرحله‌ای (پیش‌فرض: خاموش)"
     ),
     "actions_search": "جست‌وجوی برنامه‌های نصب‌شده…",
+    "app_spoken_aliases": "نام‌های گفتاری دیگر برای برنامهٔ انتخاب‌شده",
+    "app_spoken_aliases_placeholder": "نام‌ها را با ویرگول جدا کنید",
+    "app_spoken_aliases_help": (
+        "این نام‌ها فقط به تشخیص برنامه کمک می‌کنند و مجوز کنترل آن را نمی‌دهند. "
+        "هر برنامهٔ فهرست، حتی برنامهٔ بدون تیک، قابل انتخاب است."
+    ),
     "actions_select_visible": "انتخاب همهٔ موارد نمایان",
     "actions_clear_visible": "پاک‌کردن انتخاب موارد نمایان",
     "actions_selected": "انتخاب‌شده",

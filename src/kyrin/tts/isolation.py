@@ -108,7 +108,9 @@ class IsolatedTtsWorker:
             ) from exc
         self._responses: queue.Queue[str | None] = queue.Queue()
         self._lock = Lock()
-        Thread(target=self._read_responses, daemon=True).start()
+        self._close_lock = Lock()
+        self._reader_thread = Thread(target=self._read_responses, daemon=True)
+        self._reader_thread.start()
         try:
             self._request({"op": "load", "folder": str(folder), "provider": provider})
         except Exception:
@@ -173,17 +175,19 @@ class IsolatedTtsWorker:
         return np.frombuffer(raw, dtype="<f4").copy(), sample_rate
 
     def close(self) -> None:
-        process = self._process
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
-        for stream in (process.stdin, process.stdout):
-            if stream is not None:
-                stream.close()
+        with self._close_lock:
+            process = self._process
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            self._reader_thread.join(timeout=1)
+            for stream in (process.stdin, process.stdout):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
     def __del__(self) -> None:
         if hasattr(self, "_process"):

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from kyrin.app.app_permissions import AppChoice, AppPickerCatalog, app_choices
 from kyrin.app.qt.translations import UiTranslations
-from kyrin.app.settings import AllowedApp, AppSettings
+from kyrin.app.settings import AllowedApp, AppSettings, AppSpokenAliases
 from kyrin.system_power.flow import PowerAction
 
 
@@ -38,7 +38,9 @@ class DesktopActionsPage(QWidget):
         self.scroll_area.setObjectName("ActionsScrollArea")
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         page_layout.addWidget(self.scroll_area)
         content = QWidget()
         content.setObjectName("ActionsScrollContent")
@@ -81,6 +83,20 @@ class DesktopActionsPage(QWidget):
         self.apps.itemClicked.connect(self._toggle_row_if_needed)
         self.apps.itemChanged.connect(self._update_selection_count)
         layout.addWidget(self.apps)
+        self.aliases_label = QLabel()
+        layout.addWidget(self.aliases_label)
+        self.aliases_edit = QLineEdit()
+        self.aliases_edit.setAccessibleName("Spoken names for selected application")
+        self._aliases_by_platform_id = {
+            item.platform_id: item.aliases
+            for item in (settings.app_spoken_aliases if settings is not None else ())
+        }
+        self.aliases_edit.textChanged.connect(self._remember_aliases)
+        self.apps.itemSelectionChanged.connect(self._show_aliases)
+        layout.addWidget(self.aliases_edit)
+        self.aliases_help = QLabel()
+        self.aliases_help.setWordWrap(True)
+        layout.addWidget(self.aliases_help)
         self.telegram_chat_checkbox = QCheckBox()
         layout.addWidget(self.telegram_chat_checkbox)
         self.window_control_checkbox = QCheckBox()
@@ -143,7 +159,40 @@ class DesktopActionsPage(QWidget):
             self.system_power_checkbox.setEnabled(False)
             self.power_preview_button.setEnabled(False)
         self.translate()
+        self._show_aliases()
         self._update_chat_permission_availability()
+
+    def _current_app_choice(self) -> AppChoice | None:
+        item = self.apps.currentItem()
+        if item is None:
+            return None
+        choice = item.data(Qt.ItemDataRole.UserRole)
+        return choice if isinstance(choice, AppChoice) else None
+
+    def _show_aliases(self) -> None:
+        choice = self._current_app_choice()
+        self.aliases_edit.setEnabled(choice is not None)
+        self.aliases_edit.blockSignals(True)
+        self.aliases_edit.setText(
+            ", ".join(self._aliases_by_platform_id.get(choice.binding.desktop_id, ()))
+            if choice is not None
+            else ""
+        )
+        self.aliases_edit.blockSignals(False)
+
+    def _remember_aliases(self, _text: str) -> None:
+        choice = self._current_app_choice()
+        if choice is None:
+            return
+        aliases = tuple(
+            alias.strip()
+            for alias in self.aliases_edit.text().split(",")
+            if alias.strip()
+        )
+        if aliases:
+            self._aliases_by_platform_id[choice.binding.desktop_id] = aliases
+        else:
+            self._aliases_by_platform_id.pop(choice.binding.desktop_id, None)
 
     def _remember_pressed_state(self, item: QListWidgetItem) -> None:
         self._pressed_item = item
@@ -200,6 +249,9 @@ class DesktopActionsPage(QWidget):
         self.system_power_checkbox.setText(text("allow_system_power"))
         self.power_preview_button.setText(text("power_safe_preview"))
         self.search.setPlaceholderText(text("actions_search"))
+        self.aliases_label.setText(text("app_spoken_aliases"))
+        self.aliases_edit.setPlaceholderText(text("app_spoken_aliases_placeholder"))
+        self.aliases_help.setText(text("app_spoken_aliases_help"))
         self.select_visible_button.setText(text("actions_select_visible"))
         self.clear_visible_button.setText(text("actions_clear_visible"))
         for action, key in (
@@ -238,6 +290,12 @@ class DesktopActionsPage(QWidget):
                     bindings.append(choice.binding)
         return tuple(bindings)
 
+    def selected_spoken_aliases(self) -> tuple[AppSpokenAliases, ...]:
+        return tuple(
+            AppSpokenAliases(platform_id, aliases)
+            for platform_id, aliases in sorted(self._aliases_by_platform_id.items())
+        )
+
     def selected_chat_apps(self) -> tuple[str, ...]:
         return ("telegram",) if self.telegram_chat_checkbox.isChecked() else ()
 
@@ -263,4 +321,6 @@ class DesktopActionsPage(QWidget):
             or set(self.selected_window_apps()) != set(settings.allowed_window_apps)
             or set(self.selected_close_apps()) != set(settings.allowed_close_apps)
             or self.system_power_checkbox.isChecked() != settings.system_power_enabled
+            or self._aliases_by_platform_id
+            != {item.platform_id: item.aliases for item in settings.app_spoken_aliases}
         )

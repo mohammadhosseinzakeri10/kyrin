@@ -67,17 +67,41 @@ def test_voice_and_click_share_two_step_flow() -> None:
     flow = SystemPowerFlow(backend, events.append, enabled=True)
     assert flow.on_final_speech("KYRIN, power off")
     first = _wait_for(events, PowerStage.FIRST)
+    assert flow.is_current_prompt(first)
     assert "cannot verify unsaved" in first.text
     assert backend.actions == []
     assert flow.on_final_speech("Yes")
     second = _wait_for(events, PowerStage.SECOND)
+    assert not flow.is_current_prompt(first)
+    assert flow.is_current_prompt(second)
     assert second.phrase == "Power off"
+    assert second.speech_text == (
+        "Final confirmation. Say exactly Power off, or click the matching "
+        "button. You can still cancel."
+    )
     assert not flow.respond(first.request_id + 1, second.phrase)
     assert flow.on_final_speech("Restart this computer")
     assert backend.actions == []
     assert flow.respond(second.request_id, second.phrase)
     assert backend.done.wait(2)
+    assert not flow.is_current_prompt(second)
     assert backend.actions == [PowerAction.POWER_OFF]
+
+
+def test_spoken_continue_advances_only_first_power_stage() -> None:
+    backend = FakeBackend()
+    events: list[PowerPrompt] = []
+    flow = SystemPowerFlow(backend, events.append, enabled=True)
+    assert flow.on_final_speech("Restart this computer")
+    first = _wait_for(events, PowerStage.FIRST)
+    assert "Say Yes or Continue" in first.text
+    assert flow.on_final_speech("Continue")
+    second = _wait_for(events, PowerStage.SECOND)
+    assert second.phrase == "Restart computer"
+    assert backend.actions == []
+    assert flow.on_final_speech("Restart computer")
+    assert backend.done.wait(2)
+    assert backend.actions == [PowerAction.RESTART]
 
 
 def test_safe_preview_uses_only_inert_backend_even_when_real_actions_disabled() -> None:
@@ -128,17 +152,22 @@ def test_unclear_final_voice_never_confirms_or_changes_the_action() -> None:
     backend = FakeBackend()
     events: list[PowerPrompt] = []
     flow = SystemPowerFlow(backend, events.append, enabled=True)
+    announcements: list[PowerPrompt] = []
+    flow.set_announcement(announcements.append)
     assert flow.on_final_speech("Power off")
     first = _wait_for(events, PowerStage.FIRST)
     assert first.spoken and "Power off" in first.speech_text
     assert flow.on_final_speech("Yes")
     second = _wait_for(events, PowerStage.SECOND)
     assert second.phrase == "Power off"
+    announcement_count = len(announcements)
 
     for unclear in ("Okay", "Restart computer", "Yes", "Power"):
         assert flow.on_final_speech(unclear)
         assert events[-1].stage is PowerStage.SECOND
         assert events[-1].request_id == second.request_id
+        assert not events[-1].spoken
+        assert len(announcements) == announcement_count
         assert backend.actions == []
     assert flow.on_final_speech("Power off")
     assert backend.done.wait(2)

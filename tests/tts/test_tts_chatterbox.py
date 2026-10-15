@@ -82,7 +82,8 @@ def test_chatterbox_uses_local_weights_and_spoken_language(
         tts_runtime,
         "import_module",
         lambda name: SimpleNamespace(
-            play=lambda samples, rate, *, blocking: calls.append((samples, rate))
+            play=lambda samples, rate, *, blocking: calls.append((samples, rate)),
+            wait=lambda: None,
         ),
     )
     selection = TtsSelection("chatterbox", folder, "0", 1.0, DevicePreference.CPU)

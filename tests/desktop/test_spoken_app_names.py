@@ -15,6 +15,7 @@ from kyrin.commands.models import (
     ResponseKind,
     ResponseRequest,
 )
+from kyrin.desktop.app_catalog import InstalledApp
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.responses.presenter import ResponsePresenter
@@ -69,8 +70,7 @@ def test_generic_browser_asks_between_permitted_browsers_before_action(
     assert first[1].app_candidates == ("Firefox", "Google Chrome")
     assert gate.observe(first[0]) is None
     assert ResponsePresenter("en").present(first[1]).text == (
-        "Which app do you mean? 1. Firefox; 2. Google Chrome. "
-        "Say its number or name."
+        "Which app do you mean? 1. Firefox; 2. Google Chrome. Say its number or name."
     )
     unclear = coordinator.observe(_final(1, "yes"))
     assert unclear[0] == CommandResolution(1, None, language="en")
@@ -302,7 +302,7 @@ def test_observed_persian_browser_spelling_asks_before_action(tmp_path: Path) ->
     assert gate.observe(first[0]) is None
     assert isinstance(first[1], ResponseRequest)
     assert first[1].kind is ResponseKind.CONFIRM_APP
-    assert first[1].channel is ResponseChannel.TEXT_AND_VOICE
+    assert first[1].channel is ResponseChannel.TEXT_ONLY
     assert ResponsePresenter("fa").present(first[1]).text == (
         "منظورتان برنامهٔ مرورگر است؟"
     )
@@ -526,3 +526,103 @@ def test_refresh_replaces_stale_catalog_snapshot(tmp_path: Path) -> None:
     resolver.refresh()
     assert resolver.resolve("Chat One").candidates == ()
     assert resolver.resolve("Chat Two").exact
+
+
+class _DeviceCatalog:
+    """A non-XDG catalog proves matching does not depend on Ubuntu paths."""
+
+    def __init__(self, apps: tuple[InstalledApp, ...]) -> None:
+        self.apps = apps
+
+    def list_apps(self) -> tuple[InstalledApp, ...]:
+        return self.apps
+
+    def find_app(self, platform_id: str) -> InstalledApp | None:
+        return next((app for app in self.apps if app.platform_id == platform_id), None)
+
+
+def test_catalog_names_are_dynamic_and_unbound_apps_block_wrong_suggestions() -> None:
+    catalog = _DeviceCatalog(
+        (
+            InstalledApp("vendor.edit", "Nova Edit"),
+            InstalledApp("vendor.editor", "Nova Editor"),
+        )
+    )
+    resolver = CatalogSpokenAppResolver(
+        catalog,
+        {"vendor.edit": "nova_edit"},
+        registered_aliases={"vendor.edit": ("ویرایشگر نووا",)},
+    )
+    assert resolver.resolve("ویرایشگر نووا").exact
+    assert resolver.resolve("Nova Editor").candidates == ()
+    assert resolver.suggest("Nova Edito").candidates == ()
+
+    catalog.apps = (InstalledApp("vendor.edit", "Nova Edit"),)
+    resolver.refresh()
+    assert tuple(
+        candidate.app_id for candidate in resolver.suggest("Nova Edito").candidates
+    ) == ("nova_edit",)
+
+
+def test_alias_collision_with_unbound_registered_app_never_grants_permission() -> None:
+    catalog = _DeviceCatalog(
+        (
+            InstalledApp("vendor.notes", "Acme Notes"),
+            InstalledApp("vendor.chat", "Acme Chat"),
+        )
+    )
+    resolver = CatalogSpokenAppResolver(
+        catalog,
+        {"vendor.notes": "notes"},
+        registered_aliases={
+            "vendor.notes": ("کار من",),
+            "vendor.chat": ("کار من",),
+        },
+    )
+    assert resolver.resolve("کار من").candidates == ()
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    result = coordinator.observe(_final(0, "open کار من"))
+    assert result[0] == CommandResolution(0, None, language="en")
+    assert isinstance(result[1], ResponseRequest)
+    assert result[1].kind is ResponseKind.REPEAT_COMMAND
+
+
+def test_explicit_user_name_selects_one_of_duplicate_registered_chrome_labels(
+    tmp_path: Path,
+) -> None:
+    _entry(tmp_path, "com.google.Chrome.desktop", "Google Chrome", browser=True)
+    _entry(tmp_path, "google-chrome.desktop", "Google Chrome", browser=True)
+    catalog = XdgDesktopAppCatalog((tmp_path,))
+    binding = {"google-chrome.desktop": "google-chrome"}
+    unresolved = CatalogSpokenAppResolver(catalog, binding)
+    assert unresolved.resolve("Google Chrome").candidates == ()
+
+    selected = CatalogSpokenAppResolver(
+        catalog,
+        binding,
+        registered_aliases={"google-chrome.desktop": ("Google Chrome",)},
+    )
+    assert tuple(
+        candidate.app_id for candidate in selected.resolve("Google Chrome").candidates
+    ) == ("google-chrome",)
+    coordinator = CommandCoordinator(DemoCommandInterpreter(selected))
+    decision = coordinator.observe(_final(0, "open google chrome"))
+    assert decision == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_APP, "google-chrome"), language="en"
+        ),
+    )
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"google-chrome"})))
+    assert isinstance(gate.observe(decision[0]), ActionRequest)
+
+
+def test_catalog_supplied_localized_name_is_an_exact_app_name() -> None:
+    resolver = CatalogSpokenAppResolver(
+        _DeviceCatalog((
+            InstalledApp(
+                "vendor.notes", "Acme Notes", alternate_names=("یادداشت‌های اَکمه",)
+            ),
+        )),
+        {"vendor.notes": "notes"},
+    )
+    assert resolver.resolve("یادداشت‌های اَکمه").exact

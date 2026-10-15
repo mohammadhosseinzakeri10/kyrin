@@ -20,7 +20,11 @@ from kyrin.audio.audio_format import AudioFormat
 from kyrin.audio.audio_framer import AudioFramer
 from kyrin.audio.audio_input import AudioInput
 from kyrin.audio.sample_rate_converter import SampleRateConverter
-from kyrin.stt.contracts import SpeechToTextEngine, TurnAwareSpeechToTextSession
+from kyrin.stt.contracts import (
+    CancellableSpeechToTextEngine,
+    SpeechToTextEngine,
+    TurnAwareSpeechToTextSession,
+)
 from kyrin.stt.device import ComputeDevice, SpeechToTextOptions
 from kyrin.stt.transcript import TranscriptUpdate
 
@@ -76,7 +80,11 @@ class LiveSpeechPipeline:
     def stop(self) -> None:
         """End event consumption even if STT is blocked; cleanup verifies shutdown."""
         self._stop_requested.set()
-        self.source.stop_capture()
+        try:
+            self.source.stop_capture()
+        finally:
+            if isinstance(self.engine, CancellableSpeechToTextEngine):
+                self.engine.cancel_pending_inference()
 
     @contextmanager
     def open(self) -> Iterator[Iterator[LiveSpeechEvent]]:

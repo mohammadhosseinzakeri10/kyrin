@@ -30,7 +30,7 @@ from kyrin.app.permission_token import permission_token_path, save_opaque_token
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.translations import ENGLISH, UiPreferences, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
-from kyrin.app.settings import AppSettings, OcrSelection, SttSelection
+from kyrin.app.settings import AppSettings, AppSpokenAliases, OcrSelection, SttSelection
 from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
@@ -44,6 +44,7 @@ from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.stt.backends.omnilingual import CHECKPOINT_BYTES, TOKENIZER_NAME
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import (
@@ -238,28 +239,35 @@ def test_power_buttons_work_without_microphone_session(
         ui_translations=UiTranslations(tmp_path),
     )
     try:
+        window.power_dialog.present(
+            PowerPrompt(0, PowerAction.POWER_OFF, PowerStage.CHECKING, "Checking"),
+            continue_label="Continue",
+        )
+        assert window.power_dialog.stage_label.text() == (
+            "Checking · no confirmation yet"
+        )
+        assert not window.power_dialog.confirm_button.isVisible()
+        window.power_dialog.dismiss()
         window.actions_page.power_buttons[PowerAction.POWER_OFF].click()
         _pump_until(
             application,
-            lambda: (
-                window._power_prompt is not None
-                and window._power_prompt.stage is PowerStage.FIRST
-            ),
+            lambda: window._power_prompt is not None
+            and window._power_prompt.stage is PowerStage.FIRST,
         )
         assert backend.requests == []
         assert window.power_dialog.isVisible()
+        assert window.power_dialog.stage_label.text() == "Confirmation 1 of 2"
         assert not window.isVisible()
         window._on_event(SpeechSynthesisError("speaker unavailable"))
         assert window.power_dialog.voice_warning.isVisible()
         window.power_dialog.confirm_button.click()
         _pump_until(
             application,
-            lambda: (
-                window._power_prompt is not None
-                and window._power_prompt.stage is PowerStage.SECOND
-            ),
+            lambda: window._power_prompt is not None
+            and window._power_prompt.stage is PowerStage.SECOND,
         )
         assert "Power off" in window.power_dialog.confirm_button.text()
+        assert window.power_dialog.stage_label.text() == "Final confirmation 2 of 2"
         assert not window.power_dialog.voice_warning.isVisible()
         window.power_dialog.cancel_button.click()
         _pump_until(application, lambda: window._power_prompt is None)
@@ -532,6 +540,52 @@ def test_vosk_import_rejects_mismatched_folder_language_before_copy(
         application.processEvents()
 
 
+def test_omnilingual_catalog_model_can_be_selected_without_copy(
+    application: QApplication, tmp_path: Path
+) -> None:
+    name = "omniASR_CTC_300M_v2"
+    catalog = tmp_path / "omnilingual-asr"
+    folder = catalog / name
+    folder.mkdir(parents=True)
+    checkpoint = folder / "omniASR-CTC-300M-v2.pt"
+    with checkpoint.open("wb") as stream:
+        stream.truncate(CHECKPOINT_BYTES[name])
+    (folder / TOKENIZER_NAME).write_bytes(b"x" * 91481)
+    runtime = tmp_path / "python"
+    runtime.write_bytes(b"runtime")
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        omnilingual_python=runtime,
+        omnilingual_root=catalog,
+        ui_translations=UiTranslations(tmp_path),
+    )
+    try:
+        assert window.backend_combo.findData("omnilingual") >= 0
+        page = window.models_page
+        assert page.lists[0].count() == 1
+        page.lists[0].setCurrentRow(0)
+        page.use_button.click()
+        assert window.backend_combo.currentData() == "omnilingual"
+        assert window.model_path.text() == str(folder)
+        window.apply_button.click()
+        saved = store.load().stt
+        assert saved is not None
+        assert saved.backend == "omnilingual"
+        assert saved.model_path == folder
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_gpu_model_stays_visible_when_gpu_runtime_is_missing(
     application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -727,15 +781,19 @@ def test_power_preview_button_never_calls_real_backend(
         window.actions_page.power_preview_button.click()
         _pump_until(
             application,
-            lambda: window._power_prompt is not None
-            and window._power_prompt.stage is PowerStage.FIRST,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.FIRST
+            ),
         )
         assert "SAFE PREVIEW" in window.power_dialog.action_label.text()
         assert flow.on_final_speech("Yes")
         _pump_until(
             application,
-            lambda: window._power_prompt is not None
-            and window._power_prompt.stage is PowerStage.SECOND,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.SECOND
+            ),
         )
         assert flow.on_final_speech("Power off")
         _pump_until(application, lambda: preview.requests == [PowerAction.POWER_OFF])
@@ -962,6 +1020,15 @@ def test_actions_page_saves_only_explicitly_selected_app(
             for index in range(window.actions_page.apps.count())
             if "telegram.desktop" in window.actions_page.apps.item(index).text()
         )
+        browser = next(
+            window.actions_page.apps.item(index)
+            for index in range(window.actions_page.apps.count())
+            if "browser.desktop" in window.actions_page.apps.item(index).text()
+        )
+        window.actions_page.apps.setCurrentItem(browser)
+        window.actions_page.aliases_edit.setText("مرورگر من")
+        window.actions_page.apps.setCurrentItem(telegram)
+        window.actions_page.aliases_edit.setText("تلگرام من")
         telegram.setCheckState(Qt.CheckState.Checked)
         assert window.actions_page.telegram_chat_checkbox.isEnabled()
         assert not window.actions_page.window_control_checkbox.isChecked()
@@ -981,6 +1048,11 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert saved.allowed_window_apps == ("telegram",)
         assert saved.allowed_close_apps == ("telegram",)
         assert saved.wake_aliases == ("kayrin", "کایرین من")
+        assert saved.app_spoken_aliases == (
+            AppSpokenAliases("browser.desktop", ("مرورگر من",)),
+            AppSpokenAliases("telegram.desktop", ("تلگرام من",)),
+        )
+        assert all(app.desktop_id != "browser.desktop" for app in saved.allowed_apps)
         assert "1 allowed apps" in window.action_label.text()
         token_path = permission_token_path("telegram-keyboard")
         save_opaque_token(token_path, "remembered-keyboard")

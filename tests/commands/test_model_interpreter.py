@@ -41,6 +41,7 @@ from kyrin.commands.understanding import (
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.desktop.window_presence import WindowPresence
+from kyrin.responses.presenter import ResponsePresenter
 from kyrin.stt.device import DevicePreference
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
@@ -255,6 +256,85 @@ def test_pending_app_confirmation_keeps_language_and_safety(
     else:
         assert not isinstance(result, ReadyCommand)
     assert model.calls == 0
+    assert model.confirmation_calls == 0
+
+
+def test_close_cloud_needs_one_explicit_confirmation(
+    tmp_path: Path,
+) -> None:
+    applications = tmp_path / "applications"
+    applications.mkdir()
+    (applications / "claude.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Claude\n", encoding="utf-8"
+    )
+    names = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {"claude.desktop": "claude"}
+    )
+    rules = DemoCommandInterpreter(
+        names, allowed_close_apps=frozenset({"claude"})
+    )
+    model = FakeModel(
+        CommandModelError("offline"), confirmation=CommandModelError("offline")
+    )
+    coordinator = CommandCoordinator(ModelAssistedInterpreter(
+        rules,
+        model,
+        names,
+        allowed_apps=frozenset({"claude"}),
+        supported_chat_apps=frozenset(),
+    ))
+
+    first = coordinator.observe(
+        TranscriptUpdate(0, "Close.", TranscriptStatus.FINAL, "en")
+    )
+    assert first == (CommandResolution(0, None, language="en"),)
+    name_question = coordinator.observe(
+        TranscriptUpdate(1, "Cloud", TranscriptStatus.FINAL, "en")
+    )
+    assert isinstance(name_question[1], ResponseRequest)
+    assert name_question[1].kind is ResponseKind.CONFIRM_ACTION
+    assert name_question[1].channel is ResponseChannel.TEXT_ONLY
+    assert ResponsePresenter("en").present(name_question[1]).text == (
+        "Do you really want me to close Claude? Yes or no?"
+    )
+
+    confirmed = coordinator.observe(
+        TranscriptUpdate(2, "Yes.", TranscriptStatus.FINAL, "en")
+    )
+    assert confirmed[0] == CommandResolution(
+        2,
+        CommandIntent(CommandKind.CLOSE_APP_WINDOW, "claude"),
+        language="en",
+    )
+    assert coordinator.pending_clarification is None
+    assert model.confirmation_calls == 0
+
+
+def test_new_close_command_is_not_classified_as_yes_to_old_app_question(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(
+        CommandModelError("offline"), confirmation=ConfirmationDecision.YES
+    )
+    names = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {}
+    )
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("claude", "Claude"),),
+        confirmation=True,
+        operation=CommandKind.CLOSE_APP_WINDOW,
+    )
+    interpreter = ModelAssistedInterpreter(
+        DemoCommandInterpreter(),
+        model,
+        names,
+        allowed_apps=frozenset({"claude"}),
+        supported_chat_apps=frozenset(),
+    )
+    result = interpreter.interpret(
+        "Close the code", language="en", context=CommandContext(), pending=pending
+    )
+    assert isinstance(result, UnrecognizedCommand)
     assert model.confirmation_calls == 0
 
 

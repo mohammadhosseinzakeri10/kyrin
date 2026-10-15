@@ -1,12 +1,21 @@
-"""Match spoken names against explicitly bound, registered applications."""
+"""Match spoken names against the device catalog before permission filtering."""
 
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from kyrin.commands.app_names import SpokenAppCandidate, SpokenAppMatch
 from kyrin.desktop.app_catalog import AppCatalog
+
+
+@dataclass(slots=True)
+class _RegisteredName:
+    platform_id: str
+    candidate: SpokenAppCandidate | None
+    spellings: set[str]
+    user_spellings: set[str]
 
 
 def _normalize(name: str) -> str:
@@ -30,9 +39,7 @@ def _abbreviations(name: str) -> tuple[str, ...]:
 
 def _split_camel_case(name: str) -> str:
     """Allow speech recognition to separate words in a registered brand name."""
-    return re.sub(
-        r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name
-    )
+    return re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name)
 
 
 def _sound_key(name: str) -> str:
@@ -46,13 +53,19 @@ def _sound_key(name: str) -> str:
 
 
 class CatalogSpokenAppResolver:
-    """Suggest only bound apps; approximate suggestions always require a reply."""
+    """Use every registered name to avoid suggesting a different allowed app.
+
+    Only explicitly bound apps can leave this resolver as command candidates.
+    Approximate suggestions still require a user reply in the interpreter.
+    """
 
     def __init__(
         self,
         catalog: AppCatalog,
         app_ids: Mapping[str, str],
         aliases: Mapping[str, Sequence[str]] | None = None,
+        *,
+        registered_aliases: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         if any(
             not external.strip() or not internal.strip()
@@ -65,34 +78,65 @@ class CatalogSpokenAppResolver:
             for app_id, values in aliases.items()
         ):
             raise ValueError("aliases must name bound apps and contain text")
+        if registered_aliases is not None and any(
+            not platform_id.strip() or any(not _normalize(alias) for alias in values)
+            for platform_id, values in registered_aliases.items()
+        ):
+            raise ValueError("registered aliases must have an app ID and text")
         self._catalog = catalog
         self._app_ids = dict(app_ids)
         self._aliases = {key: tuple(values) for key, values in (aliases or {}).items()}
+        self._registered_aliases = {
+            key: tuple(values) for key, values in (registered_aliases or {}).items()
+        }
         self._names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
+        self._registered_names: tuple[_RegisteredName, ...] = ()
         self._browser_candidates: tuple[SpokenAppCandidate, ...] = ()
         self.refresh()
 
     def refresh(self) -> None:
         """Refresh after installation/removal, outside the live audio callback."""
         names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
+        registered: list[_RegisteredName] = []
         browser_ids: set[str] = set()
         for installed in self._catalog.list_apps():
             app_id = self._app_ids.get(installed.platform_id)
+            user_spellings = {
+                _normalize(alias)
+                for alias in self._registered_aliases.get(installed.platform_id, ())
+            }
+            spellings = {
+                _normalize(installed.display_name),
+                _normalize(_split_camel_case(installed.display_name)),
+            }
+            spellings.update(_abbreviations(installed.display_name))
+            spellings.update(_normalize(name) for name in installed.alternate_names)
+            spellings.update(user_spellings)
+            candidate = (
+                SpokenAppCandidate(app_id, installed.display_name)
+                if app_id is not None
+                else None
+            )
+            if app_id is not None:
+                spellings.add(_normalize(app_id))
+                spellings.update(
+                    _normalize(alias) for alias in self._aliases.get(app_id, ())
+                )
+            registered.append(
+                _RegisteredName(
+                    installed.platform_id, candidate, spellings, user_spellings
+                )
+            )
             if app_id is None:
                 continue
             if "WebBrowser" in installed.categories:
                 browser_ids.add(app_id)
-            _, spellings = names.setdefault(
+            _, allowed_spellings = names.setdefault(
                 app_id, (SpokenAppCandidate(app_id, installed.display_name), set())
             )
-            spellings.add(_normalize(installed.display_name))
-            spellings.add(_normalize(_split_camel_case(installed.display_name)))
-            spellings.add(_normalize(app_id))
-            spellings.update(_abbreviations(installed.display_name))
-            spellings.update(
-                _normalize(alias) for alias in self._aliases.get(app_id, ())
-            )
+            allowed_spellings.update(spellings)
         self._names = names
+        self._registered_names = tuple(registered)
         self._browser_candidates = tuple(
             sorted(
                 (names[app_id][0] for app_id in browser_ids),
@@ -143,17 +187,38 @@ class CatalogSpokenAppResolver:
         name = _normalize(spoken_name)
         if not name:
             return SpokenAppMatch()
+        # A user can select which duplicate registration owns its own display
+        # name. An alias borrowing another app's name cannot override it.
+        user_exact = tuple(
+            entry for entry in self._registered_names if name in entry.user_spellings
+        )
+        if (
+            len(user_exact) == 1
+            and user_exact[0].candidate is not None
+            and name == _normalize(user_exact[0].candidate.display_name)
+        ):
+            return SpokenAppMatch((user_exact[0].candidate,), exact=True)
         exact = tuple(
-            candidate
-            for candidate, spellings in self._names.values()
-            if name in spellings
+            entry for entry in self._registered_names if name in entry.spellings
         )
         if exact:
-            return SpokenAppMatch(exact, exact=True)
+            if any(entry.candidate is None for entry in exact):
+                return SpokenAppMatch()
+            return SpokenAppMatch(
+                tuple(
+                    dict.fromkeys(
+                        entry.candidate
+                        for entry in exact
+                        if entry.candidate is not None
+                    )
+                ),
+                exact=True,
+            )
 
-        scores: list[tuple[float, SpokenAppCandidate]] = []
+        scores: list[tuple[float, _RegisteredName]] = []
         sound_key = _sound_key(name) if allow_weak_suggestion else ""
-        for candidate, spellings in self._names.values():
+        for entry in self._registered_names:
+            spellings = entry.spellings
             score = max(
                 (
                     SequenceMatcher(None, name, spelling).ratio()
@@ -181,19 +246,25 @@ class CatalogSpokenAppResolver:
                     _sound_key(spelling) == sound_key for spelling in spellings
                 ):
                     score = max(score, 0.85)
-            scores.append((score, candidate))
-        scores.sort(key=lambda item: (-item[0], item[1].app_id))
+            scores.append((score, entry))
+        scores.sort(key=lambda item: (-item[0], item[1].platform_id))
         if not scores:
             return SpokenAppMatch()
         best = scores[0][0]
         # Longer, speech-split names can be suggested at a lower score. Fuzzy
         # matches never authorize an action: the interpreter must ask first.
         proposal_threshold = (
-            0.70
-            if allow_weak_suggestion and len(name.replace(" ", "")) >= 5
-            else 0.82
+            0.70 if allow_weak_suggestion and len(name.replace(" ", "")) >= 5 else 0.82
         )
         if best < proposal_threshold:
             return SpokenAppMatch()
-        near = tuple(candidate for score, candidate in scores if score >= best - 0.08)
-        return SpokenAppMatch(near)
+        near = tuple(entry for score, entry in scores if score >= best - 0.08)
+        if any(entry.candidate is None for entry in near):
+            return SpokenAppMatch()
+        return SpokenAppMatch(
+            tuple(
+                dict.fromkeys(
+                    entry.candidate for entry in near if entry.candidate is not None
+                )
+            )
+        )

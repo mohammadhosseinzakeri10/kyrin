@@ -122,16 +122,33 @@ class ModelAssistedInterpreter:
         if pending is not None:
             if _words(text) == ("یا",):
                 return NeedsClarification(pending)
+            if isinstance(direct, (ReadyCommand, ReadyPlan, DeclinedClarification)):
+                return direct
+            if isinstance(direct, NeedsClarification) and direct.pending != pending:
+                # The rules advanced to a new question (for example, from
+                # app identity to close confirmation). Never restore the old
+                # question because a model reply is slow or unavailable.
+                return direct
             if (
                 isinstance(pending, PendingAppClarification)
                 and pending.confirmation
-                and not isinstance(direct, (ReadyCommand, DeclinedClarification))
                 and len(_words(text)) <= 5
             ):
+                if self._source_operations.extract(
+                    text, language=language
+                ).operations:
+                    return direct
                 try:
                     decision = self._model.classify_confirmation(
                         UnderstandingInput(text, language),
-                        question=f"Open {pending.candidates[0].display_name}?",
+                        question=(
+                            f"Close {pending.candidates[0].display_name}?"
+                            if pending.operation is CommandKind.CLOSE_APP_WINDOW
+                            else (
+                                "Is this the "
+                                f"{pending.candidates[0].display_name} app?"
+                            )
+                        ),
                     )
                 except CommandModelError, ValueError:
                     return NeedsClarification(pending)

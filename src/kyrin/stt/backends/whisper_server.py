@@ -238,9 +238,15 @@ class WhisperCppServer:
 
     def close(self) -> None:
         if self._process.poll() is None:
-            self._process.terminate()
+            try:
+                self._process.terminate()
+            except ProcessLookupError:
+                return
             try:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self._process.kill()
+                try:
+                    self._process.kill()
+                except ProcessLookupError:
+                    pass
                 self._process.wait()

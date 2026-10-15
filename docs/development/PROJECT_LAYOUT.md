@@ -94,6 +94,7 @@ models/
       command-understanding/ollama/ one complete store per model
       stt/vosk/                     one extracted folder per Vosk model
       stt/whisper.cpp/              one folder per Whisper model
+      stt/omnilingual-asr/           six local v2 model folders
       tts/<family>/<model>/         selected TTS packages, one per model
       ocr/tesseract/                OCR language data only
     ocr/tesseract/                   experimental OCR executable and libraries
@@ -127,6 +128,15 @@ other. TTS packages are organized by family and model under
 duplicate. A packaged app without this checkout uses its platform application
 data directory as a fallback. The OCR runtime is separate from its trained
 language data.
+
+The desktop entry point accepts a development model catalog only when its
+module is physically inside the expected `src/kyrin/app/qt/` source layout
+and that checkout has `pyproject.toml`. An installed wheel therefore uses the
+application model library for TTS and installed STT entries; it does not infer
+a model catalog from unrelated parent directories. This guards path discovery
+but does not yet constitute a portable release: optional speech runtimes,
+model acquisition, and desktop integration still need packaging and an
+installed-environment acceptance test.
 
 On this machine, the standard XDG application paths point to `local-data/`
 through symlinks. See [local storage](../app/LOCAL_DATA_STORAGE.md). Portable

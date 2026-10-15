@@ -103,3 +103,20 @@ def test_browser_category_comes_from_registered_desktop_entry(tmp_path: Path) ->
     assert XdgDesktopAppCatalog((root,)).find_app("chrome.desktop") == InstalledApp(
         "chrome.desktop", "Google Chrome", ("Network", "WebBrowser")
     )
+
+
+def test_registered_localized_names_are_discovered_without_machine_word_list(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "data"
+    _entry(
+        root,
+        "notes.desktop",
+        name="Acme Notes",
+        extra="Name[fa]=یادداشت‌های اَکمه\nName[de]=Acme Notizen\n",
+    )
+    assert XdgDesktopAppCatalog((root,)).find_app("notes.desktop") == InstalledApp(
+        "notes.desktop",
+        "Acme Notes",
+        alternate_names=("یادداشت‌های اَکمه", "Acme Notizen"),
+    )

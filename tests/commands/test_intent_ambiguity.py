@@ -56,7 +56,9 @@ def test_ambiguous_app_or_chat_requires_explicit_choice(tmp_path: Path) -> None:
     assert isinstance(first[1], ResponseRequest)
     assert first[1].kind is ResponseKind.CHOOSE_APP_OR_CHAT
     assert isinstance(coordinator.pending_clarification, PendingIntentClarification)
-    assert "app or a chat" in ResponsePresenter("en").present(first[1]).text
+    prompt = ResponsePresenter("en").present(first[1]).text
+    assert "app or a chat" in prompt
+    assert "1. App. 2. Chat." in prompt
     assert gate.observe(first[0]) is None
 
     unclear = coordinator.observe(_final(1, "yes"))
@@ -89,6 +91,44 @@ def test_chat_choice_uses_fresh_context_and_never_opens_app(tmp_path: Path) -> N
     assert chat[0].intent.app == "telegram"
 
 
+@pytest.mark.parametrize("answer", ("1", "one", "number one", "option 1"))
+def test_number_one_selects_registered_app(tmp_path: Path, answer: str) -> None:
+    coordinator = _coordinator(tmp_path)
+    coordinator.observe(_final(0, "Open Chat One"))
+
+    assert coordinator.observe(_final(1, answer)) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_APP, "chat_one"), language="en"
+        ),
+    )
+
+
+@pytest.mark.parametrize("answer", ("2", "two", "number two", "option 2"))
+def test_number_two_selects_chat_with_fresh_context(
+    tmp_path: Path, answer: str
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    coordinator.observe(_final(0, "Open Chat One"))
+
+    result = coordinator.observe(_final(1, answer), observed_active_app="telegram")
+    assert result == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.OPEN_CHAT, "one", "telegram"), language="en"
+        ),
+    )
+
+
+@pytest.mark.parametrize("answer", ("number three", "one or two", "yes"))
+def test_invalid_intent_choice_keeps_question(tmp_path: Path, answer: str) -> None:
+    coordinator = _coordinator(tmp_path)
+    coordinator.observe(_final(0, "Open Chat One"))
+
+    result = coordinator.observe(_final(1, answer))
+    assert result[0] == CommandResolution(1, None, language="en")
+    assert result[1].kind is ResponseKind.CHOOSE_APP_OR_CHAT
+    assert isinstance(coordinator.pending_clarification, PendingIntentClarification)
+
+
 def test_near_app_name_that_reads_as_chat_also_asks(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path)
     result = coordinator.observe(_final(0, "Open Chat On"))
@@ -113,7 +153,9 @@ def test_persian_app_and_chat_name_also_requires_a_choice(tmp_path: Path) -> Non
     assert first[0] == CommandResolution(0, None, language="fa")
     assert isinstance(first[1], ResponseRequest)
     assert first[1].kind is ResponseKind.CHOOSE_APP_OR_CHAT
-    assert "برنامه" in ResponsePresenter("fa").present(first[1]).text
+    prompt = ResponsePresenter("fa").present(first[1]).text
+    assert "۱. برنامهٔ" in prompt
+    assert "۲. چت" in prompt
     selected = coordinator.observe(
         TranscriptUpdate(1, "برنامه", TranscriptStatus.FINAL, "fa")
     )
@@ -122,6 +164,32 @@ def test_persian_app_and_chat_name_also_requires_a_choice(tmp_path: Path) -> Non
             1, CommandIntent(CommandKind.OPEN_APP, "ali_chat"), language="fa"
         ),
     )
+
+
+@pytest.mark.parametrize("answer", ("شماره یک", "گزینه ۱", "شماره دو", "گزینه ۲"))
+def test_persian_numbered_intent_choices(tmp_path: Path, answer: str) -> None:
+    app_dir = tmp_path / "applications"
+    app_dir.mkdir()
+    (app_dir / "ali-chat.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=چت علی\n", encoding="utf-8"
+    )
+    resolver = CatalogSpokenAppResolver(
+        XdgDesktopAppCatalog((tmp_path,)), {"ali-chat.desktop": "ali_chat"}
+    )
+    coordinator = CommandCoordinator(DemoCommandInterpreter(resolver))
+    coordinator.observe(
+        TranscriptUpdate(0, "چت علی را باز کن", TranscriptStatus.FINAL, "fa")
+    )
+    result = coordinator.observe(
+        TranscriptUpdate(1, answer, TranscriptStatus.FINAL, "fa"),
+        observed_active_app="telegram",
+    )
+    if answer.endswith(("یک", "۱")):
+        assert result[0].intent == CommandIntent(CommandKind.OPEN_APP, "ali_chat")
+    else:
+        assert result[0].intent == CommandIntent(
+            CommandKind.OPEN_CHAT, "علی", "telegram"
+        )
 
 
 def test_partial_then_negated_final_never_executes(tmp_path: Path) -> None:

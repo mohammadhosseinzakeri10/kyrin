@@ -109,6 +109,14 @@ development convention, not a runtime dependency or the future installed-app
 storage policy. If these local files are removed, restore the ZIP from the
 source above and verify its recorded checksum before extraction.
 
+## Local Omnilingual ASR models
+
+Six Omnilingual ASR v2 checkpoints are stored separately under
+`models/local/by-model/stt/omnilingual-asr/<model-name>/`. Each folder includes
+its own copy of `omniASR_tokenizer_written_v2.model`. KYRIN reads these folders
+in place and runs the official package from an isolated Python 3.12 runtime;
+see [local integration](../docs/stt/OMNILINGUAL_ASR_FA.md).
+
 ## Local Whisper comparison models
 
 Two multilingual `whisper.cpp` candidates were downloaded on 2026-10-05 for

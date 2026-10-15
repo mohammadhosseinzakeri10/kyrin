@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from kyrin.commands.ollama_engine import CommandModelError
 from kyrin.commands.ollama_models import ollama_model_stores
@@ -85,10 +85,33 @@ class LocalOllamaServer:
 
     def __exit__(self, *_exc: object) -> None:
         process = self._process
+        url = self.base_url
         self._process = None
         self.base_url = None
         if process is None or process.poll() is not None:
             return
+        if url is not None:
+            # The private server may keep its model resident for five minutes
+            # after the last inference. Explicitly unload before shutdown.
+            request = Request(
+                f"{url}/api/generate",
+                data=json.dumps(
+                    {
+                        "model": self._model,
+                        "prompt": "",
+                        "keep_alive": 0,
+                        "stream": False,
+                    }
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urlopen(request, timeout=3) as response:
+                    response.read()
+            except (OSError, URLError, TimeoutError):
+                # Server termination below remains the fallback.
+                pass
         process.terminate()
         try:
             process.wait(timeout=5)

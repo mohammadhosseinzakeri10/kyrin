@@ -55,6 +55,29 @@ def test_voice_is_async_and_suppresses_capture_until_playback_finishes() -> None
     assert not errors
 
 
+def test_stale_queued_prompt_is_not_spoken_after_stage_changes() -> None:
+    backend = BlockingSynthesizer()
+    speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
+    current = True
+    first = PresentedResponse(
+        None, None, "First stage", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    second = PresentedResponse(
+        None, None, "Second stage", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    try:
+        assert speaker.submit(first)
+        assert backend.started.wait(2)
+        assert speaker.submit(second, still_current=lambda: current)
+        current = False
+        backend.release.set()
+        assert speaker.wait_until_idle(2)
+        assert backend.calls == [("First stage", "en")]
+    finally:
+        backend.release.set()
+        speaker.close()
+
+
 def test_preview_speaks_with_its_own_selection_without_changing_normal_voice() -> None:
     backend = BlockingSynthesizer()
     speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
@@ -102,7 +125,7 @@ def test_local_backend_waits_for_offline_speech_and_propagates_failure(
         backend.speak("Please repeat.", "en")
 
 
-def test_unclear_final_command_reaches_both_text_and_voice(
+def test_unclear_final_command_is_displayed_without_voice(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     script = Path(__file__).resolve().parents[2] / "scripts/audio/check_live_speech.py"
@@ -116,10 +139,8 @@ def test_unclear_final_command_reaches_both_text_and_voice(
     try:
         for decision in decisions:
             print_command_event(decision, 0, ResponsePresenter("en"), speaker)
-        assert backend.started.wait(2)
-        assert backend.calls == [
-            ("I didn't understand. Please repeat the command.", "en")
-        ]
+        assert not backend.started.wait(0.05)
+        assert backend.calls == []
         assert "Please repeat the command." in capsys.readouterr().out
     finally:
         backend.release.set()

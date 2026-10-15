@@ -68,3 +68,10 @@ class SpeechToTextEngine(Protocol):
     def close(self) -> None:
         """Release the loaded model after all of its sessions have closed."""
         ...
+
+
+@runtime_checkable
+class CancellableSpeechToTextEngine(Protocol):
+    """Optional way to interrupt an active request before joining its session."""
+
+    def cancel_pending_inference(self) -> None: ...

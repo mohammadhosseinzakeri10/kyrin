@@ -11,7 +11,7 @@ from time import monotonic, sleep
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.sample_rate_converter import SampleRateConverter
-from kyrin.stt.contracts import SpeechToTextEngine
+from kyrin.stt.contracts import SpeechToTextEngine, TurnAwareSpeechToTextSession
 from kyrin.stt.device import DevicePreference, SpeechToTextOptions
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
@@ -33,6 +33,9 @@ class EvaluationResult:
     reference_characters: int
     edit_distance: int
     cer: float
+    reference_words: int
+    word_edit_distance: int
+    wer: float
     audio_seconds: float
     first_partial_seconds: float | None
     first_final_seconds: float | None
@@ -86,7 +89,7 @@ def normalize_text(text: str) -> str:
     return " ".join(text.split())
 
 
-def edit_distance(left: str, right: str) -> int:
+def edit_distance[T](left: Sequence[T], right: Sequence[T]) -> int:
     """Count insertions, deletions, and substitutions with bounded memory."""
     if len(right) > len(left):
         left, right = right, left
@@ -112,6 +115,7 @@ def evaluate_item(
     chunk_ms: int = 20,
     realtime: bool = True,
     device: DevicePreference = DevicePreference.AUTO,
+    engine_language: str | None = None,
 ) -> EvaluationResult:
     """Stream one WAV in order and score only sealed final transcript segments."""
     if chunk_ms <= 0:
@@ -131,7 +135,12 @@ def evaluate_item(
                 yield AudioData(data, source_format)
 
         session = engine.open_session(
-            SpeechToTextOptions(device=device, language_hint=item.language)
+            SpeechToTextOptions(
+                device=device,
+                language_hint=(
+                    engine_language if engine_language is not None else item.language
+                ),
+            )
         )
         try:
             converter = SampleRateConverter(
@@ -158,6 +167,9 @@ def evaluate_item(
                         if update.text.strip():
                             final_segments.append(update.text.strip())
 
+            if isinstance(session, TurnAwareSpeechToTextSession):
+                observe(session.start_turn())
+
             for chunk in converter.convert(source_chunks()):
                 audio_seconds += (
                     len(chunk.data)
@@ -167,11 +179,18 @@ def evaluate_item(
                 if realtime:
                     sleep(max(0.0, started + audio_seconds - monotonic()))
                 observe(session.accept_audio(chunk))
+            if isinstance(session, TurnAwareSpeechToTextSession):
+                observe(session.end_turn())
             observe(session.finish())
             elapsed = monotonic() - started
             transcript = " ".join(final_segments)
             reference = normalize_text(item.reference)
-            distance = edit_distance(reference, normalize_text(transcript))
+            normalized_transcript = normalize_text(transcript)
+            distance = edit_distance(reference, normalized_transcript)
+            reference_words = reference.split()
+            word_distance = edit_distance(
+                reference_words, normalized_transcript.split()
+            )
             return EvaluationResult(
                 id=item.id,
                 language=item.language,
@@ -180,6 +199,9 @@ def evaluate_item(
                 reference_characters=len(reference),
                 edit_distance=distance,
                 cer=distance / len(reference),
+                reference_words=len(reference_words),
+                word_edit_distance=word_distance,
+                wer=word_distance / len(reference_words),
                 audio_seconds=audio_seconds,
                 first_partial_seconds=first_partial,
                 first_final_seconds=first_final,
@@ -196,10 +218,15 @@ def summarize(results: tuple[EvaluationResult, ...]) -> dict[str, object]:
         raise ValueError("results must not be empty")
     characters = sum(result.reference_characters for result in results)
     edits = sum(result.edit_distance for result in results)
+    words = sum(result.reference_words for result in results)
+    word_edits = sum(result.word_edit_distance for result in results)
     return {
         "files": len(results),
         "reference_characters": characters,
         "edit_distance": edits,
         "cer": edits / characters,
+        "reference_words": words,
+        "word_edit_distance": word_edits,
+        "wer": word_edits / words,
         "results": [asdict(result) for result in results],
     }

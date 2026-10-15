@@ -37,12 +37,16 @@ class WhisperSession:
         partial_every_seconds: float = 2.5,
         preview_window_seconds: float = 8.0,
         maximum_turn_seconds: float = 30.0,
+        engine_name: str = "Whisper",
+        emit_partials: bool = True,
     ) -> None:
         if not 0 < partial_after_seconds <= partial_every_seconds:
             raise ValueError("partial interval must be positive and ordered")
         if not 0 < preview_window_seconds <= maximum_turn_seconds:
             raise ValueError("preview window must fit within the maximum turn")
         self._infer = infer
+        self._engine_name = engine_name
+        self.supports_partial_updates = emit_partials
         self._language = language
         self._on_close = on_close
         self.compute_device = compute_device
@@ -62,9 +66,9 @@ class WhisperSession:
 
     def _require_open(self) -> None:
         if self._closed:
-            raise SpeechToTextError("Whisper session is closed")
+            raise SpeechToTextError(f"{self._engine_name} session is closed")
         if self._finished:
-            raise SpeechToTextError("Whisper session has finished")
+            raise SpeechToTextError(f"{self._engine_name} session has finished")
 
     def _transcribe(self, pcm: bytes) -> WhisperResult:
         try:
@@ -73,12 +77,16 @@ class WhisperSession:
                 return WhisperResult(result.text.strip(), result.language)
             return WhisperResult(result.strip(), self._language)
         except (OSError, ValueError, RuntimeError) as exc:
-            raise SpeechToTextError("Whisper could not transcribe audio") from exc
+            raise SpeechToTextError(
+                f"{self._engine_name} could not transcribe audio: {exc}"
+            ) from exc
 
     def accept_audio(self, chunk: AudioData) -> Sequence[TranscriptUpdate]:
         self._require_open()
         if chunk.audio_format != self.input_format:
-            raise SpeechToTextError("audio format does not match Whisper session")
+            raise SpeechToTextError(
+                f"audio format does not match {self._engine_name} session"
+            )
         if not chunk.data:
             return ()
         self._pre_roll.extend(chunk.data)
@@ -89,7 +97,11 @@ class WhisperSession:
         self._turn.extend(chunk.data[:remaining])
         if len(chunk.data) > remaining:
             self._too_long = True
-        if self._too_long or len(self._turn) < self._next_partial:
+        if (
+            not self.supports_partial_updates
+            or self._too_long
+            or len(self._turn) < self._next_partial
+        ):
             return ()
         self._next_partial = len(self._turn) + self._partial_every
         result = self._transcribe(bytes(self._turn[-self._preview_window :]))
@@ -242,6 +254,14 @@ class WhisperEngine:
         with self._lock:
             if self._active_sessions:
                 raise SpeechToTextError("close Whisper sessions before the engine")
+            server = self._server
+            self._server = None
+        if server is not None:
+            server.close()
+
+    def cancel_pending_inference(self) -> None:
+        """Stop the owned server even if a session request is still active."""
+        with self._lock:
             server = self._server
             self._server = None
         if server is not None:
