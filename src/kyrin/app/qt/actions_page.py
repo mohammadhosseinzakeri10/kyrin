@@ -289,7 +289,7 @@ class DesktopActionsPage(QWidget):
         self.telegram_pointer_grant_status.setText(self._translations.text(key))
 
     def _update_scroll_permission_availability(self) -> None:
-        enabled = self.apps.isEnabled() and bool(self.selected_apps())
+        enabled = self.apps.isEnabled()
         self.desktop_scroll_checkbox.setEnabled(enabled)
         if not enabled:
             self.desktop_scroll_checkbox.setChecked(False)

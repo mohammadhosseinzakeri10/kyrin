@@ -19,12 +19,14 @@ class DesktopScrollExecutor:
         *,
         desktop_ids: Mapping[str, str],
         identity_reader: WindowIdentityReader,
+        allow_any_focused_app: bool = False,
         helper_path: Path = SCROLL_HELPER,
         system_python: str = "/usr/bin/python3",
     ) -> None:
         self._delegate = delegate
         self._desktop_ids = dict(desktop_ids)
         self._identity_reader = identity_reader
+        self._allow_any_focused_app = allow_any_focused_app
         self._helper_path = helper_path
         self._system_python = system_python
 
@@ -32,7 +34,11 @@ class DesktopScrollExecutor:
         kind = request.intent.kind
         if kind not in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
             return self._delegate.execute(request)
-        desktop_id = self._desktop_ids.get(request.intent.target)
+        desktop_id = (
+            request.intent.target
+            if self._allow_any_focused_app
+            else self._desktop_ids.get(request.intent.target)
+        )
         identity = self._identity_reader()
         if desktop_id is None or identity is None or identity[0] != desktop_id:
             return ActionResult(
@@ -47,7 +53,7 @@ class DesktopScrollExecutor:
                     str(identity[1]),
                     "up" if kind is CommandKind.SCROLL_UP else "down",
                     str(request.intent.scroll_steps or 3),
-                    "left" if request.intent.target == "telegram" else "center",
+                    "left" if "telegram" in identity[0].casefold() else "center",
                     "desktop-scroll",
                 ],
                 capture_output=True,

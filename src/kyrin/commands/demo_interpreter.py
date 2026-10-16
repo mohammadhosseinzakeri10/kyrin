@@ -142,6 +142,7 @@ class DemoCommandInterpreter:
         browser_candidates: Sequence[SpokenAppCandidate] = (),
         allowed_window_apps: frozenset[str] = frozenset(),
         allowed_scroll_apps: frozenset[str] = frozenset(),
+        scroll_any_focused_app: bool = False,
         allowed_close_apps: frozenset[str] = frozenset(),
         window_presence: AppWindowPresence | None = None,
         terminal_app_id: str | None = None,
@@ -151,6 +152,7 @@ class DemoCommandInterpreter:
         self._browser_candidates = tuple(browser_candidates)
         self._allowed_window_apps = allowed_window_apps
         self._allowed_scroll_apps = allowed_scroll_apps
+        self._scroll_any_focused_app = scroll_any_focused_app
         self._allowed_close_apps = allowed_close_apps
         self._window_presence = window_presence
         self._terminal_app_id = terminal_app_id
@@ -198,8 +200,15 @@ class DemoCommandInterpreter:
         scroll_match = english_scroll or persian_scroll or short_scroll
         repeat_scroll = phrase in {"more", "again", "بیشتر", "دوباره"}
         if scroll_match is not None or repeat_scroll:
-            active = context.observed_active_app
-            if active is None or active not in self._allowed_scroll_apps:
+            active = (
+                context.observed_scroll_app
+                if self._scroll_any_focused_app
+                else context.observed_active_app
+            )
+            if active is None or (
+                not self._scroll_any_focused_app
+                and active not in self._allowed_scroll_apps
+            ):
                 return UnrecognizedCommand()
             if repeat_scroll:
                 if context.recent_scroll_kind is None:

@@ -103,6 +103,7 @@ class CommandCoordinator:
         update: TranscriptUpdate,
         *,
         observed_active_app: str | None = None,
+        observed_scroll_app: str | None = None,
     ) -> Sequence[CommandEvent]:
         """Observe one update; pass a fresh OS observation, never cached context."""
         if update.segment_id <= self._finalized_through:
@@ -145,9 +146,10 @@ class CommandCoordinator:
             interpreted_text = self._fragments.combine(update.text) or update.text
         recent_scroll_kind: CommandKind | None = None
         recent_scroll_steps: int | None = None
-        if self._last_scroll is not None and observed_active_app is not None:
+        current_scroll_app = observed_scroll_app or observed_active_app
+        if self._last_scroll is not None and current_scroll_app is not None:
             scroll_app, scroll_kind, scroll_steps, recorded_at = self._last_scroll
-            if scroll_app == observed_active_app and monotonic() - recorded_at <= 30:
+            if scroll_app == current_scroll_app and monotonic() - recorded_at <= 30:
                 recent_scroll_kind = scroll_kind
                 recent_scroll_steps = scroll_steps
         interpretation = self.interpreter.interpret(
@@ -163,6 +165,7 @@ class CommandCoordinator:
                 else (),
                 recent_scroll_kind,
                 recent_scroll_steps,
+                observed_scroll_app,
             ),
             pending=self._pending,
         )

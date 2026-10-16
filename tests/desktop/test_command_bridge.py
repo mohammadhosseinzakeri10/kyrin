@@ -67,3 +67,38 @@ def test_final_only_observation_does_not_reuse_earlier_focus() -> None:
         ),
     )
     assert observer.calls == 2
+
+
+def test_scroll_focus_is_read_only_for_final_speech() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(scroll_any_focused_app=True)
+    )
+    focus = [("unselected.desktop", 42)]
+    calls = 0
+
+    def read_focus() -> tuple[str, int] | None:
+        nonlocal calls
+        calls += 1
+        return focus.pop(0)
+
+    _, partial = observe_command_update(
+        coordinator,
+        TranscriptUpdate(0, "Scroll down", TranscriptStatus.PARTIAL, "en"),
+        None,
+        read_focus,
+    )
+    assert partial == ()
+    assert calls == 0
+    _, final = observe_command_update(
+        coordinator,
+        TranscriptUpdate(0, "Scroll down", TranscriptStatus.FINAL, "en"),
+        None,
+        read_focus,
+    )
+    assert final == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.SCROLL_DOWN, "unselected.desktop"),
+            language="en",
+        ),
+    )
+    assert calls == 1

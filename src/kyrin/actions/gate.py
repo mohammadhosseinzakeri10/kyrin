@@ -30,6 +30,7 @@ class ActionPolicy:
     allowed_chat_apps: frozenset[str] = field(default_factory=frozenset)
     allowed_window_apps: frozenset[str] = field(default_factory=frozenset)
     allowed_scroll_apps: frozenset[str] = field(default_factory=frozenset)
+    allow_focused_scroll: bool = False
     allowed_close_apps: frozenset[str] = field(default_factory=frozenset)
     confirmation_required_for: frozenset[CommandKind] = field(default_factory=frozenset)
     supported_kinds: frozenset[CommandKind] = field(
@@ -204,7 +205,10 @@ class ActionGate:
         if intent.kind is CommandKind.OPEN_CHAT:
             return intent.app in self.policy.allowed_chat_apps
         if intent.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
-            return intent.target in self.policy.allowed_scroll_apps
+            return (
+                self.policy.allow_focused_scroll
+                or intent.target in self.policy.allowed_scroll_apps
+            )
         return False
 
     def _issue(

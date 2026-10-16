@@ -156,7 +156,7 @@ PERSIAN: dict[str, str] = {
     "telegram_pointer_save_first": (
         "ابتدا تنظیمات چت و دسترسی کنترل Telegram را ذخیره کنید."
     ),
-    "allow_desktop_scroll": "اجازهٔ اسکرول در برنامه‌های انتخاب‌شده",
+    "allow_desktop_scroll": "اجازهٔ اسکرول در برنامهٔ فعال",
     "desktop_scroll_grant_now": "تنظیم دسترسی اسکرول دسکتاپ…",
     "desktop_scroll_not_ready": "دسترسی اسکرول ذخیره نشده است؛ تنظیمات را ذخیره کنید.",
     "desktop_scroll_ready": "دسترسی اسکرول دسکتاپ ذخیره شده است.",

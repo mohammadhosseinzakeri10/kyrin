@@ -51,6 +51,19 @@ def test_scroll_requires_separate_app_permission() -> None:
     )
 
 
+def test_global_scroll_permission_accepts_focused_unselected_app() -> None:
+    intent = CommandIntent(CommandKind.SCROLL_DOWN, "unselected.desktop")
+    gate = ActionGate(
+        ActionPolicy(
+            allow_focused_scroll=True,
+            supported_kinds=frozenset({CommandKind.SCROLL_DOWN}),
+        )
+    )
+    assert gate.observe(CommandResolution(0, intent)) == ActionRequest(
+        ActionKey(0, 0), intent
+    )
+
+
 def test_candidate_never_issues_action_and_final_issues_once() -> None:
     gate = ActionGate(POLICY)
     key = ActionKey(0, 4)

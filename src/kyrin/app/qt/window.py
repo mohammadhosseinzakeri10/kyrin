@@ -708,6 +708,7 @@ class ControlWindow(QWidget):
             actions_enabled
             and not selected_apps
             and not self.actions_page.system_power_checkbox.isChecked()
+            and not self.actions_page.desktop_scroll_checkbox.isChecked()
         ):
             raise ValueError(self._translations.text("action_select_one"))
         return replace(

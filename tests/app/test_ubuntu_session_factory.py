@@ -326,6 +326,63 @@ def test_dry_run_allows_only_configured_app_without_executing(
         history.close()
 
 
+def test_scroll_reaches_unselected_focused_app_without_window_controls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    completed = Event()
+    requested: list[ActionRequest] = []
+    observed: list[ubuntu.ApplicationEvent] = []
+
+    class ScrollSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Scroll down", TranscriptStatus.FINAL, "en")
+            assert completed.wait(2)
+
+    class ScrollExecutor:
+        def __init__(self, delegate, **kwargs) -> None:
+            assert kwargs["desktop_ids"] == {}
+            assert kwargs["allow_any_focused_app"] is True
+
+        def execute(self, request: ActionRequest) -> ActionResult:
+            requested.append(request)
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    def on_event(event: ubuntu.ApplicationEvent) -> None:
+        observed.append(event)
+        if isinstance(event, ActionFeedback):
+            completed.set()
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", ScrollSpeechController)
+    monkeypatch.setattr(ubuntu, "DesktopScrollExecutor", ScrollExecutor)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=on_event,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+        focused_window=lambda: ("unselected.desktop", 42),
+    )
+    settings = _settings(
+        tmp_path,
+        allowed_apps=(),
+        allowed_window_apps=(),
+        allow_desktop_scroll=True,
+        action_execution_enabled=True,
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+
+    assert [request.intent.target for request in requested] == [
+        "unselected.desktop"
+    ]
+    assert any(
+        isinstance(event, ActionFeedback)
+        and event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+        for event in observed
+    )
+
+
 def test_selected_command_model_reaches_live_transcript_without_executing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

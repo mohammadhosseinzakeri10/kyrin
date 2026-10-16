@@ -161,7 +161,7 @@ ENGLISH: dict[str, str] = {
     "telegram_pointer_grant_done": "Telegram keyboard and mouse access is saved.",
     "telegram_pointer_grant_failed": "Control access was not saved. Try again here.",
     "telegram_pointer_save_first": "Save Telegram chat and control settings first.",
-    "allow_desktop_scroll": "Allow scrolling in selected desktop apps",
+    "allow_desktop_scroll": "Allow scrolling in the focused desktop app",
     "desktop_scroll_grant_now": "Set up desktop scroll access now…",
     "desktop_scroll_not_ready": (
         "No saved scroll access. Save settings, then set up access here."

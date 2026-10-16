@@ -1134,6 +1134,27 @@ def test_actions_page_saves_only_explicitly_selected_app(
         application.processEvents()
 
 
+def test_scroll_permission_can_be_saved_without_selected_apps(
+    application: QApplication, tmp_path: Path
+) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    window = _window(AppSettings(listening_enabled=False), store, _controller([]))
+    try:
+        assert window.actions_page.desktop_scroll_checkbox.isEnabled()
+        window.actions_page.enabled_checkbox.setChecked(True)
+        window.actions_page.desktop_scroll_checkbox.setChecked(True)
+        window.apply_button.click()
+        saved = store.load()
+        assert saved.action_execution_enabled
+        assert saved.allow_desktop_scroll
+        assert saved.allowed_apps == ()
+        assert saved.allowed_window_apps == ()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_telegram_control_access_is_requested_from_settings(
     application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

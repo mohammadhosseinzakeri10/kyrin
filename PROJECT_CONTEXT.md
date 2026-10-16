@@ -4671,6 +4671,27 @@ The direct grammar now accepts those bounded scroll-shaped ASR variants;
 `Oh` remains non-actionable because it is ambiguous. The owner reported the
 motion itself felt good. The new spelling aliases need a live retest.
 
+The owner subsequently requested that generic scrolling work in every
+focused desktop app, independently of the app-selection and window-control
+permissions. The earlier composition allowed speech and policy checks for
+all selected installed apps, but built the scroll executor's desktop-ID map
+only from `allowed_window_apps`; scroll could therefore fail even with its
+own permission enabled. Generic scroll now uses the GNOME extension's fresh
+focused-window desktop ID as a scroll-only command target. The action rereads
+the focused desktop ID/PID and the portal helper checks them again before
+pointer movement. The saved scroll permission and one-time RemoteDesktop
+grant remain required. `More` still needs the same focused desktop ID within
+30 seconds. The UI permits saving scroll without selecting any app and labels
+the setting for the focused app. Opening apps, chat navigation, and window
+controls keep their separate allowlists. Deterministic command, gate,
+composition, executor, and UI tests pass. The owner then reported a live
+`Scroll up` in ChatGPT and a successful `Scroll down` after removing the
+per-app permission in KYRIN. The owner agreed that generic scroll should
+remain available without individual app permission. Exact `Action result`
+lines were not supplied, so this is owner-confirmed visible movement rather
+than a recorded action outcome. A window with no identity from the GNOME
+endpoint cannot be scrolled by this voice path.
+
 ## 139. Voice listening modes
 
 The owner requested voice activation at startup, voice standby, and a spoken

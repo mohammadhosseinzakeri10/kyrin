@@ -119,6 +119,7 @@ class LiveCommandRuntime:
         on_action_output: Callable[[ActionDecision | ActionFeedback], None],
         on_session_end: Callable[[SpeechSessionEnded], None],
         on_active_app: Callable[[str | None], None] | None = None,
+        scroll_focus_reader: Callable[[], tuple[str, int] | None] | None = None,
         system_power: SystemPowerFlow | None = None,
         telegram_selection: TelegramChatSelection | None = None,
         history: ConversationHistory | None = None,
@@ -138,6 +139,7 @@ class LiveCommandRuntime:
         self._on_action_output = on_action_output
         self._on_session_end = on_session_end
         self._on_active_app = on_active_app
+        self._scroll_focus_reader = scroll_focus_reader
         self._system_power = system_power
         self._telegram_selection = telegram_selection
         self._history = history
@@ -262,7 +264,10 @@ class LiveCommandRuntime:
                         self._remember(event)
                         continue
                     active_app, decisions = observe_command_update(
-                        coordinator, event, self._observer
+                        coordinator,
+                        event,
+                        self._observer,
+                        self._scroll_focus_reader,
                     )
                     if (
                         self._observer is not None

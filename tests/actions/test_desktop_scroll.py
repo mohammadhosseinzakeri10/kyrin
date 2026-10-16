@@ -99,3 +99,37 @@ def test_scroll_amount_reaches_bounded_helper(
     )
     assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
     assert commands[0][-3:] == ["2", "left", "desktop-scroll"]
+
+
+def test_global_scroll_dispatches_for_unselected_focused_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
+
+    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    executor = desktop_scroll.DesktopScrollExecutor(
+        Delegate(),
+        desktop_ids={},
+        identity_reader=lambda: ("unselected.desktop", 42),
+        allow_any_focused_app=True,
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(CommandKind.SCROLL_DOWN, "unselected.desktop"),
+    )
+    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert commands[0][-6:] == [
+        "unselected.desktop", "42", "down", "3", "center", "desktop-scroll"
+    ]
+    changed = ActionRequest(
+        ActionKey(0, 2),
+        CommandIntent(CommandKind.SCROLL_DOWN, "other.desktop"),
+    )
+    assert executor.execute(changed) == ActionResult(
+        changed.key, ActionOutcome.FAILED, error_code="scroll_focus_changed"
+    )
+    assert len(commands) == 1

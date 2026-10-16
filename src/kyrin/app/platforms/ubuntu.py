@@ -312,9 +312,7 @@ class UbuntuSessionFactory:
                 spoken_names.browser_candidates() if spoken_names else ()
             ),
             allowed_window_apps=frozenset(settings.allowed_window_apps),
-            allowed_scroll_apps=(
-                frozenset(installed) if settings.allow_desktop_scroll else frozenset()
-            ),
+            scroll_any_focused_app=settings.allow_desktop_scroll,
             allowed_close_apps=frozenset(settings.allowed_close_apps),
             window_presence=window_presence,
             terminal_app_id=terminal_app_id,
@@ -357,7 +355,7 @@ class UbuntuSessionFactory:
         if chat_enabled:
             supported_kinds.add(CommandKind.OPEN_CHAT)
         if (
-            settings.allow_desktop_scroll and installed
+            settings.allow_desktop_scroll
             and self._focused_window is not None
         ):
             supported_kinds.update({CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN})
@@ -382,9 +380,9 @@ class UbuntuSessionFactory:
                 if chat_enabled
                 else frozenset(),
                 allowed_window_apps=frozenset(settings.allowed_window_apps),
-                allowed_scroll_apps=(
-                    frozenset(installed)
-                    if settings.allow_desktop_scroll else frozenset()
+                allow_focused_scroll=(
+                    settings.allow_desktop_scroll
+                    and self._focused_window is not None
                 ),
                 allowed_close_apps=frozenset(settings.allowed_close_apps),
                 supported_kinds=frozenset(supported_kinds),
@@ -696,12 +694,9 @@ class UbuntuSessionFactory:
                 if settings.allow_desktop_scroll and self._focused_window is not None:
                     executor = DesktopScrollExecutor(
                         executor,
-                        desktop_ids={
-                            app_id: desktop_ids[app_id]
-                            for app_id in settings.allowed_window_apps
-                            if app_id in desktop_ids
-                        },
+                        desktop_ids={},
                         identity_reader=self._focused_window,
+                        allow_any_focused_app=True,
                     )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
@@ -719,6 +714,9 @@ class UbuntuSessionFactory:
                 on_command_event=show_command,
                 on_action_output=show_action,
                 on_session_end=show_session_end,
+                scroll_focus_reader=(
+                    self._focused_window if settings.allow_desktop_scroll else None
+                ),
                 system_power=power_flow,
                 telegram_selection=chat_selection,
                 history=history,

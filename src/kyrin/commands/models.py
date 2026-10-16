@@ -91,6 +91,7 @@ class CommandContext:
     recent_utterances: tuple[str, ...] = ()
     recent_scroll_kind: CommandKind | None = None
     recent_scroll_steps: int | None = None
+    observed_scroll_app: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

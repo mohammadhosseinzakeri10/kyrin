@@ -281,6 +281,37 @@ def test_scroll_command_targets_only_permitted_active_app(
     ) == (CommandResolution(0, CommandIntent(kind, "telegram")),)
 
 
+def test_global_scroll_uses_fresh_window_id_without_app_selection() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(scroll_any_focused_app=True)
+    )
+    assert coordinator.observe(
+        update(0, "Scroll down", TranscriptStatus.FINAL),
+        observed_scroll_app="org.example.Unselected.desktop",
+    ) == (
+        CommandResolution(
+            0,
+            CommandIntent(CommandKind.SCROLL_DOWN, "org.example.Unselected.desktop"),
+        ),
+    )
+    assert coordinator.observe(
+        update(1, "More", TranscriptStatus.FINAL),
+        observed_scroll_app="org.example.Unselected.desktop",
+    ) == (
+        CommandResolution(
+            1,
+            CommandIntent(CommandKind.SCROLL_DOWN, "org.example.Unselected.desktop"),
+        ),
+    )
+    assert coordinator.observe(
+        update(2, "More", TranscriptStatus.FINAL),
+        observed_scroll_app="org.example.Other.desktop",
+    )[0] == CommandResolution(2, None)
+    assert coordinator.observe(
+        update(3, "Scroll up", TranscriptStatus.FINAL),
+    )[0] == CommandResolution(3, None)
+
+
 def test_more_repeats_recent_scroll_direction_in_same_active_app() -> None:
     coordinator = CommandCoordinator(
         DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
