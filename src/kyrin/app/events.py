@@ -8,6 +8,7 @@ from kyrin.commands.models import CommandEvent
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
 from kyrin.runtime.speech_sessions import SpeechSessionEnded
+from kyrin.runtime.voice_control import VoiceModeChanged
 from kyrin.stt.device import ComputeDevice
 from kyrin.system_power.flow import PowerPrompt
 
@@ -19,6 +20,11 @@ class SttDeviceReady:
     device: ComputeDevice
 
 
+@dataclass(frozen=True, slots=True)
+class AudioCaptureReady:
+    """The selected microphone has supplied its first audio chunk."""
+
+
 ApplicationEvent = (
     LiveSpeechEvent
     | CommandEvent
@@ -28,5 +34,7 @@ ApplicationEvent = (
     | PresentedResponse
     | SpeechSynthesisError
     | SttDeviceReady
+    | AudioCaptureReady
     | PowerPrompt
+    | VoiceModeChanged
 )

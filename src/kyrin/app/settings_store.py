@@ -18,7 +18,7 @@ from kyrin.app.settings import (
 )
 from kyrin.stt.device import DevicePreference
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 13
 
 
 class SettingsError(ValueError):
@@ -134,6 +134,10 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("app_spoken_aliases")
     if version >= 11:
         fields.add("tts_enabled")
+    if version >= 12:
+        fields.add("remember_telegram_pointer")
+    if version >= 13:
+        fields.add("allow_desktop_scroll")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -303,6 +307,14 @@ def _parse_settings(document: object) -> AppSettings:
             ),
             allowed_apps=tuple(apps),
             allowed_chat_apps=chat_apps,
+            remember_telegram_pointer=(
+                _boolean(root["remember_telegram_pointer"], "remember_telegram_pointer")
+                if version >= 12 else False
+            ),
+            allow_desktop_scroll=(
+                _boolean(root["allow_desktop_scroll"], "allow_desktop_scroll")
+                if version >= 13 else False
+            ),
             allowed_window_apps=window_apps,
             allowed_close_apps=close_apps,
             wake_aliases=wake_aliases,
@@ -360,6 +372,8 @@ def _document(settings: AppSettings) -> dict[str, object]:
             for app in settings.allowed_apps
         ],
         "allowed_chat_apps": list(settings.allowed_chat_apps),
+        "remember_telegram_pointer": settings.remember_telegram_pointer,
+        "allow_desktop_scroll": settings.allow_desktop_scroll,
         "allowed_window_apps": list(settings.allowed_window_apps),
         "allowed_close_apps": list(settings.allowed_close_apps),
         "wake_aliases": list(settings.wake_aliases),

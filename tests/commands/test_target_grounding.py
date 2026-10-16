@@ -134,6 +134,22 @@ def test_chat_name_and_explicit_app_are_checked_separately() -> None:
     ) == (TargetGroundingStatus.CLARIFY, "chat_app_mismatch")
 
 
+def test_model_chat_target_case_does_not_change_source_identity() -> None:
+    assert check(
+        "Open chat My Mother",
+        "en",
+        MeaningStep(RequestedOperation.OPEN_CHAT, "my mother"),
+        active_app="telegram",
+    ) == (TargetGroundingStatus.MATCHED, None)
+
+    assert check(
+        "Open My Mother chat",
+        "en",
+        MeaningStep(RequestedOperation.OPEN_CHAT, "my mother"),
+        active_app="telegram",
+    ) == (TargetGroundingStatus.MATCHED, None)
+
+
 def test_chat_context_cannot_be_invented_by_model() -> None:
     assert check(
         "Open Ali's chat",

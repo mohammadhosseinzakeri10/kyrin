@@ -24,13 +24,19 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
 from kyrin.app.controller import ApplicationController, ApplicationState
-from kyrin.app.events import SttDeviceReady
+from kyrin.app.events import AudioCaptureReady, SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
 from kyrin.app.permission_token import permission_token_path, save_opaque_token
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.translations import ENGLISH, UiPreferences, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
-from kyrin.app.settings import AppSettings, AppSpokenAliases, OcrSelection, SttSelection
+from kyrin.app.settings import (
+    AllowedApp,
+    AppSettings,
+    AppSpokenAliases,
+    OcrSelection,
+    SttSelection,
+)
 from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
@@ -44,6 +50,7 @@ from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
 from kyrin.stt.backends.omnilingual import CHECKPOINT_BYTES, TOKENIZER_NAME
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
@@ -108,14 +115,16 @@ def _pump_until(application: QApplication, predicate: Callable[[], bool]) -> Non
     pytest.fail("Qt status did not advance before timeout")
 
 
-def _controller(sessions: list[FakeSession]) -> ApplicationController:
+def _controller(
+    sessions: list[FakeSession], *, start_in_standby: bool = False
+) -> ApplicationController:
     @contextmanager
     def factory(settings: AppSettings) -> Iterator[FakeSession]:
         session = FakeSession()
         sessions.append(session)
         yield session
 
-    return ApplicationController(factory)
+    return ApplicationController(factory, start_in_standby=start_in_standby)
 
 
 def _window(
@@ -634,7 +643,7 @@ def test_gpu_model_stays_visible_when_gpu_runtime_is_missing(
         application.processEvents()
 
 
-def test_listening_switch_persists_and_stops_real_controller_session(
+def test_listening_switch_enters_standby_and_full_off_stops_session(
     application: QApplication, tmp_path: Path
 ) -> None:
     model = tmp_path / "vosk-model"
@@ -651,9 +660,58 @@ def test_listening_switch_persists_and_stops_real_controller_session(
         window.start_initial_session()
         assert controller.status().state is ApplicationState.PAUSED
         window.listening_button.click()
-        _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        _pump_until(
+            application,
+            lambda: bool(sessions)
+            and sessions[0].running.is_set(),
+        )
+        window._on_event(AudioCaptureReady())
         assert store.load().listening_enabled
         window.listening_button.click()
+        assert not controller.commands_active()
+        assert not sessions[0].stopped.is_set()
+        assert store.load().listening_enabled
+        window.microphone_off_button.click()
+        _pump_until(application, lambda: controller.wait_until_stopped(0))
+        assert sessions[0].stopped.is_set()
+        assert not store.load().listening_enabled
+    finally:
+        controller.request_stop()
+        controller.wait_until_stopped(2)
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_voice_modes_start_in_standby_and_full_off_persists(
+    application: QApplication, tmp_path: Path
+) -> None:
+    model = tmp_path / "vosk-model"
+    model.mkdir()
+    settings = AppSettings(stt=SttSelection("vosk", model, "en"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    sessions: list[FakeSession] = []
+    controller = _controller(sessions, start_in_standby=True)
+    window = _window(settings, store, controller)
+    try:
+        window.start_initial_session()
+        _pump_until(
+            application,
+            lambda: controller.status().state is ApplicationState.RUNNING,
+        )
+        assert not controller.commands_active()
+        window._refresh()
+        assert ENGLISH["state_mic_starting"] in window.status_label.text()
+        window._on_event(AudioCaptureReady())
+        window._refresh()
+        assert ENGLISH["state_standby"] in window.status_label.text()
+        window._on_event(VoiceModeChanged(VoiceMode.ACTIVE))
+        assert controller.commands_active()
+        window._on_event(VoiceModeChanged(VoiceMode.STANDBY))
+        assert not controller.commands_active()
+        assert not sessions[0].stopped.is_set()
+        window._on_event(VoiceModeChanged(VoiceMode.OFF))
         _pump_until(application, lambda: controller.wait_until_stopped(0))
         assert sessions[0].stopped.is_set()
         assert not store.load().listening_enabled
@@ -1034,6 +1092,8 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert not window.actions_page.window_control_checkbox.isChecked()
         assert not window.actions_page.close_window_checkbox.isChecked()
         window.actions_page.telegram_chat_checkbox.setChecked(True)
+        assert window.actions_page.telegram_pointer_checkbox.isEnabled()
+        window.actions_page.telegram_pointer_checkbox.setChecked(True)
         window.actions_page.window_control_checkbox.setChecked(True)
         window.actions_page.close_window_checkbox.setChecked(True)
         window.wake_aliases_edit.setText("kayrin, کایرین من")
@@ -1045,6 +1105,7 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert saved.allowed_apps[0].desktop_id == "telegram.desktop"
         assert saved.allowed_apps[0].app_id == "telegram"
         assert saved.allowed_chat_apps == ("telegram",)
+        assert saved.remember_telegram_pointer
         assert saved.allowed_window_apps == ("telegram",)
         assert saved.allowed_close_apps == ("telegram",)
         assert saved.wake_aliases == ("kayrin", "کایرین من")
@@ -1055,11 +1116,100 @@ def test_actions_page_saves_only_explicitly_selected_app(
         assert all(app.desktop_id != "browser.desktop" for app in saved.allowed_apps)
         assert "1 allowed apps" in window.action_label.text()
         token_path = permission_token_path("telegram-keyboard")
+        pointer_path = permission_token_path("telegram-pointer")
+        control_path = permission_token_path("telegram-control")
         save_opaque_token(token_path, "remembered-keyboard")
+        save_opaque_token(pointer_path, "remembered-pointer")
+        save_opaque_token(control_path, "remembered-control")
         window.actions_page.telegram_chat_checkbox.setChecked(False)
         window.apply_button.click()
         assert store.load().allowed_chat_apps == ()
+        assert not store.load().remember_telegram_pointer
         assert not token_path.exists()
+        assert not pointer_path.exists()
+        assert not control_path.exists()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_telegram_control_access_is_requested_from_settings(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "local-data"))
+    settings = AppSettings(
+        listening_enabled=False,
+        allowed_apps=(AllowedApp("telegram", "telegram.desktop"),),
+        allowed_chat_apps=("telegram",),
+        remember_telegram_pointer=True,
+    )
+    calls: list[tuple[str, list[str]]] = []
+    approve = [False]
+
+    class FakeSignal:
+        def __init__(self) -> None:
+            self.callback = None
+
+        def connect(self, callback) -> None:
+            self.callback = callback
+
+        def emit(self, *args) -> None:
+            assert self.callback is not None
+            self.callback(*args)
+
+    class FakeProcess:
+        def __init__(self, _parent) -> None:
+            self.finished = FakeSignal()
+            self.errorOccurred = FakeSignal()
+            self.program = ""
+            self.arguments: list[str] = []
+
+        def setProgram(self, program: str) -> None:
+            self.program = program
+
+        def setArguments(self, arguments: list[str]) -> None:
+            self.arguments = arguments
+
+        def start(self) -> None:
+            calls.append((self.program, self.arguments))
+            if approve[0]:
+                save_opaque_token(
+                    permission_token_path("telegram-control"), "granted-control"
+                )
+            self.finished.emit(0 if approve[0] else 1, None)
+
+        def readAllStandardOutput(self) -> bytes:
+            return b"CONTROL_GRANT_READY"
+
+        def deleteLater(self) -> None:
+            pass
+
+    monkeypatch.setattr("kyrin.app.qt.window.QProcess", FakeProcess)
+    old_keyboard = permission_token_path("telegram-keyboard")
+    old_pointer = permission_token_path("telegram-pointer")
+    save_opaque_token(old_keyboard, "old-keyboard")
+    save_opaque_token(old_pointer, "old-pointer")
+    window = _window(
+        settings, JsonSettingsStore(tmp_path / "settings.json"), _controller([])
+    )
+    try:
+        button = window.actions_page.telegram_pointer_grant_button
+        assert button.isEnabled()
+        button.click()
+        assert "not saved" in window.actions_page.telegram_pointer_grant_status.text()
+        assert not permission_token_path("telegram-control").exists()
+        assert old_keyboard.exists()
+        assert old_pointer.exists()
+        approve[0] = True
+        button.click()
+        assert len(calls) == 2
+        assert calls[0][0] == "/usr/bin/python3"
+        assert calls[0][1][0].endswith("telegram_portal_helper.py")
+        assert calls[0][1][1] == "grant-control"
+        assert "saved" in window.actions_page.telegram_pointer_grant_status.text()
+        assert not old_keyboard.exists()
+        assert not old_pointer.exists()
     finally:
         window._timer.stop()
         window.deleteLater()

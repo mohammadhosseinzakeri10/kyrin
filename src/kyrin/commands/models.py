@@ -9,6 +9,8 @@ from kyrin.commands.app_names import SpokenAppCandidate
 class CommandKind(StrEnum):
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
+    SCROLL_UP = "scroll_up"
+    SCROLL_DOWN = "scroll_down"
     RESTORE_APP = "restore_app"
     MINIMIZE_APP = "minimize_app"
     CLOSE_APP_WINDOW = "close_app_window"
@@ -33,6 +35,7 @@ class CommandIntent:
     target: str
     app: str | None = None
     window_index: int | None = None
+    scroll_steps: int | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -50,6 +53,14 @@ class CommandIntent:
                 )
         elif self.window_index is not None:
             raise ValueError("only numbered window actions may carry a window number")
+        if self.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
+            if self.scroll_steps is not None and (
+                type(self.scroll_steps) is not int
+                or not 1 <= self.scroll_steps <= 4
+            ):
+                raise ValueError("scroll steps must be an integer from 1 to 4")
+        elif self.scroll_steps is not None:
+            raise ValueError("only scroll actions may carry scroll steps")
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +89,8 @@ class CommandContext:
     observed_active_app: str | None = None
     is_final_transcript: bool = True
     recent_utterances: tuple[str, ...] = ()
+    recent_scroll_kind: CommandKind | None = None
+    recent_scroll_steps: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

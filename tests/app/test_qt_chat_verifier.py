@@ -118,7 +118,10 @@ def test_search_result_is_only_returned_for_unique_left_pane_match(
             "telegram.desktop",
             123,
             OcrResult(
-                (RecognizedText("Alice", TextBox(70, 220, 90, 24), 0.91),),
+                (
+                    RecognizedText("Alice", TextBox(70, 45, 90, 13), 0.91),
+                    RecognizedText("Alice", TextBox(70, 92, 90, 13), 0.91),
+                ),
                 "eng",
                 OcrDevice.CPU,
                 "fake",
@@ -137,10 +140,58 @@ def test_search_result_is_only_returned_for_unique_left_pane_match(
 
     assert _call_from_worker(app, work)
     assert result[0] is not None
-    assert result[0].top == 220
+    assert result[0].top == 92
     assert _call_from_worker(
         app,
         lambda: verifier.find_search_result("telegram.desktop", 123, "Bob") is None,
+    )
+
+
+def test_search_choices_keep_local_and_global_rows_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(
+        IdentifiedWindowText(
+            "telegram.desktop",
+            123,
+            OcrResult(
+                (
+                    RecognizedText("Alice", TextBox(70, 45, 90, 13), 0.91),
+                    RecognizedText("Alice", TextBox(70, 92, 90, 13), 0.91),
+                    RecognizedText("Alice", TextBox(70, 182, 90, 13), 0.91),
+                    RecognizedText("Alice", TextBox(70, 244, 90, 13), 0.91),
+                ),
+                "eng",
+                OcrDevice.CPU,
+                "fake",
+            ),
+            (1600, 900),
+        )
+    )
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    choices = []
+
+    def work() -> bool:
+        choices.append(verifier.find_search_choices("telegram.desktop", 123, "alice"))
+        return True
+
+    assert _call_from_worker(app, work)
+    assert choices[0] is not None
+    assert choices[0].own_chat is not None
+    assert choices[0].own_chat.top == 92
+    assert tuple(row.top for row in choices[0].global_results) == (182, 244)
+    assert verifier.choice_status().startswith(
+        "classified_local_1_global_2_matches_4_size_1600x900_at_"
+    )
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_search_result("telegram.desktop", 123, "Alice")
+        is not None,
     )
 
 

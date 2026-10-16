@@ -189,6 +189,13 @@ class VisualStatusController:
                 if language == "fa"
                 else f"Opening {request.intent.target}'s chat…"
             )
+        elif request.intent.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
+            going_up = request.intent.kind is CommandKind.SCROLL_UP
+            caption = (
+                ("در حال اسکرول به بالا…" if going_up else "در حال اسکرول به پایین…")
+                if language == "fa"
+                else ("Scrolling up…" if going_up else "Scrolling down…")
+            )
         else:
             caption = (
                 f"در حال انجام فرمان روی {request.intent.target}…"
@@ -206,6 +213,15 @@ class VisualStatusController:
         """An executor raised before it could return structured feedback."""
         self._set(VisualStatus.FAILED, executing=False)
 
+    def on_chat_selection_prompt(self, event: ResponseRequest) -> None:
+        """A named-chat action has stopped executing and now needs a choice."""
+        self._set(
+            VisualStatus.QUESTION,
+            caption=self._presenter.present(event).text,
+            language=event.language,
+            executing=False,
+        )
+
     def on_action_output(self, output: ActionDecision | ActionFeedback) -> None:
         if isinstance(output, ActionRequest):
             # An authorized dry-run decision never starts an OS action.
@@ -222,8 +238,10 @@ class VisualStatusController:
             )
             return
         if (
-            output.intent.kind in (
-                CommandKind.SHOW_APP_WINDOWS, CommandKind.SHOW_ALL_WINDOWS,
+            output.intent.kind
+            in (
+                CommandKind.SHOW_APP_WINDOWS,
+                CommandKind.SHOW_ALL_WINDOWS,
             )
             and output.outcome is ActionOutcome.LAUNCH_ACCEPTED
         ):

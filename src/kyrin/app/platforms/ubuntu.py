@@ -18,6 +18,7 @@ from kyrin.actions.models import (
     ActionResult,
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
+from kyrin.actions.platforms.desktop_scroll import DesktopScrollExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
 from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
 from kyrin.actions.platforms.ptyxis import PtyxisActionExecutor
@@ -26,9 +27,10 @@ from kyrin.actions.platforms.telegram import (
     TelegramSavedMessagesExecutor,
     WindowIdentityReader,
 )
+from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.window_control import WindowControlExecutor
 from kyrin.app.controller import RuntimeSession
-from kyrin.app.events import ApplicationEvent, SttDeviceReady
+from kyrin.app.events import ApplicationEvent, AudioCaptureReady, SttDeviceReady
 from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.settings import AppSettings, CommandModelSelection, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
@@ -223,6 +225,7 @@ class UbuntuSessionFactory:
         system_power: SystemPowerFlow | None = None,
         command_server_factory: CommandServerFactory = _command_server,
         echo_cancellation_factory: Callable[[], PipeWireEchoCancellation] | None = None,
+        voice_standby: bool = False,
     ) -> None:
         self._stt_openers = dict(stt_openers)
         self._on_event = on_event
@@ -244,6 +247,7 @@ class UbuntuSessionFactory:
         self._system_power = system_power
         self._command_server_factory = command_server_factory
         self._echo_cancellation_factory = echo_cancellation_factory
+        self._voice_standby = voice_standby
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
@@ -308,6 +312,9 @@ class UbuntuSessionFactory:
                 spoken_names.browser_candidates() if spoken_names else ()
             ),
             allowed_window_apps=frozenset(settings.allowed_window_apps),
+            allowed_scroll_apps=(
+                frozenset(installed) if settings.allow_desktop_scroll else frozenset()
+            ),
             allowed_close_apps=frozenset(settings.allowed_close_apps),
             window_presence=window_presence,
             terminal_app_id=terminal_app_id,
@@ -349,6 +356,11 @@ class UbuntuSessionFactory:
             })
         if chat_enabled:
             supported_kinds.add(CommandKind.OPEN_CHAT)
+        if (
+            settings.allow_desktop_scroll and installed
+            and self._focused_window is not None
+        ):
+            supported_kinds.update({CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN})
         if window_controls_available:
             supported_kinds.update(
                 {
@@ -370,6 +382,10 @@ class UbuntuSessionFactory:
                 if chat_enabled
                 else frozenset(),
                 allowed_window_apps=frozenset(settings.allowed_window_apps),
+                allowed_scroll_apps=(
+                    frozenset(installed)
+                    if settings.allow_desktop_scroll else frozenset()
+                ),
                 allowed_close_apps=frozenset(settings.allowed_close_apps),
                 supported_kinds=frozenset(supported_kinds),
             )
@@ -522,6 +538,7 @@ class UbuntuSessionFactory:
                     on_compute_device=lambda device: self._on_event(
                         SttDeviceReady(device)
                     ),
+                    on_audio_ready=lambda: self._on_event(AudioCaptureReady()),
                 )
 
             def show_live(event: LiveSpeechEvent) -> None:
@@ -539,6 +556,11 @@ class UbuntuSessionFactory:
                     show_response(presenter.present(event))
 
             def show_action(output: ActionDecision | ActionFeedback) -> None:
+                if (
+                    isinstance(output, ActionFeedback)
+                    and output.error_code == "chat_selection_pending"
+                ):
+                    return
                 if visual is not None:
                     visual.on_action_output(output)
                 self._on_event(output)
@@ -609,6 +631,17 @@ class UbuntuSessionFactory:
                     )
                 )
 
+            def show_chat_selection_prompt(event: ResponseRequest) -> None:
+                if visual is not None:
+                    visual.on_chat_selection_prompt(event)
+                self._on_event(event)
+                show_response(presenter.present(event))
+
+            chat_selection = (
+                TelegramChatSelection(show_chat_selection_prompt, show_action)
+                if chat_enabled and settings.action_execution_enabled
+                else None
+            )
             executor: ActionExecutor | None = None
             if settings.action_execution_enabled:
                 executor = self._executor_factory(installed)
@@ -624,7 +657,7 @@ class UbuntuSessionFactory:
                         executor,
                         {
                             app_id: desktop_ids[app_id]
-                            for app_id in settings.allowed_window_apps
+                            for app_id in installed
                             if app_id in desktop_ids
                         },
                         {
@@ -644,11 +677,31 @@ class UbuntuSessionFactory:
                 if chat_enabled:
                     assert self._focused_window is not None
                     assert self._chat_verifier is not None
-                    executor = TelegramSavedMessagesExecutor(
+                    telegram_executor = TelegramSavedMessagesExecutor(
                         executor,
                         telegram_desktop_id=installed["telegram"].name,
                         identity_reader=self._focused_window,
                         verifier=self._chat_verifier,
+                        selection=chat_selection,
+                        remember_pointer=settings.remember_telegram_pointer,
+                    )
+                    if chat_selection is not None:
+                        chat_selection.set_completion(
+                            telegram_executor.complete_selection
+                        )
+                        chat_selection.set_page_navigation(
+                            telegram_executor.next_search_page
+                        )
+                    executor = telegram_executor
+                if settings.allow_desktop_scroll and self._focused_window is not None:
+                    executor = DesktopScrollExecutor(
+                        executor,
+                        desktop_ids={
+                            app_id: desktop_ids[app_id]
+                            for app_id in settings.allowed_window_apps
+                            if app_id in desktop_ids
+                        },
+                        identity_reader=self._focused_window,
                     )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
@@ -667,7 +720,10 @@ class UbuntuSessionFactory:
                 on_action_output=show_action,
                 on_session_end=show_session_end,
                 system_power=power_flow,
+                telegram_selection=chat_selection,
                 history=history,
+                voice_standby=self._voice_standby,
+                on_voice_mode=self._on_event,
             )
             yield runtime
         except AudioCaptureStopError:

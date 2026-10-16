@@ -366,9 +366,10 @@ def main() -> int:
         system_power=power_flow,
         response_speaker=speaker,
         echo_cancellation_factory=PipeWireEchoCancellation,
+        voice_standby=True,
         visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
-    controller = ApplicationController(factory, power_flow)
+    controller = ApplicationController(factory, power_flow, start_in_standby=True)
     window = ControlWindow(
         settings,
         store,

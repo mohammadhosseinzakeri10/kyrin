@@ -243,6 +243,41 @@ def test_system_dialogue_discards_an_unfinished_app_fragment() -> None:
     assert actions == []
 
 
+def test_telegram_choice_answer_bypasses_command_interpreter() -> None:
+    class FakeSelection:
+        def __init__(self) -> None:
+            self.answers: list[str] = []
+            self.cancelled = False
+
+        def on_final_speech(self, text: str) -> bool:
+            self.answers.append(text)
+            return text == "own chat"
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    choice = FakeSelection()
+    commands: list[CommandEvent] = []
+    runtime = LiveCommandRuntime(
+        FakeController(
+            (TranscriptUpdate(0, "own chat", TranscriptStatus.FINAL, "en"),)
+        ),
+        coordinator=CommandCoordinator(DemoCommandInterpreter()),
+        gate=ActionGate(ActionPolicy()),
+        observer=None,
+        executor=None,
+        on_live_event=lambda _: None,
+        on_command_event=commands.append,
+        on_action_output=lambda _: None,
+        on_session_end=lambda _: None,
+        telegram_selection=choice,
+    )
+    runtime.run()
+    assert choice.answers == ["own chat"]
+    assert choice.cancelled
+    assert commands == []
+
+
 def test_final_executes_on_worker_without_blocking_speech_consumer() -> None:
     completed = Event()
     calls: list[ActionRequest] = []

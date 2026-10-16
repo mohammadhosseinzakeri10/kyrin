@@ -132,6 +132,11 @@ ENGLISH: dict[str, str] = {
     "save": "Save changes",
     "start": "Start listening",
     "stop": "Stop listening",
+    "microphone_off": "Turn microphone off",
+    "voice_started": "Listening to commands.",
+    "voice_standby": "Standby. Say Start listening to resume.",
+    "voice_off": "Microphone is fully off.",
+    "voice_turning_off": "Turning the microphone off…",
     "quit": "Quit KYRIN",
     "actions_on": "Desktop actions enabled",
     "actions_off": "Desktop actions disabled",
@@ -142,6 +147,30 @@ ENGLISH: dict[str, str] = {
     "allow_telegram_chats": (
         "Allow KYRIN to open chats in Telegram (no message sending)"
     ),
+    "remember_telegram_pointer": (
+        "Remember keyboard and mouse access for Telegram chats"
+    ),
+    "telegram_pointer_grant_now": "Set up Telegram control access now…",
+    "telegram_pointer_not_ready": (
+        "No saved control grant. Save these settings, then set up access here."
+    ),
+    "telegram_pointer_ready": (
+        "A control grant is saved. The system may revoke it later."
+    ),
+    "telegram_pointer_grant_running": "Confirm the system's Remote Desktop request…",
+    "telegram_pointer_grant_done": "Telegram keyboard and mouse access is saved.",
+    "telegram_pointer_grant_failed": "Control access was not saved. Try again here.",
+    "telegram_pointer_save_first": "Save Telegram chat and control settings first.",
+    "allow_desktop_scroll": "Allow scrolling in selected desktop apps",
+    "desktop_scroll_grant_now": "Set up desktop scroll access now…",
+    "desktop_scroll_not_ready": (
+        "No saved scroll access. Save settings, then set up access here."
+    ),
+    "desktop_scroll_ready": "Desktop scroll access is saved.",
+    "desktop_scroll_running": "Confirm the system's Remote Desktop request…",
+    "desktop_scroll_done": "Desktop scroll access is saved.",
+    "desktop_scroll_failed": "Scroll access was not saved. Try again here.",
+    "desktop_scroll_save_first": "Save desktop scroll settings first.",
     "allow_window_controls": (
         "Allow KYRIN to restore, minimize, maximize, or fullscreen selected apps"
     ),
@@ -246,7 +275,9 @@ ENGLISH: dict[str, str] = {
     "language_added": "Language pack added.",
     "ui_saved": "Interface preferences saved.",
     "state_stopped": "Stopped",
-    "state_paused": "Listening is off",
+    "state_paused": "Microphone is fully off",
+    "state_standby": "Standby: say Start listening",
+    "state_mic_starting": "Starting microphone; voice commands are not ready yet",
     "state_setup": "Speech model setup required",
     "state_starting": "Starting",
     "state_running": "Running",

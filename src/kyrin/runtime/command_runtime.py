@@ -9,6 +9,7 @@ import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import closing
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Protocol
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from kyrin.actions.queued_dispatch import (
     FinalActionCommand,
     QueuedActionDispatcher,
 )
+from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.models import (
@@ -32,6 +34,7 @@ from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.command_bridge import observe_command_update
 from kyrin.memory.history import ConversationHistory, ConversationTurn
 from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
+from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged, control_phrase
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import SystemPowerFlow
 
@@ -117,7 +120,10 @@ class LiveCommandRuntime:
         on_session_end: Callable[[SpeechSessionEnded], None],
         on_active_app: Callable[[str | None], None] | None = None,
         system_power: SystemPowerFlow | None = None,
+        telegram_selection: TelegramChatSelection | None = None,
         history: ConversationHistory | None = None,
+        voice_standby: bool = False,
+        on_voice_mode: Callable[[VoiceModeChanged], None] | None = None,
     ) -> None:
         if (coordinator is None) != (gate is None):
             raise ValueError("coordinator and action gate must be supplied together")
@@ -133,9 +139,14 @@ class LiveCommandRuntime:
         self._on_session_end = on_session_end
         self._on_active_app = on_active_app
         self._system_power = system_power
+        self._telegram_selection = telegram_selection
         self._history = history
         self._history_session_id = uuid4().hex
         self._history_stream_id = 0
+        self._voice_lock = Lock()
+        self._commands_active = not voice_standby
+        self._reset_dialogue = False
+        self._on_voice_mode = on_voice_mode
         self._worker = (
             QueuedActionDispatcher(
                 lambda command: execute_final_command(
@@ -151,9 +162,53 @@ class LiveCommandRuntime:
         )
 
     def stop(self) -> None:
+        if self._telegram_selection is not None:
+            self._telegram_selection.cancel()
         if self._system_power is not None:
             self._system_power.cancel()
         self._controller.stop()
+
+    def set_commands_active(self, active: bool) -> None:
+        """Let the GUI button switch modes without rebuilding the STT session."""
+        with self._voice_lock:
+            self._commands_active = active
+            if not active:
+                self._reset_dialogue = True
+
+    def _clear_dialogue_if_requested(self) -> None:
+        with self._voice_lock:
+            reset = self._reset_dialogue
+            self._reset_dialogue = False
+        if not reset:
+            return
+        if self._coordinator is not None:
+            self._coordinator.cancel_dialogue()
+        if self._telegram_selection is not None:
+            self._telegram_selection.cancel()
+        if self._system_power is not None:
+            self._system_power.cancel()
+
+    def _control_speech(self, event: TranscriptUpdate) -> bool:
+        with self._voice_lock:
+            active = self._commands_active
+        if event.status is not TranscriptStatus.FINAL:
+            return not active
+        mode = control_phrase(event.text, active=active)
+        if mode is None:
+            return not active
+        if (mode is VoiceMode.ACTIVE and active) or (
+            mode is VoiceMode.STANDBY and not active
+        ):
+            return True
+        if mode is not VoiceMode.OFF:
+            self.set_commands_active(mode is VoiceMode.ACTIVE)
+        else:
+            self.set_commands_active(False)
+        self._clear_dialogue_if_requested()
+        self._on_live_event(event)
+        if self._on_voice_mode is not None:
+            self._on_voice_mode(VoiceModeChanged(mode))
+        return True
 
     def respond_to_system_action(self, request_id: int, answer: str) -> bool:
         return (
@@ -175,10 +230,18 @@ class LiveCommandRuntime:
                 worker.start()
             with closing(self._controller.events()) as stream:
                 for event in stream:
+                    self._clear_dialogue_if_requested()
                     if isinstance(event, SpeechSessionEnded):
                         self._end_stream()
                         self._on_session_end(event)
                         continue
+                    if isinstance(event, TranscriptUpdate):
+                        if self._control_speech(event):
+                            continue
+                    else:
+                        with self._voice_lock:
+                            if not self._commands_active:
+                                continue
                     self._on_live_event(event)
                     if coordinator is None or not isinstance(event, TranscriptUpdate):
                         continue
@@ -186,6 +249,14 @@ class LiveCommandRuntime:
                         event.status is TranscriptStatus.FINAL
                         and self._system_power is not None
                         and self._system_power.on_final_speech(event.text)
+                    ):
+                        coordinator.cancel_fragment()
+                        self._remember(event)
+                        continue
+                    if (
+                        event.status is TranscriptStatus.FINAL
+                        and self._telegram_selection is not None
+                        and self._telegram_selection.on_final_speech(event.text)
                     ):
                         coordinator.cancel_fragment()
                         self._remember(event)
@@ -215,9 +286,13 @@ class LiveCommandRuntime:
                                 self._on_action_output(action)
                     self._remember(event)
         finally:
-            self._end_stream()
-            if worker is not None:
-                worker.close()
+            try:
+                self._end_stream()
+                if worker is not None:
+                    worker.close()
+            finally:
+                if self._telegram_selection is not None:
+                    self._telegram_selection.cancel()
 
     def _end_stream(self) -> None:
         if self._system_power is not None:

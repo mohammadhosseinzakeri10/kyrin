@@ -217,6 +217,171 @@ def test_chat_requires_fresh_active_app_or_asks_for_app() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "spoken_name",
+    ("my mother", "my mother".title(), "my mother".upper()),
+)
+def test_english_chat_name_preserves_spoken_case_for_search(
+    spoken_name: str,
+) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, f"Open chat {spoken_name}", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_CHAT, spoken_name, "telegram")
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ("Open My Mother chat", "Open My Mother's chat", "Go to my mother chat"),
+)
+def test_english_chat_suffix_form_uses_spoken_name(
+    phrase: str,
+) -> None:
+    expected = "my mother" if phrase.startswith("Go") else "My Mother"
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, phrase, TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            0, CommandIntent(CommandKind.OPEN_CHAT, expected, "telegram")
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("phrase", "kind"),
+    (
+        ("Scroll down", CommandKind.SCROLL_DOWN),
+        ("Please scroll up", CommandKind.SCROLL_UP),
+        ("More, Scroll Down", CommandKind.SCROLL_DOWN),
+        ("More Scrolls Down", CommandKind.SCROLL_DOWN),
+        ("More Skool Up", CommandKind.SCROLL_UP),
+        ("Down", CommandKind.SCROLL_DOWN),
+        ("Up", CommandKind.SCROLL_UP),
+        ("Come up", CommandKind.SCROLL_UP),
+        ("Go down", CommandKind.SCROLL_DOWN),
+        ("اسکرول پایین کن", CommandKind.SCROLL_DOWN),
+    ),
+)
+def test_scroll_command_targets_only_permitted_active_app(
+    phrase: str, kind: CommandKind
+) -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
+    )
+    assert coordinator.observe(
+        update(0, phrase, TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (CommandResolution(0, CommandIntent(kind, "telegram")),)
+
+
+def test_more_repeats_recent_scroll_direction_in_same_active_app() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
+    )
+    assert coordinator.observe(
+        update(0, "Scroll up", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (CommandResolution(0, CommandIntent(CommandKind.SCROLL_UP, "telegram")),)
+    assert coordinator.observe(
+        update(1, "More", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (CommandResolution(1, CommandIntent(CommandKind.SCROLL_UP, "telegram")),)
+
+
+@pytest.mark.parametrize(
+    ("phrase", "kind", "steps"),
+    (
+        ("Scroll down more", CommandKind.SCROLL_DOWN, 4),
+        ("Scroll up less", CommandKind.SCROLL_UP, 2),
+        ("Scroll down list", CommandKind.SCROLL_DOWN, 2),
+        ("Scroll up Liz", CommandKind.SCROLL_UP, 2),
+        ("Scroll a little down", CommandKind.SCROLL_DOWN, 2),
+        ("اسکرول پایین بیشتر", CommandKind.SCROLL_DOWN, 4),
+        ("اسکرول بالا کمتر", CommandKind.SCROLL_UP, 2),
+    ),
+)
+def test_scroll_amount_is_bounded_and_explicit(
+    phrase: str, kind: CommandKind, steps: int
+) -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
+    )
+    assert coordinator.observe(
+        update(0, phrase, TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            0, CommandIntent(kind, "telegram", scroll_steps=steps)
+        ),
+    )
+
+
+def test_more_repeats_scroll_amount_too() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
+    )
+    coordinator.observe(
+        update(0, "Scroll down less", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )
+    assert coordinator.observe(
+        update(1, "More", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.SCROLL_DOWN, "telegram", scroll_steps=2)
+        ),
+    )
+
+
+def test_more_needs_recent_scroll_in_same_active_app() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(
+            allowed_scroll_apps=frozenset({"telegram", "firefox"})
+        )
+    )
+    assert coordinator.observe(
+        update(0, "More", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0] == CommandResolution(0, None)
+    coordinator.observe(
+        update(1, "Scroll down", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )
+    assert coordinator.observe(
+        update(2, "More", TranscriptStatus.FINAL),
+        observed_active_app="firefox",
+    )[0] == CommandResolution(2, None)
+
+
+def test_more_does_not_reuse_stale_scroll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.commands import coordinator as coordinator_module
+
+    now = [0.0]
+    monkeypatch.setattr(coordinator_module, "monotonic", lambda: now[0])
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram"}))
+    )
+    coordinator.observe(
+        update(0, "Scroll down", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )
+    now[0] = 31.0
+    assert coordinator.observe(
+        update(1, "More", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0] == CommandResolution(1, None)
+
+
 def test_previous_app_alone_does_not_resolve_chat_target() -> None:
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     assert coordinator.observe(
@@ -413,7 +578,7 @@ def test_split_open_chat_joins_nearby_name_with_active_telegram() -> None:
         observed_active_app="telegram",
     ) == (
         CommandResolution(
-            1, CommandIntent(CommandKind.OPEN_CHAT, "hunter vpn", "telegram")
+            1, CommandIntent(CommandKind.OPEN_CHAT, "Hunter VPN", "telegram")
         ),
     )
 
@@ -628,7 +793,7 @@ def test_each_final_event_keeps_its_own_transcript_language() -> None:
             0,
             ResponseKind.CHOOSE_CHAT_APP,
             ResponseChannel.TEXT_AND_VOICE,
-            target="ali",
+            target="Ali",
             language="en",
         ),
     )
@@ -637,6 +802,6 @@ def test_each_final_event_keeps_its_own_transcript_language() -> None:
     )
     assert persian_events == (
         CommandResolution(
-            1, CommandIntent(CommandKind.OPEN_CHAT, "ali", "telegram"), language="fa"
+            1, CommandIntent(CommandKind.OPEN_CHAT, "Ali", "telegram"), language="fa"
         ),
     )

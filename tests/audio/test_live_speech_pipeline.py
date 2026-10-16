@@ -119,6 +119,7 @@ def test_live_pipeline_uses_one_capture_and_keeps_vad_and_stt_independent() -> N
     source = Source([AudioData(data[:100], FORMAT), AudioData(data[100:], FORMAT)])
     detector = Detector([True, False, True])
     session = Session()
+    capture_ready: list[bool] = []
     pipeline = LiveSpeechPipeline(
         source,
         FORMAT,
@@ -126,12 +127,14 @@ def test_live_pipeline_uses_one_capture_and_keeps_vad_and_stt_independent() -> N
         Engine(session),
         start_confirm_ms=1,
         pause_confirm_ms=1,
+        on_audio_ready=lambda: capture_ready.append(True),
     )
 
     with pipeline.open() as stream:
         events = list(stream)
 
     assert source.capture_count == 1
+    assert capture_ready == [True]
     assert source.stop_count == 1
     assert b"".join(detector.seen) == data
     assert b"".join(session.seen) == data

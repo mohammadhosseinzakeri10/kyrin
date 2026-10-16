@@ -4,11 +4,12 @@ import unicodedata
 from dataclasses import dataclass
 from itertools import pairwise
 
+from kyrin.text_normalization import fold_case
 from kyrin.vision.ocr.contracts import OcrResult, RecognizedText, TextBox
 
 
 def _word(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = fold_case(value)
     normalized = normalized.replace("ي", "ی").replace("ك", "ک").replace("‌", "")
     return normalized.strip(" \t\r\n.,:;!?()[]{}«»\"'’")
 

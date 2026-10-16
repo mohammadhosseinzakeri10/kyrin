@@ -1,9 +1,10 @@
 """Conservative OCR checks for Telegram chat navigation."""
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 from kyrin.vision.text_reader import IdentifiedWindowText
-from kyrin.vision.text_targets import find_exact_phrases
+from kyrin.vision.text_targets import VisiblePhrase, find_exact_phrases
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,29 @@ class ChatSearchMatch:
     image_height: int
 
 
+@dataclass(frozen=True, slots=True)
+class ChatSearchChoices:
+    """Observed local and global rows; no choice authorizes a click."""
+
+    own_chat: ChatSearchMatch | None
+    global_results: tuple[ChatSearchMatch, ...]
+    other_local_results: tuple[ChatSearchMatch, ...] = ()
+    global_section_verified: bool = False
+    view_signature: str = ""
+
+    @property
+    def local_results(self) -> tuple[ChatSearchMatch, ...]:
+        return (
+            (self.own_chat, *self.other_local_results)
+            if self.own_chat is not None
+            else ()
+        )
+
+    @property
+    def selectable_results(self) -> tuple[ChatSearchMatch, ...]:
+        return self.local_results or self.global_results
+
+
 def _same_window(
     observation: IdentifiedWindowText, expected_app_id: str, expected_pid: int
 ) -> bool:
@@ -28,30 +52,163 @@ def _same_window(
     )
 
 
+def search_choices(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    target: str,
+) -> ChatSearchChoices | None:
+    """Separate local and global rows, tolerating a missed query OCR read."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return None
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    # A short digest lets bounded paging detect an unchanged results viewport
+    # without retaining OCR text or message previews in selection state.
+    visible_text = "\n".join(
+        f"{span.box.top // 4}:{span.text}"
+        for span in observation.result.spans
+        if span.box.left < width * 0.3
+        and height * 0.075 < span.box.top < height * 0.75
+        and span.confidence is not None and span.confidence >= 0.65
+    )
+    view_signature = sha256(visible_text.encode("utf-8")).hexdigest()
+    visible = [
+        match
+        for match in find_exact_phrases(observation.result, target)
+        if match.lowest_confidence is not None
+        and match.box.left >= 0
+        and match.box.left + match.box.width < width * 0.3
+    ]
+    # The query is text KYRIN just typed. Its OCR confidence can be low even
+    # when the exact phrase is visible; row confidence stays stricter below.
+    queries = [match for match in visible if match.box.top < height * 0.075]
+    if len(queries) > 1:
+        return None
+    matches = [
+        match for match in visible
+        if match.lowest_confidence is not None and match.lowest_confidence >= 0.75
+    ]
+    query_bottom = (
+        queries[0].box.top + queries[0].box.height if queries else None
+    )
+    section_headers = [
+        match for match in find_exact_phrases(observation.result, "Search Results")
+        if height * 0.1 < match.box.top < height * 0.75
+        and match.box.left < width * 0.3
+    ]
+    if not section_headers:
+        # Telegram may render "Global Search Results" while OCR keeps only
+        # its final word. The heading starts close to the left edge.
+        section_headers = [
+            match for match in find_exact_phrases(observation.result, "Results")
+            if match.lowest_confidence is not None
+            and match.lowest_confidence >= 0.65
+            and height * 0.1 < match.box.top < height * 0.75
+            and match.box.left < width * 0.15
+        ]
+    section_top = min((match.box.top for match in section_headers), default=None)
+    row_candidates = sorted((
+        match
+        for match in matches
+        if height * 0.075 < match.box.top < height * 0.75
+        and width * 0.025 <= match.box.left < width * 0.15
+        and (
+            query_bottom is None
+            or query_bottom + height * 0.015 < match.box.top
+        )
+    ), key=lambda match: match.box.top)
+    # Two titles in the same row are ambiguous. Text farther right and below
+    # a title belongs to its preview, not to another numbered chat.
+    if any(
+        abs(other.box.top - title.box.top) < height * 0.012
+        and abs(other.box.left - title.box.left) > width * 0.04
+        for title in row_candidates
+        for other in matches
+        if other is not title
+    ):
+        return None
+    if section_top is not None:
+        local_candidates = [
+            match for match in row_candidates if match.box.top < section_top
+        ]
+    else:
+        # When OCR misses the section title, a fixed top-of-window cutoff
+        # hides the second or third local chat. Extend the first row only
+        # through adjacent, similarly aligned result rows.
+        local_candidates = []
+        for match in row_candidates:
+            if not local_candidates:
+                if match.box.top < height * 0.16:
+                    local_candidates.append(match)
+                continue
+            previous = local_candidates[-1]
+            if (
+                match.box.top - previous.box.top <= height * 0.07
+                and abs(match.box.left - local_candidates[0].box.left)
+                <= width * 0.04
+            ):
+                local_candidates.append(match)
+            else:
+                break
+    if not queries and not local_candidates and section_top is None:
+        return None
+    globals_ = sorted(
+        (
+            match
+            for match in matches
+            if match.box.left < width * 0.15
+            and (
+                (section_top is not None and match.box.top > section_top)
+                or (
+                    section_top is None
+                    and match not in local_candidates
+                    and match.box.top >= height * 0.16
+                )
+            )
+        ),
+        key=lambda match: match.box.top,
+    )
+    if any(
+        second.box.top - first.box.top < height * 0.025
+        for first, second in zip(globals_, globals_[1:], strict=False)
+    ):
+        return None
+
+    def as_box(match: VisiblePhrase) -> ChatSearchMatch:
+        box = match.box
+        return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+
+    return ChatSearchChoices(
+        as_box(local_candidates[0]) if local_candidates else None,
+        tuple(as_box(match) for match in globals_),
+        tuple(as_box(match) for match in local_candidates[1:]),
+        section_top is not None,
+        view_signature,
+    )
+
+
 def unique_search_result(
     observation: IdentifiedWindowText,
     expected_app_id: str,
     expected_pid: int,
     target: str,
 ) -> ChatSearchMatch | None:
-    """Accept one exact, clear title in the left results pane below search."""
-    if not _same_window(observation, expected_app_id, expected_pid):
+    """Auto-select only when no lower result needs a user choice."""
+    if observation.image_size is None:
         return None
-    assert observation.image_size is not None
     width, height = observation.image_size
-    candidates = [
-        match
-        for match in find_exact_phrases(observation.result, target)
-        if match.lowest_confidence is not None
-        and match.lowest_confidence >= 0.75
-        and match.box.left >= 0
+    if not any(
+        match.box.left >= 0
         and match.box.left + match.box.width < width * 0.3
-        and height * 0.12 < match.box.top < height * 0.75
-    ]
-    if len(candidates) != 1:
+        and match.box.top < height * 0.075
+        for match in find_exact_phrases(observation.result, target)
+    ):
         return None
-    box = candidates[0].box
-    return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+    choices = search_choices(observation, expected_app_id, expected_pid, target)
+    if choices is None or len(choices.local_results) != 1:
+        return None
+    return choices.local_results[0]
 
 
 def chat_header_visible(
@@ -60,21 +217,20 @@ def chat_header_visible(
     expected_pid: int,
     target: str,
 ) -> bool:
-    """Confirm a unique exact title in the upper right chat pane."""
+    """Confirm one exact title in the upper right chat pane."""
     if not _same_window(observation, expected_app_id, expected_pid):
         return False
     assert observation.image_size is not None
     width, height = observation.image_size
-    matches = find_exact_phrases(observation.result, target)
-    if len(matches) != 1:
-        return False
-    match = matches[0]
-    return (
-        match.lowest_confidence is not None
+    matches = [
+        match
+        for match in find_exact_phrases(observation.result, target)
+        if match.lowest_confidence is not None
         and match.lowest_confidence >= 0.65
         and match.box.left >= width * 0.3
         and match.box.top <= height * 0.2
-    )
+    ]
+    return len(matches) == 1
 
 
 def saved_messages_header_visible(

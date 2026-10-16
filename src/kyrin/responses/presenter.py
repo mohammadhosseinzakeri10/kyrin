@@ -61,11 +61,25 @@ _TEXT: dict[str, dict[str, str]] = {
             "برای نام «{target}» نتیجهٔ یکتا و دقیق پیدا نکردم؛ "
             "لطفاً نام چت را دوباره بگویید."
         ),
+        "chat_selection_expired": (
+            "زمان انتخاب چت تمام شد؛ لطفاً فرمان را دوباره بگویید."
+        ),
+        "chat_selection_cancelled": "انتخاب چت لغو شد.",
+        "telegram_control_setup_required": (
+            "برای بازکردن چت، در تنظیمات Desktop Actions دسترسی کنترل Telegram "
+            "را فعال و از همان‌جا تأیید کنید."
+        ),
         "screen_access_required": "برای بررسی چت، دسترسی صفحه را در برنامه فعال کنید.",
         "telegram_not_active": (
             "تلگرام فعال نیست؛ لطفاً آن را جلو بیاورید و دوباره بگویید."
         ),
         "telegram_focus_changed": "پنجرهٔ فعال تغییر کرد؛ فرمان چت متوقف شد.",
+        "scroll_focus_changed": "پنجرهٔ فعال تغییر کرد؛ اسکرول متوقف شد.",
+        "scroll_control_setup_required": (
+            "برای اسکرول، دسترسی آن را در Desktop Actions فعال و تنظیم کنید."
+        ),
+        "scroll_unavailable": "نتوانستم اسکرول را انجام دهم. لطفاً صفحه را بررسی کنید.",
+        "scroll_dispatched": "فرمان اسکرول ارسال شد؛ حرکت صفحه را هنوز تأیید نکرده‌ام.",
         "chat_unverified": "بازشدن چت را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید.",
         "no_window": "پنجره‌ای از این برنامه پیدا نکردم.",
         "multiple_windows": (
@@ -159,12 +173,25 @@ _TEXT: dict[str, dict[str, str]] = {
             "I couldn't find one exact chat result for “{target}”. "
             "Please repeat the chat name."
         ),
+        "chat_selection_expired": "Chat selection expired. Please repeat the command.",
+        "chat_selection_cancelled": "Chat selection was cancelled.",
+        "telegram_control_setup_required": (
+            "Set up Telegram control access in Desktop Actions before opening chats."
+        ),
         "screen_access_required": "Enable Screen Access in KYRIN to verify the chat.",
         "telegram_not_active": (
             "Telegram is not active. Bring it forward and try again."
         ),
         "telegram_focus_changed": (
             "The active window changed, so I stopped the chat command."
+        ),
+        "scroll_focus_changed": "The active window changed, so I stopped scrolling.",
+        "scroll_control_setup_required": (
+            "Set up desktop scroll access in Desktop Actions first."
+        ),
+        "scroll_unavailable": "I couldn't scroll. Please check the screen.",
+        "scroll_dispatched": (
+            "I sent the scroll input, but haven't verified that the page moved."
         ),
         "chat_unverified": (
             "I couldn't verify that the chat opened. Please check the screen."
@@ -270,6 +297,12 @@ class ResponsePresenter:
             ):
                 text = messages["confirmed_active_app"]
             elif (
+                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                and event.intent.kind
+                in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN)
+            ):
+                text = messages["scroll_dispatched"]
+            elif (
                 event.error_code in {"unsupported_action", "unsupported_chat"}
                 and event.intent.kind is CommandKind.OPEN_CHAT
             ):
@@ -284,6 +317,12 @@ class ResponsePresenter:
                 "telegram_focus_changed",
                 "chat_unverified",
                 "chat_search_uncertain",
+                "chat_selection_expired",
+                "chat_selection_cancelled",
+                "telegram_control_setup_required",
+                "scroll_focus_changed",
+                "scroll_control_setup_required",
+                "scroll_unavailable",
                 "no_window",
                 "multiple_windows",
                 "unavailable",
@@ -294,6 +333,12 @@ class ResponsePresenter:
                     messages[event.error_code].format(target=event.intent.target)
                     if event.error_code == "chat_search_uncertain"
                     else messages[event.error_code]
+                )
+            elif event.error_code is not None and event.error_code.startswith(
+                "chat_search_uncertain:"
+            ):
+                text = messages["chat_search_uncertain"].format(
+                    target=event.intent.target
                 )
             else:
                 text = messages[event.outcome.value]

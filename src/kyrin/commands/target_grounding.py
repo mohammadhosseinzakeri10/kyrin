@@ -5,7 +5,6 @@ wording clarifies rather than trusting a model-supplied app or chat name.
 """
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -21,6 +20,7 @@ from kyrin.commands.understanding import (
     UnderstandingResult,
     UnderstandingStatus,
 )
+from kyrin.text_normalization import fold_case
 
 
 class TargetGroundingStatus(StrEnum):
@@ -40,7 +40,7 @@ _EN_ACTION = re.compile(
     r"close|exit|quit|open|go to)\s+"
 )
 _EN_CHAT_POSSESSIVE = re.compile(
-    r"^(?P<name>.+?)'s (?:chat|conversation)(?: in (?P<app>.+))?$"
+    r"^(?P<name>.+?)(?:'s)? (?:chat|conversation)(?: in (?P<app>.+))?$"
 )
 _EN_CHAT_PREFIX = re.compile(
     r"^(?:the )?(?:chat|conversation)(?: with)? (?P<name>.+?)"
@@ -57,7 +57,7 @@ _FA_CHAT = re.compile(r"^(?:چت|گفتگو|گفت\s+و\s+گو)\s+(?P<name>.+)$"
 
 
 def _words(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value).casefold()
+    value = fold_case(value)
     value = value.replace("ي", "ی").replace("ك", "ک")
     return " ".join(re.findall(r"[^\W_]+", value, flags=re.UNICODE))
 

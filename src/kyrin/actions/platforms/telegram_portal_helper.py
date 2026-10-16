@@ -33,10 +33,12 @@ SHELL = "org.gnome.Shell"
 SHELL_OBJECT = "/org/kyrin/ActiveApp"
 SHELL_INTERFACE = "org.kyrin.ActiveApp"
 CONTROL = 0xFFE3
+ESCAPE = 0xFF1B
 F_KEY = ord("f")
+A_KEY = ord("a")
 ZERO = ord("0")
 LEFT_BUTTON = 0x110
-KEYBOARD_TOKEN_PATH = permission_token_path("telegram-keyboard")
+CONTROL_TOKEN_PATH = permission_token_path("telegram-control")
 
 
 def _request(
@@ -215,18 +217,33 @@ def _press(connection: Gio.DBusConnection, session: str, symbol: int) -> None:
 
 
 def _type_search_target(
-    connection: Gio.DBusConnection, session: str, target: str
+    connection: Gio.DBusConnection,
+    session: str,
+    target: str,
+    expected: tuple[str, int] | None = None,
 ) -> None:
     if not 1 <= len(target) <= 64 or any(
         not (char.isalnum() or char in " -_.'@") for char in target
     ):
         raise ValueError("unsupported chat search characters")
+    # The first Escape closes an existing search; the second exits an open chat.
+    # Ctrl+F can otherwise search only within that conversation.
+    for _ in range(2):
+        _press(connection, session, ESCAPE)
+        sleep(0.15)
+    if expected is not None and _focused_identity() != expected:
+        raise ValueError("telegram focus changed before search")
     _key(connection, session, CONTROL, True)
     try:
         _press(connection, session, F_KEY)
     finally:
         _key(connection, session, CONTROL, False)
     sleep(0.15)
+    _key(connection, session, CONTROL, True)
+    try:
+        _press(connection, session, A_KEY)
+    finally:
+        _key(connection, session, CONTROL, False)
     for char in target:
         codepoint = ord(char)
         symbol = codepoint if codepoint < 128 else 0x01000000 | codepoint
@@ -245,7 +262,7 @@ def _click_verified_box(
         or width == 0
         or height == 0
         or left + width >= image_width * 0.3
-        or not image_height * 0.12 < top < image_height * 0.75
+        or not image_height * 0.07 < top < image_height * 0.75
     ):
         return False
     before = _window_and_pointer()
@@ -295,27 +312,36 @@ def _click_verified_box(
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        raise ValueError("expected Telegram desktop ID and PID")
-    expected = (sys.argv[1], int(sys.argv[2]))
-    mode = "saved" if len(sys.argv) == 3 else sys.argv[3]
-    if mode not in {"saved", "search", "click"}:
+    grant_control = sys.argv[1:] == ["grant-control"]
+    if grant_control:
+        mode = "grant-control"
+        expected = None
+    else:
+        if len(sys.argv) < 3:
+            raise ValueError("expected Telegram desktop ID and PID")
+        expected = (sys.argv[1], int(sys.argv[2]))
+        mode = "saved" if len(sys.argv) == 3 else sys.argv[3]
+    if mode not in {"saved", "search", "click", "grant-control"}:
         raise ValueError("unsupported chat input mode")
-    if (
+    if not grant_control and (
         (mode == "saved" and len(sys.argv) not in (3, 4))
         or (mode == "search" and len(sys.argv) != 5)
         or (mode == "click" and len(sys.argv) != 10)
     ):
         raise ValueError("invalid chat input arguments")
-    if "telegram" not in expected[0].casefold() or expected[1] <= 0:
-        raise ValueError("expected identity must be Telegram")
-    if _focused_identity() != expected:
-        print("FOCUS_CHANGED", flush=True)
-        return 2
+    if expected is not None:
+        if "telegram" not in expected[0].casefold() or expected[1] <= 0:
+            raise ValueError("expected identity must be Telegram")
+        if _focused_identity() != expected:
+            print("FOCUS_CHANGED", flush=True)
+            return 2
+    device = 3  # One remembered RemoteDesktop grant covers keyboard and pointer.
+    remembered = read_opaque_token(CONTROL_TOKEN_PATH)
+    if mode != "grant-control" and remembered is None:
+        print("CONTROL_SETUP_REQUIRED", flush=True)
+        return 3
     connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     session: str | None = None
-    device = 2 if mode == "click" else 1
-    token_path = None if mode == "click" else KEYBOARD_TOKEN_PATH
     try:
         created = _request(
             connection,
@@ -326,10 +352,9 @@ def main() -> int:
         if created is None:
             return 1
         session = created["session_handle"]
-        remembered = read_opaque_token(token_path) if token_path is not None else None
         options = {
             "types": GLib.Variant("u", device),
-            "persist_mode": GLib.Variant("u", 0 if mode == "click" else 2),
+            "persist_mode": GLib.Variant("u", 2),
         }
         if remembered is not None:
             options["restore_token"] = GLib.Variant("s", remembered)
@@ -342,24 +367,35 @@ def main() -> int:
         if selected is None:
             return 1
         started = _request(connection, "Start", (session, "", {}), 30000)
-        if started is None or started.get("devices", 0) & device == 0:
+        if started is None or started.get("devices", 0) & device != device:
             return 1
         replacement = started.get("restore_token")
-        if isinstance(replacement, str) and token_path is not None:
+        stored = False
+        if isinstance(replacement, str):
             try:
-                save_opaque_token(token_path, replacement)
+                save_opaque_token(CONTROL_TOKEN_PATH, replacement)
+                stored = True
             except (OSError, ValueError) as exc:
-                print(f"Could not remember keyboard permission: {exc}", file=sys.stderr)
-        elif remembered is not None and token_path is not None:
-            # An old restore token may have been consumed. Never reuse it.
-            try:
-                token_path.unlink(missing_ok=True)
-            except OSError as exc:
                 print(
-                    f"Could not clear old keyboard permission: {exc}",
+                    f"Could not remember Telegram input permission: {exc}",
                     file=sys.stderr,
                 )
+        elif remembered is not None:
+            # An old restore token may have been consumed. Never reuse it.
+            try:
+                CONTROL_TOKEN_PATH.unlink(missing_ok=True)
+            except OSError as exc:
+                print(
+                    f"Could not clear old Telegram input permission: {exc}",
+                    file=sys.stderr,
+                )
+        if mode == "grant-control":
+            if not stored:
+                return 1
+            print("CONTROL_GRANT_READY", flush=True)
+            return 0
         print("INPUT_GRANTED focus_telegram_within=10s", flush=True)
+        assert expected is not None
         if not _wait_for_expected_focus(expected):
             print("FOCUS_CHANGED", flush=True)
             return 2
@@ -371,7 +407,7 @@ def main() -> int:
                 _key(connection, session, CONTROL, False)
             print("SHORTCUT_DISPATCHED", flush=True)
         elif mode == "search":
-            _type_search_target(connection, session, sys.argv[4])
+            _type_search_target(connection, session, sys.argv[4], expected)
             print("SEARCH_TYPED", flush=True)
         else:
             box = (

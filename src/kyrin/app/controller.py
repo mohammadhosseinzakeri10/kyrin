@@ -49,7 +49,11 @@ class ApplicationController:
     """
 
     def __init__(
-        self, factory: SessionFactory, system_power: SystemPowerFlow | None = None
+        self,
+        factory: SessionFactory,
+        system_power: SystemPowerFlow | None = None,
+        *,
+        start_in_standby: bool = False,
     ) -> None:
         self._factory = factory
         self._system_power = system_power
@@ -59,6 +63,8 @@ class ApplicationController:
         self._stop_thread: Thread | None = None
         self._session: RuntimeSession | None = None
         self._stop_requested = Event()
+        self._start_in_standby = start_in_standby
+        self._commands_active = not start_in_standby
 
     def status(self) -> ApplicationStatus:
         with self._lock:
@@ -97,6 +103,7 @@ class ApplicationController:
             if settings.stt is None:
                 self._status = ApplicationStatus(ApplicationState.SETUP_REQUIRED)
                 return self._status
+            self._commands_active = not self._start_in_standby
             self._stop_requested = Event()
             self._session = None
             self._status = ApplicationStatus(ApplicationState.STARTING)
@@ -109,9 +116,24 @@ class ApplicationController:
             thread.start()
             return self._status
 
+    def commands_active(self) -> bool:
+        with self._lock:
+            return self._commands_active
+
+    def set_commands_active(self, active: bool) -> None:
+        """Switch command routing while keeping the microphone session alive."""
+        with self._lock:
+            self._commands_active = active
+            session = self._session
+            if session is not None:
+                setter = getattr(session, "set_commands_active", None)
+                if setter is not None:
+                    setter(active)
+
     def request_stop(self) -> None:
         """Request a stop without blocking a future graphical control thread."""
         with self._lock:
+            self._commands_active = False
             thread = self._thread
             if thread is None or not thread.is_alive():
                 if self._status.state is not ApplicationState.ERROR and (
@@ -187,6 +209,9 @@ class ApplicationController:
             with self._factory(settings) as session:
                 with self._lock:
                     self._session = session
+                    setter = getattr(session, "set_commands_active", None)
+                    if setter is not None:
+                        setter(self._commands_active)
                     cancelled = stop_requested.is_set()
                     if not cancelled:
                         self._status = ApplicationStatus(ApplicationState.RUNNING)

@@ -1,7 +1,6 @@
 """Use a selected model only when bounded rules cannot decide a command."""
 
 import re
-import unicodedata
 from collections.abc import Callable
 
 from kyrin.commands.app_names import AppNameResolver
@@ -43,10 +42,11 @@ from kyrin.commands.understanding import (
     UnderstandingResult,
     UnderstandingStatus,
 )
+from kyrin.text_normalization import fold_case, source_spelling
 
 
 def _words(value: str) -> tuple[str, ...]:
-    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = fold_case(value)
     normalized = normalized.replace("ي", "ی").replace("ك", "ک")
     return tuple(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
 
@@ -254,7 +254,11 @@ class ModelAssistedInterpreter:
                 return UnrecognizedCommand()
             if kind is CommandKind.OPEN_CHAT:
                 assert step.target_phrase is not None
-                intents.append(CommandIntent(kind, step.target_phrase, step.app_id))
+                intents.append(
+                    CommandIntent(
+                        kind, source_spelling(text, step.target_phrase), step.app_id
+                    )
+                )
             else:
                 intents.append(CommandIntent(kind, step.app_id))
         if len(intents) == 1:

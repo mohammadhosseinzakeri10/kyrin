@@ -123,6 +123,11 @@ PERSIAN: dict[str, str] = {
     "save": "ذخیرهٔ تغییرات",
     "start": "شروع گوش‌دادن",
     "stop": "توقف گوش‌دادن",
+    "microphone_off": "خاموش‌کردن کامل میکروفن",
+    "voice_started": "دریافت فرمان‌ها فعال شد.",
+    "voice_standby": "آماده‌باش؛ برای ادامه بگویید Start listening.",
+    "voice_off": "میکروفن کاملاً خاموش شد.",
+    "voice_turning_off": "در حال خاموش‌کردن میکروفن…",
     "quit": "خروج از KYRIN",
     "actions_on": "اقدام‌های دسکتاپ فعال‌اند",
     "actions_off": "اقدام‌های دسکتاپ غیرفعال‌اند",
@@ -133,6 +138,32 @@ PERSIAN: dict[str, str] = {
     ),
     "enable_actions": "فعال‌کردن اقدام‌های انتخاب‌شدهٔ دسکتاپ",
     "allow_telegram_chats": "اجازهٔ بازکردن چت در Telegram (بدون ارسال پیام)",
+    "remember_telegram_pointer": (
+        "ذخیرهٔ دسترسی کیبورد و ماوس برای چت‌های Telegram"
+    ),
+    "telegram_pointer_grant_now": "تنظیم دسترسی کنترل Telegram…",
+    "telegram_pointer_not_ready": (
+        "مجوز کنترل ذخیره نشده است. تنظیمات را ذخیره کنید، سپس اینجا دسترسی بدهید."
+    ),
+    "telegram_pointer_ready": (
+        "مجوز کنترل ذخیره شده است؛ سیستم می‌تواند بعداً آن را لغو کند."
+    ),
+    "telegram_pointer_grant_running": "درخواست Remote Desktop سیستم را تأیید کنید…",
+    "telegram_pointer_grant_done": "دسترسی کیبورد و ماوس Telegram ذخیره شد.",
+    "telegram_pointer_grant_failed": (
+        "دسترسی کنترل ذخیره نشد. از همین‌جا دوباره تلاش کنید."
+    ),
+    "telegram_pointer_save_first": (
+        "ابتدا تنظیمات چت و دسترسی کنترل Telegram را ذخیره کنید."
+    ),
+    "allow_desktop_scroll": "اجازهٔ اسکرول در برنامه‌های انتخاب‌شده",
+    "desktop_scroll_grant_now": "تنظیم دسترسی اسکرول دسکتاپ…",
+    "desktop_scroll_not_ready": "دسترسی اسکرول ذخیره نشده است؛ تنظیمات را ذخیره کنید.",
+    "desktop_scroll_ready": "دسترسی اسکرول دسکتاپ ذخیره شده است.",
+    "desktop_scroll_running": "درخواست Remote Desktop سیستم را تأیید کنید…",
+    "desktop_scroll_done": "دسترسی اسکرول دسکتاپ ذخیره شد.",
+    "desktop_scroll_failed": "دسترسی اسکرول ذخیره نشد؛ دوباره تلاش کنید.",
+    "desktop_scroll_save_first": "ابتدا تنظیمات اسکرول دسکتاپ را ذخیره کنید.",
     "allow_window_controls": (
         "اجازهٔ بازگرداندن، کوچک‌کردن، بزرگ‌کردن یا تمام‌صفحه‌کردن برنامه‌های انتخاب‌شده"
     ),
@@ -240,7 +271,9 @@ PERSIAN: dict[str, str] = {
     "language_added": "بستهٔ زبان افزوده شد.",
     "ui_saved": "تنظیم زبان رابط ذخیره شد.",
     "state_stopped": "متوقف",
-    "state_paused": "گوش‌دادن خاموش است",
+    "state_paused": "میکروفن کاملاً خاموش است",
+    "state_standby": "آماده‌باش: بگویید Start listening",
+    "state_mic_starting": "میکروفن در حال راه‌اندازی است؛ فرمان صوتی هنوز آماده نیست",
     "state_setup": "مدل تشخیص گفتار باید تنظیم شود",
     "state_starting": "در حال شروع",
     "state_running": "در حال اجرا",

@@ -33,6 +33,24 @@ POLICY = ActionPolicy(
 )
 
 
+def test_scroll_requires_separate_app_permission() -> None:
+    intent = CommandIntent(CommandKind.SCROLL_DOWN, "telegram")
+    supported = frozenset({CommandKind.SCROLL_DOWN})
+    denied = ActionGate(ActionPolicy(supported_kinds=supported))
+    assert denied.observe(CommandResolution(0, intent)) == ActionNotice(
+        ActionKey(0, 0), intent, ActionNoticeReason.NOT_ALLOWED
+    )
+    allowed = ActionGate(
+        ActionPolicy(
+            allowed_scroll_apps=frozenset({"telegram"}),
+            supported_kinds=supported,
+        )
+    )
+    assert allowed.observe(CommandResolution(0, intent)) == ActionRequest(
+        ActionKey(0, 0), intent
+    )
+
+
 def test_candidate_never_issues_action_and_final_issues_once() -> None:
     gate = ActionGate(POLICY)
     key = ActionKey(0, 4)

@@ -1,10 +1,11 @@
 """Join only a short, explicit operation fragment to its nearby target."""
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
+
+from kyrin.text_normalization import fold_case
 
 _PREFIX_OPERATIONS = frozenset(
     {
@@ -50,7 +51,7 @@ _PERSIAN_COMMAND = re.compile(
 
 
 def _normalize(text: str) -> str:
-    value = unicodedata.normalize("NFKC", text).casefold()
+    value = fold_case(text)
     value = value.replace("ي", "ی").replace("ك", "ک").replace("‌", " ")
     return " ".join(value.strip().rstrip(".!?؟。").split())
 

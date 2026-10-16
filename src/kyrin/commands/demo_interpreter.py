@@ -1,7 +1,6 @@
 """Tiny offline demonstration interpreter; not the multilingual product engine."""
 
 import re
-import unicodedata
 from collections.abc import Sequence
 from difflib import SequenceMatcher
 
@@ -39,6 +38,7 @@ from kyrin.commands.models import (
 from kyrin.commands.open_window_meaning import requests_open_window_overview
 from kyrin.commands.wake_names import DEFAULT_WAKE_NAMES
 from kyrin.desktop.window_presence import AppWindowPresence, WindowPresence
+from kyrin.text_normalization import fold_case, source_spelling
 
 _APPS = {
     "تلگرام": "telegram",
@@ -88,6 +88,18 @@ _OPEN_CHAT_WITH_APP_FA = re.compile(r"^چت (.+?) را در (تلگرام|وات
 _OPEN_CHAT_FA = re.compile(r"^(?:چت|گفتگوی) (.+?) را باز کن$")
 _GO_CHAT_FA = re.compile(r"^به (?:چت|گفتگوی) (.+?) برو$")
 _OPEN_CHAT_EN = re.compile(r"^(?:open|go to) chat (.+)$")
+_OPEN_CHAT_SUFFIX_EN = re.compile(
+    r"^(?:open|go to) (?:the )?(.+?)(?:'s)? chat$"
+)
+_SCROLL_EN = re.compile(
+    r"^(?:please )?(?:more )?(?:scrolls?|skool) (a little )?(up|down)"
+    r"(?: (more|less|list|liz|a little))?$"
+)
+_SCROLL_FA = re.compile(
+    r"^(کمی )?اسکرول (بالا|پایین)(?: کن)?(?: (بیشتر|کمتر))?$"
+)
+_SCROLL_SHORT_EN = re.compile(r"^(?:(?:come|go) )?(up|down)$")
+_SCROLL_SHORT_FA = re.compile(r"^(?:برو )?(بالا|پایین)$")
 _WAKE_PREFIXES = (*DEFAULT_WAKE_NAMES, "کایری")
 _NUMBERED_CLOSE_EN = re.compile(
     r"^(?:please )?(?:(?:close|exit|quit) (.+)|(.+) (?:close|exit|quit))$"
@@ -112,7 +124,7 @@ def _close_window_index(text: str, count: int) -> int | None:
 
 
 def _normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text).casefold()
+    text = fold_case(text)
     text = text.replace("’", "'")
     text = text.replace("ي", "ی").replace("ك", "ک").replace("‌", " ")
     text = re.sub(r"[،,؟?!。؛;:.]", " ", text)
@@ -129,6 +141,7 @@ class DemoCommandInterpreter:
         wake_aliases: Sequence[str] = (),
         browser_candidates: Sequence[SpokenAppCandidate] = (),
         allowed_window_apps: frozenset[str] = frozenset(),
+        allowed_scroll_apps: frozenset[str] = frozenset(),
         allowed_close_apps: frozenset[str] = frozenset(),
         window_presence: AppWindowPresence | None = None,
         terminal_app_id: str | None = None,
@@ -137,6 +150,7 @@ class DemoCommandInterpreter:
         self._app_name_resolver = app_name_resolver
         self._browser_candidates = tuple(browser_candidates)
         self._allowed_window_apps = allowed_window_apps
+        self._allowed_scroll_apps = allowed_scroll_apps
         self._allowed_close_apps = allowed_close_apps
         self._window_presence = window_presence
         self._terminal_app_id = terminal_app_id
@@ -174,6 +188,52 @@ class DemoCommandInterpreter:
         # Otherwise a still-pending "yes" could act on the older request.
         if "باز نکن" in phrase or phrase.startswith(("don't open ", "do not open ")):
             return DeclinedClarification() if pending is not None else NotACommand()
+
+        english_scroll = _SCROLL_EN.fullmatch(phrase)
+        persian_scroll = _SCROLL_FA.fullmatch(phrase)
+        short_scroll = (
+            _SCROLL_SHORT_EN.fullmatch(phrase)
+            or _SCROLL_SHORT_FA.fullmatch(phrase)
+        )
+        scroll_match = english_scroll or persian_scroll or short_scroll
+        repeat_scroll = phrase in {"more", "again", "بیشتر", "دوباره"}
+        if scroll_match is not None or repeat_scroll:
+            active = context.observed_active_app
+            if active is None or active not in self._allowed_scroll_apps:
+                return UnrecognizedCommand()
+            if repeat_scroll:
+                if context.recent_scroll_kind is None:
+                    return UnrecognizedCommand()
+                return ReadyCommand(
+                    CommandIntent(
+                        context.recent_scroll_kind,
+                        active,
+                        scroll_steps=context.recent_scroll_steps,
+                    )
+                )
+            assert scroll_match is not None
+            if english_scroll is not None:
+                direction = english_scroll[2]
+                modifier = english_scroll[3] or english_scroll[1]
+            elif persian_scroll is not None:
+                direction = persian_scroll[2]
+                modifier = persian_scroll[3] or persian_scroll[1]
+            else:
+                direction = scroll_match[1]
+                modifier = None
+            kind = (
+                CommandKind.SCROLL_UP
+                if direction in {"up", "بالا"}
+                else CommandKind.SCROLL_DOWN
+            )
+            steps = (
+                4 if modifier in {"more", "بیشتر"}
+                else 2 if modifier in {
+                    "less", "list", "liz", "a little", "a little ", "کمتر", "کمی "
+                }
+                else None
+            )
+            return ReadyCommand(CommandIntent(kind, active, scroll_steps=steps))
 
         if isinstance(pending, PendingActionConfirmation):
             if phrase in ("no", "nein", "نه", "خیر", "لغو", "cancel"):
@@ -493,7 +553,7 @@ class DemoCommandInterpreter:
             )
 
         if " and " in phrase and phrase.startswith(("open ", "go to ")):
-            return self._interpret_english_plan(phrase)
+            return self._interpret_english_plan(phrase, source=text)
 
         if self._app_name_resolver is not None:
             app_match = _OPEN_NAMED_APP_FA.fullmatch(
@@ -505,6 +565,7 @@ class DemoCommandInterpreter:
                 or _OPEN_CHAT_FA.fullmatch(phrase)
                 or _GO_CHAT_FA.fullmatch(phrase)
                 or _OPEN_CHAT_EN.fullmatch(phrase)
+                or _OPEN_CHAT_SUFFIX_EN.fullmatch(phrase)
             )
             if app_match is not None and chat_match is not None:
                 app_result = self._app_name_resolver.resolve(app_match[1])
@@ -518,7 +579,9 @@ class DemoCommandInterpreter:
                     )
                     return NeedsClarification(
                         PendingIntentClarification(
-                            app_result.candidates[0], chat_match[1].strip(), chat_app
+                            app_result.candidates[0],
+                            source_spelling(text, chat_match[1].strip()),
+                            chat_app,
                         )
                     )
 
@@ -530,9 +593,12 @@ class DemoCommandInterpreter:
             _OPEN_CHAT_FA.fullmatch(phrase)
             or _GO_CHAT_FA.fullmatch(phrase)
             or _OPEN_CHAT_EN.fullmatch(phrase)
+            or _OPEN_CHAT_SUFFIX_EN.fullmatch(phrase)
         )
         if match is not None:
-            return self._chat_command(match[1].strip(), context)
+            return self._chat_command(
+                source_spelling(text, match[1].strip()), context
+            )
 
         if self._app_name_resolver is not None:
             match = _OPEN_NAMED_APP_FA.fullmatch(
@@ -629,7 +695,9 @@ class DemoCommandInterpreter:
             return UnrecognizedCommand()
         return NotACommand()
 
-    def _interpret_english_plan(self, phrase: str) -> Interpretation:
+    def _interpret_english_plan(
+        self, phrase: str, *, source: str
+    ) -> Interpretation:
         """Recognize two explicit steps; never execute a fragment of unclear text."""
         clauses = phrase.split(" and ")
         if len(clauses) != 2:
@@ -653,7 +721,9 @@ class DemoCommandInterpreter:
                 and self._app_name_resolver.resolve(second_app_match[1]).candidates
             ):
                 return UnrecognizedCommand()
-            person = (chat_match[1] or chat_match[2]).strip()
+            person = source_spelling(
+                source, (chat_match[1] or chat_match[2]).strip()
+            )
             if person:
                 return ReadyPlan(
                     CommandPlan(

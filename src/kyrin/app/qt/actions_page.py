@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from kyrin.app.app_permissions import AppChoice, AppPickerCatalog, app_choices
+from kyrin.app.permission_token import permission_token_path, read_opaque_token
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import AllowedApp, AppSettings, AppSpokenAliases
 from kyrin.system_power.flow import PowerAction
@@ -99,6 +100,29 @@ class DesktopActionsPage(QWidget):
         layout.addWidget(self.aliases_help)
         self.telegram_chat_checkbox = QCheckBox()
         layout.addWidget(self.telegram_chat_checkbox)
+        self.telegram_pointer_checkbox = QCheckBox()
+        layout.addWidget(self.telegram_pointer_checkbox)
+        self.telegram_pointer_grant_button = QPushButton()
+        layout.addWidget(self.telegram_pointer_grant_button)
+        self.telegram_pointer_grant_status = QLabel()
+        self.telegram_pointer_grant_status.setWordWrap(True)
+        layout.addWidget(self.telegram_pointer_grant_status)
+        self.desktop_scroll_checkbox = QCheckBox()
+        layout.addWidget(self.desktop_scroll_checkbox)
+        self.desktop_scroll_grant_button = QPushButton()
+        layout.addWidget(self.desktop_scroll_grant_button)
+        self.desktop_scroll_grant_status = QLabel()
+        self.desktop_scroll_grant_status.setWordWrap(True)
+        layout.addWidget(self.desktop_scroll_grant_status)
+        self.desktop_scroll_checkbox.toggled.connect(
+            self._update_scroll_permission_availability
+        )
+        self.telegram_chat_checkbox.toggled.connect(
+            self._update_pointer_permission_availability
+        )
+        self.telegram_pointer_checkbox.toggled.connect(
+            self._update_pointer_permission_availability
+        )
         self.window_control_checkbox = QCheckBox()
         layout.addWidget(self.window_control_checkbox)
         self.close_window_checkbox = QCheckBox()
@@ -138,6 +162,10 @@ class DesktopActionsPage(QWidget):
             self.telegram_chat_checkbox.setChecked(
                 "telegram" in settings.allowed_chat_apps
             )
+            self.telegram_pointer_checkbox.setChecked(
+                settings.remember_telegram_pointer
+            )
+            self.desktop_scroll_checkbox.setChecked(settings.allow_desktop_scroll)
             selected_app_ids = {binding.app_id for binding in settings.allowed_apps}
             self.window_control_checkbox.setChecked(
                 bool(selected_app_ids)
@@ -154,6 +182,10 @@ class DesktopActionsPage(QWidget):
             self.select_visible_button.setEnabled(False)
             self.clear_visible_button.setEnabled(False)
             self.telegram_chat_checkbox.setEnabled(False)
+            self.telegram_pointer_checkbox.setEnabled(False)
+            self.telegram_pointer_grant_button.setEnabled(False)
+            self.desktop_scroll_checkbox.setEnabled(False)
+            self.desktop_scroll_grant_button.setEnabled(False)
             self.window_control_checkbox.setEnabled(False)
             self.close_window_checkbox.setEnabled(False)
             self.system_power_checkbox.setEnabled(False)
@@ -161,6 +193,7 @@ class DesktopActionsPage(QWidget):
         self.translate()
         self._show_aliases()
         self._update_chat_permission_availability()
+        self._update_scroll_permission_availability()
 
     def _current_app_choice(self) -> AppChoice | None:
         item = self.apps.currentItem()
@@ -229,6 +262,7 @@ class DesktopActionsPage(QWidget):
             f"{len(self.selected_apps())} {self._translations.text('actions_selected')}"
         )
         self._update_chat_permission_availability()
+        self._update_scroll_permission_availability()
 
     def _update_chat_permission_availability(self) -> None:
         telegram_selected = any(
@@ -237,6 +271,35 @@ class DesktopActionsPage(QWidget):
         self.telegram_chat_checkbox.setEnabled(telegram_selected)
         if not telegram_selected:
             self.telegram_chat_checkbox.setChecked(False)
+        self._update_pointer_permission_availability()
+
+    def _update_pointer_permission_availability(self) -> None:
+        enabled = self.telegram_chat_checkbox.isEnabled() and (
+            self.telegram_chat_checkbox.isChecked()
+        )
+        self.telegram_pointer_checkbox.setEnabled(enabled)
+        if not enabled:
+            self.telegram_pointer_checkbox.setChecked(False)
+        self.telegram_pointer_grant_button.setEnabled(
+            enabled and self.telegram_pointer_checkbox.isChecked()
+        )
+
+    def set_pointer_grant_ready(self, ready: bool) -> None:
+        key = "telegram_pointer_ready" if ready else "telegram_pointer_not_ready"
+        self.telegram_pointer_grant_status.setText(self._translations.text(key))
+
+    def _update_scroll_permission_availability(self) -> None:
+        enabled = self.apps.isEnabled() and bool(self.selected_apps())
+        self.desktop_scroll_checkbox.setEnabled(enabled)
+        if not enabled:
+            self.desktop_scroll_checkbox.setChecked(False)
+        self.desktop_scroll_grant_button.setEnabled(
+            enabled and self.desktop_scroll_checkbox.isChecked()
+        )
+
+    def set_scroll_grant_ready(self, ready: bool) -> None:
+        key = "desktop_scroll_ready" if ready else "desktop_scroll_not_ready"
+        self.desktop_scroll_grant_status.setText(self._translations.text(key))
 
     def translate(self) -> None:
         text = self._translations.text
@@ -244,6 +307,16 @@ class DesktopActionsPage(QWidget):
         self.caption.setText(text("actions_caption"))
         self.enabled_checkbox.setText(text("enable_actions"))
         self.telegram_chat_checkbox.setText(text("allow_telegram_chats"))
+        self.telegram_pointer_checkbox.setText(text("remember_telegram_pointer"))
+        self.telegram_pointer_grant_button.setText(text("telegram_pointer_grant_now"))
+        self.set_pointer_grant_ready(
+            read_opaque_token(permission_token_path("telegram-control")) is not None
+        )
+        self.desktop_scroll_checkbox.setText(text("allow_desktop_scroll"))
+        self.desktop_scroll_grant_button.setText(text("desktop_scroll_grant_now"))
+        self.set_scroll_grant_ready(
+            read_opaque_token(permission_token_path("desktop-scroll")) is not None
+        )
         self.window_control_checkbox.setText(text("allow_window_controls"))
         self.close_window_checkbox.setText(text("allow_window_close"))
         self.system_power_checkbox.setText(text("allow_system_power"))
@@ -299,6 +372,12 @@ class DesktopActionsPage(QWidget):
     def selected_chat_apps(self) -> tuple[str, ...]:
         return ("telegram",) if self.telegram_chat_checkbox.isChecked() else ()
 
+    def remember_telegram_pointer(self) -> bool:
+        return self.telegram_pointer_checkbox.isChecked()
+
+    def allow_desktop_scroll(self) -> bool:
+        return self.desktop_scroll_checkbox.isChecked()
+
     def selected_window_apps(self) -> tuple[str, ...]:
         return (
             tuple(app.app_id for app in self.selected_apps())
@@ -318,6 +397,8 @@ class DesktopActionsPage(QWidget):
             self.enabled_checkbox.isChecked() != settings.action_execution_enabled
             or set(self.selected_apps()) != set(settings.allowed_apps)
             or self.selected_chat_apps() != settings.allowed_chat_apps
+            or self.remember_telegram_pointer() != settings.remember_telegram_pointer
+            or self.allow_desktop_scroll() != settings.allow_desktop_scroll
             or set(self.selected_window_apps()) != set(settings.allowed_window_apps)
             or set(self.selected_close_apps()) != set(settings.allowed_close_apps)
             or self.system_power_checkbox.isChecked() != settings.system_power_enabled

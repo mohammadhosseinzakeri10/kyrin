@@ -32,7 +32,7 @@ def test_final_compound_command_keeps_both_steps_and_chat_app(phrase: str) -> No
     expected = CommandPlan(
         (
             CommandIntent(CommandKind.OPEN_APP, "telegram"),
-            CommandIntent(CommandKind.OPEN_CHAT, "alice", "telegram"),
+            CommandIntent(CommandKind.OPEN_CHAT, "Alice", "telegram"),
         )
     )
 

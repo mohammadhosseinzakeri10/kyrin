@@ -1,6 +1,7 @@
 """Turn revisable transcript updates into safe, observable command decisions."""
 
 from collections.abc import Callable, Sequence
+from time import monotonic
 
 from kyrin.commands.fragments import CommandFragmentBuffer
 from kyrin.commands.interpreter import (
@@ -60,6 +61,7 @@ class CommandCoordinator:
         self._emitted_candidate: CommandIntent | None = None
         self._pending: PendingCommandClarification | None = None
         self._last_referenced_app: str | None = None
+        self._last_scroll: tuple[str, CommandKind, int | None, float] | None = None
 
     @property
     def pending_clarification(
@@ -73,6 +75,11 @@ class CommandCoordinator:
 
     def cancel_fragment(self) -> None:
         """Discard an unfinished operation when another dialogue flow takes over."""
+        self._fragments.clear()
+
+    def cancel_dialogue(self) -> None:
+        """Drop a pending question when normal command listening is paused."""
+        self._pending = None
         self._fragments.clear()
 
     def start_new_stream(self) -> Sequence[CommandEvent]:
@@ -136,6 +143,13 @@ class CommandCoordinator:
         interpreted_text = update.text
         if update.status is TranscriptStatus.FINAL:
             interpreted_text = self._fragments.combine(update.text) or update.text
+        recent_scroll_kind: CommandKind | None = None
+        recent_scroll_steps: int | None = None
+        if self._last_scroll is not None and observed_active_app is not None:
+            scroll_app, scroll_kind, scroll_steps, recorded_at = self._last_scroll
+            if scroll_app == observed_active_app and monotonic() - recorded_at <= 30:
+                recent_scroll_kind = scroll_kind
+                recent_scroll_steps = scroll_steps
         interpretation = self.interpreter.interpret(
             interpreted_text,
             language=update.language,
@@ -147,6 +161,8 @@ class CommandCoordinator:
                 if update.status is TranscriptStatus.FINAL
                 and self._recent_utterances is not None
                 else (),
+                recent_scroll_kind,
+                recent_scroll_steps,
             ),
             pending=self._pending,
         )
@@ -204,6 +220,12 @@ class CommandCoordinator:
                 else (interpretation.intent,)
             )
             for item in intents:
+                if item.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
+                    self._last_scroll = (
+                        item.target, item.kind, item.scroll_steps, monotonic()
+                    )
+                else:
+                    self._last_scroll = None
                 if item.kind in (
                     CommandKind.OPEN_APP,
                     CommandKind.RESTORE_APP,

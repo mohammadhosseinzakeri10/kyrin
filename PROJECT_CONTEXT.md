@@ -4322,3 +4322,395 @@ with the real catalog and saved settings produced `OPEN_APP` targeting
 Ubuntu composition tests cover the fix. The running desktop process must
 restart before it reads the changed code and settings; a live voice retest
 has not yet been observed.
+
+## 131. Telegram named-chat search and transcript capitalization
+
+In a first live `Open Chat My Mother` trial on 2026-10-16, the installed app
+heard the intended phrase and produced `open_chat: my mother`, but reported
+`chat_search_uncertain` after 3,803 ms from final text to result. The owner saw
+the target typed in Telegram search and no matching row. A read-only portal
+capture with local Tesseract found one high-confidence phrase match at x=67,
+y=45, inside the search field; it did not find a result-row match. The owner
+reported that manually typing the visible spelling `My Mother` produced the
+chat result. This isolates the observed failure to the search stage rather
+than command recognition or OCR letter-case comparison. No uncertain row was
+clicked.
+
+The command path already used Unicode `casefold()` to compare recognized
+speech and OCR without case sensitivity, but its rule interpreter discarded
+the final transcript's capitalization when constructing `OPEN_CHAT`. A shared
+normalization utility now keeps case-insensitive comparison while recovering
+the source spelling for a chat target before sending it to an external app.
+The model-assisted path applies the same recovery after source grounding.
+Regression tests cover mixed-case chat names, OCR matches, split utterances,
+and multi-step commands. In the next live trial, KYRIN interpreted
+`open_chat: My Mother` and typed the correct spelling. The owner confirmed the
+first local chat row was visible, but KYRIN still stopped with
+`chat_search_uncertain` after 3,674 ms from final text to result. A read-only
+portal capture found the query at y=45, that chat row at y=92, and four more
+exact-name matches at y=182, 244, 368, and 492 in Global Search Results.
+The previous verifier excluded y=92 and treated lower repeated names as an
+ambiguity. No row was clicked.
+
+The owner then specified a two-stage choice: choose the local chat or Global
+Search Results first; if Global Search Results is chosen, present numbered
+rows for a second choice. The OCR parser now separates the first local row
+from lower repeated exact-name matches and exposes both categories through the
+Qt screen verifier. A session-scoped Telegram selection flow now asks for the
+local chat or global results, then accepts a 1-based global result number from
+top to bottom. Invalid answers repeat the current question; cancellation and
+expiry discard the pending selection. The action re-reads all choice boxes and
+the focused Telegram identity before clicking a selected row. Tests cover the
+dialogue, stable rows, and changed results. The parser still recognizes only
+global rows with exact-name OCR matches, and no live named-chat opening after
+this change has yet been observed.
+
+The first live repeat after adding dialogue still returned
+`chat_search_uncertain` after 7,146 ms from final text without showing the
+choice question. A separate owner-approved, non-persistent portal capture of
+the same search returned a 1920×1080 image with exact-name matches at y=45,
+92, 182, 244, 368, and 492; the parser classified one local chat and four
+global rows. This points to a difference in KYRIN's persistent capture/read
+path, not a failure of the pure parser on that captured image. A content-free
+choice-read status is now emitted in the action diagnostic so the next live
+run can distinguish capture, identity, OCR, and classification failure.
+
+The next two owner runs still showed no choice prompt:
+`chat_search_uncertain:unclassified_matches_1` with `My Mother`, then
+`chat_search_uncertain:classified_own_0_global_0` with `my mother`. These
+statuses show that the in-app OCR did not classify a result row in either run;
+they do not establish whether rows were absent from the captured frame or
+missed by OCR. The settle loop no longer treats two empty classifications as
+a stable search result. A content-free diagnostic now includes image size and
+the positions of exact target matches for the next live run. The corrected
+wait and diagnostic pass deterministic tests; live validation is pending.
+
+A fresh owner-authorized read-only portal capture while KYRIN's query was
+visible found only the phrase in the search field at x=67, y=45, with no
+matching result row. The owner reports that clearing the field and typing the
+same name manually produced the chat row. Telegram Desktop's `Ctrl+F` search
+can be scoped to the open conversation; the previous helper invoked it
+without leaving that context or clearing an existing query. Search input now
+presses `Esc`, then `Ctrl+F`, selects the existing field content, and types the
+target. The pointer helper's lower bound now permits the observed first local
+row at y=92 in a 1080-pixel image while excluding the query at y=45. These
+are proposed corrections backed by deterministic tests, awaiting live owner
+validation; the capture does not prove which search mode was active.
+
+The owner identified the scope difference directly: with a chat open on the
+right, KYRIN searched inside that chat; with no chat open, Telegram displayed
+matching chat results. The latter run still returned
+`chat_search_uncertain:unstable_unclassified_matches_4_size_1853x1048_at_67-42_69-92_155-244_71-492`.
+A later selected-window portal capture at 1920×1080 found the query, local row,
+and four exact-name global matches; pure classification returned one local and
+four global choices. The in-app four-match read therefore remains an OCR or
+classification discrepancy, not an absence of all results. Search input now
+sends two `Esc` keys before `Ctrl+F` (to close an existing search and leave an
+open chat), checks Telegram focus, then selects prior query text. Query-title
+classification accepts a lower OCR confidence than result rows; diagnostics
+now include match confidences. A live retest of these changes is pending.
+
+The owner confirmed that the two-Escape search path displayed results even
+with a chat initially open, but still did not ask for a choice. The diagnostic
+was `unstable_unclassified_matches_4_size_1853x1048_at_67-42-5_69-92-96_155-244-96_71-492-0`.
+Thus the typed query itself had only 5% OCR confidence while the first local
+row and one global row had 96%; the old query threshold discarded the whole
+classification. The parser now requires an exact, unique query phrase in the
+search-field geometry without imposing a confidence floor on that known typed
+text. Result rows still require 75% confidence and two stable full reads
+before a choice prompt or click. A live owner retest is pending.
+
+That retest still produced no prompt. The diagnostic
+`unstable_unclassified_matches_3_size_1853x1048_at_69-92-96_155-244-96_71-492-0`
+showed that OCR omitted the query entirely while reading the local row and
+one global row at 96%. Classification now allows a missing query only when
+a unique, high-confidence local row appears in the expected left-pane band.
+The automatic single-result click still requires an exact query-field match;
+all choice clicks still require fresh stable rows, focused identity, portal
+geometry checks, and header verification. A live retest is pending.
+
+The next owner retest opened `My Mother` successfully with `Action result:
+confirmed` after 7,375 ms from final text, without a choice prompt. The
+owner clarified a revised product rule: a single existing chat with the
+requested name should open directly even if global search results also match;
+ask for a numbered choice only when two or more selectable chats have that
+name. The current implementation now prioritizes local chat rows over global
+results, uses a recognized `Search Results` section heading to separate
+multiple local rows from lower results, and prompts with 1-based numbers for
+multiple local matches. Global rows alone do not start this selection flow;
+an unmatched local chat remains unverified and is not opened automatically.
+The prior local/global two-stage prompt is
+superseded. Deterministic tests cover one local plus globals, two locals,
+numbered selection, and changed-row rejection. A real duplicate-name chat
+has not been available for live validation.
+
+In the owner's next run, diagnostics showed `Reason or clarification:
+conversation`, but the avatar stayed on `Opening My Mother's Chat` without
+showing the question. Code inspection found that the choice request was
+emitted during action execution; the visual controller suppresses ordinary
+conversation requests while `_executing` is true. The selection callback now
+explicitly transitions the visual state to `QUESTION` and clears the executing
+flag. A timer expires an unanswered choice after 45 seconds and publishes
+failure feedback; stopping or ending the runtime cancels a pending choice. The owner
+has not yet live-tested this fix. The latest rule also limits selection to
+multiple local rows, so a single `My Mother` chat should open without a
+question even when global results repeat its name.
+
+## 132. Remembered Telegram pointer consent
+
+The owner reported that opening a named Telegram chat works but prompts for
+pointer access on every click. The keyboard portal grant was already
+remembered, while pointer clicks always used `persist_mode=0`. Desktop
+Actions now has a separate, default-off `remember_telegram_pointer` checkbox
+in settings schema 12. When checked, the click helper requests pointer
+`persist_mode=2`, stores an opaque single-use restore token, and rotates it
+after each successful session. Disabling the checkbox or Telegram chat
+permission deletes that token. The per-action Telegram identity, result-box,
+pointer-position, and chat-header checks remain. Deterministic settings,
+UI, and portal tests pass; owner validation of the system's actual pointer
+restore behavior remains pending. Portal persistence can be withdrawn or
+refused by the desktop, in which case the system consent dialog may reappear.
+
+## 133. Numbered Telegram chat selection fails after the spoken answer
+
+In two subsequent owner runs, `Open Chat My Mother` produced a conversation
+question, but both `One` and `Number 1` ended in `chat_search_uncertain` after
+about 12–16 seconds from final answer. Thus the display handoff is now
+working; failure occurs during the fresh OCR reread before the selected row
+can be clicked. The owner reports that the question offered three numbered
+`My Mother` matches; the exact local/global division was not recorded.
+
+The selection implementation compared every global result box between the
+initial question and final click, even though only local rows are selectable.
+It now checks stable local rows only, so refreshes in the unrelated global
+section cannot invalidate a local selection. The completion feedback now
+distinguishes a failed fresh read from changed local rows without reporting
+message contents. Deterministic tests cover a global-row refresh before and
+after the question.
+
+In the next owner trial, answering `Number One` reached an operating-system
+permission dialog before the chat click. Code inspection identifies this as
+the `org.freedesktop.portal.RemoteDesktop` pointer-device grant requested by
+the Telegram click helper. The owner's `remember_telegram_pointer` setting is
+enabled, and the owner-only pointer restore-token file was updated at the time
+of the trial. This is strong evidence that the dialog was the portal grant;
+the exact wording and whether the chat finished opening were not observed.
+
+## 134. Advance Telegram RemoteDesktop setup
+
+The owner confirmed that the mid-command dialog was named Remote Desktop and
+asked for a one-time setup action inside KYRIN instead of a consent request
+while choosing a chat. The portal's official API supports persistent grants
+and single-use restore tokens, but says a revoked or un-restorable token can
+cause a system prompt again. The initial pointer-only remembered grant was
+therefore superseded by a Desktop Actions setup button that requests keyboard
+and pointer together, saves one `telegram-control` restore token, and rotates
+it for each Telegram input action. The existing default-off
+`remember_telegram_pointer` settings field gates this combined control setup;
+its UI label now names both devices. A missing saved setting or token stops
+chat actions with `telegram_control_setup_required` before the action-time
+portal request. Disabling the setting or Telegram chats removes the token.
+The button launches the portal helper asynchronously so the Qt window stays
+responsive. Focus and visual verification still apply to each action.
+Deterministic tests cover setup, token rotation, no grant during action when
+setup is absent, and UI wiring. The owner then restarted KYRIN, completed the
+in-app control setup, and reported that chat selection worked without the
+previous permission interruption. The owner did not provide a final
+`Action result` line, so this confirms the observed user flow rather than a
+recorded action outcome. Future OS revocation can still require a new grant.
+
+## 135. Telegram duplicate-row correction and global-only choices
+
+The owner tested two local chats named `My Mother`. Saying `Number 2` initially
+opened the first chat while KYRIN reported `confirmed`. A read-only portal OCR
+capture showed local chat titles at y=92 and y=154, plus another occurrence
+of `My Mother` in the first row's preview at x=350, y=116. The parser counted
+that preview as the second local choice. It also missed the global section
+heading because OCR read only `results` at y=203. The parser now limits local
+titles to Telegram's title column, recognizes a high-confidence left-pane
+`results` heading when the full heading is absent, and extends adjacent local
+rows when the heading is missed. A second read-only capture classified local
+rows `(92, 154)` and global rows `(244, 306, 430, 554)`. The owner restarted
+KYRIN and reported that `Number Two` opened the intended second chat. No final
+diagnostic line was supplied for that successful retest.
+
+When no local chat matches, a visibly identified global-results section can
+now start a numbered selection. The prompt explicitly says these are global
+search results; even a single global result requires a spoken number. Before
+clicking, KYRIN rereads and compares the global row boxes. If the section
+heading is not observed or rows change, it does not click. Existing local
+priority remains: one local match opens directly, while multiple local
+matches use local numbering and ignore global refreshes. Deterministic tests
+cover the new parser geometry, global-only question, selected click, and
+changed-row rejection. A live global-only case has not yet been tested.
+
+## 136. Natural spoken Telegram choices and STT test scope
+
+The owner reported that the current speech recognizer transcribes `matin` as
+`Martin` and does not reliably preserve the coined name `kyrin`. The current
+navigation acceptance tests should therefore use names with clear English
+pronunciation, while custom-name and multilingual STT improvements remain a
+separate future work item. These transcription errors do not establish which
+words occurred in the recognizer's training data. The global-only live path
+remains unconfirmed: `Admin` opened successfully, but a read-only check found
+that it also had a local row above the global section.
+
+Telegram's pending selection now accepts cardinal and ordinal replies such as
+`number two`, `two`, `the second`, `the second one`, `second option`, `2nd`,
+`option number two`, and `choose the second`. Standard Persian number and
+ordinal forms are also accepted. Words for one through ten and first through
+tenth are supported; numeric replies still require a valid displayed index.
+The entire answer must fit the small selection grammar: negated, ambiguous,
+multi-choice, and out-of-range replies repeat the question without completing
+the action. Local and verified global choices share the parser and still
+require the executor's fresh row and window checks. The spoken prompt now
+mentions ordinal replies. Deterministic selection and executor tests cover
+equivalent forms, correct row selection, and rejected answers; these new
+ordinal phrases have not yet been validated live through the microphone.
+
+## 137. Offscreen and archived Telegram chat discovery
+
+The owner pointed out that the intended chat may be far down the initial chat
+list or in Archive, and that `Open My Mother chat` should work alongside
+`Open chat My Mother`. Inspection showed the named-chat action already exits
+an open conversation and types the target into Telegram's own search. It does
+not crawl the initial list; therefore a chat being initially offscreen is not
+by itself a known limitation. The verifier does inspect only the currently
+visible search-result rows and cannot yet page through more matches. Archive
+coverage has not been confirmed with a live named-chat run. An upstream
+Telegram Desktop issue indicates that archive and search can interact, but is
+not sufficient evidence for this user's installed version or for KYRIN's OCR
+classification. The owner chose `My Mother` for a future archive test; at
+the time of the first follow-up run, the selected chat was still ordinary.
+
+The single-command rule interpreter and the model source-target grounder now
+accept `Open My Mother chat`; the rule path also accepts the possessive form.
+The final transcript's name spelling is preserved for Telegram search. This
+is command phrasing support, not a fix for STT changing a name to another
+word. Focused deterministic command tests pass. The owner then restarted
+KYRIN and spoke `Open my mother chat`; KYRIN reported `open_chat: my mother`,
+requested a numbered match, and confirmed opening after `First`. The owner
+confirmed that this was an ordinary chat and planned to archive one of the
+same-name chats for a separate test.
+
+After archiving one of the two `My Mother` chats, the owner observed in
+Telegram's search that the ordinary row was first and the archived row
+second, both above `Global Search Results`. Thus the current search surface
+exposes this archived chat without separate Archive navigation. A KYRIN
+`Open my mother chat` attempt reached the selection dialogue but ended with
+`Action result: failed (chat_selection_cancelled)`. The owner also said the
+chat opened, so that statement and the diagnostic do not establish a
+confirmed archived-row selection; a focused `Number Two` retest followed.
+
+In that focused retest, the owner answered `Number Two` and confirmed that
+the archived chat opened. The final `Action result` line was not supplied,
+so this is owner-confirmed visual behavior rather than a recorded outcome.
+
+## 138. Bounded desktop scroll and Telegram result paging
+
+The owner requested both generic voice scrolling and bounded navigation of
+offscreen Telegram search results, in that order. A separate default-off
+`allow_desktop_scroll` setting (settings schema 13) and `desktop-scroll`
+RemoteDesktop pointer restore token now gate generic scroll commands. In
+Desktop Actions, the user selects apps, saves the scroll setting, and runs
+the dedicated setup button. `Scroll up/down` and short Persian equivalents
+resolve only against a freshly observed active selected app. A new executor
+checks the focused desktop ID/PID, then a system-Python helper checks focus,
+window geometry, and pointer position before sending three discrete vertical
+axis events near the window center, or inside Telegram's left chat list. It
+reports an accepted dispatch, not a verified change of content. The generic grant is separate from the existing
+Telegram chat-control grant; disabling the setting deletes its token.
+
+The Telegram named-chat action now uses the same bounded pointer-axis helper
+with its existing `telegram-control` token, aiming inside the left results
+pane. If no exact selectable row is visible after search, it tries up to
+four scrolls within an 18-second scan deadline, rereading stable OCR choices
+after each. While a numbered choice is pending, `next`/`more results`/`بعدی`
+scrolls to another visible page, with at most five pages. A changed digest
+of visible left-pane OCR text is required for the next-page prompt. The
+digest is transient and not logged. A selected number still undergoes the
+existing fresh row, focus, and header checks. Duplicate names are numbered
+within each visible page rather than accumulated across pages. Live portal
+and microphone tests of Telegram result paging remain pending.
+
+The first owner microphone test of generic scrolling recognized `Scroll down`
+three times and showed the Remote Desktop dialog on the first action only.
+All three returned `confirmed` but the owner saw no movement. The original
+generic target was the center of the Telegram window, which can hit the open
+conversation instead of the chat list. The target now aims into the left
+list, and the result is `launch_accepted` because no visual movement check
+exists. The observed `More, Scroll Down` phrasing is also accepted. These
+This initial correction was subsequently tested live as described below.
+
+The owner restarted KYRIN and confirmed four consecutive `Scroll down`
+commands moved Telegram's left chat list, each returning `launch_accepted` in
+about 1.5–1.6 seconds from speech onset. The owner reported that the three
+discrete wheel steps felt like an abrupt jump. Generic scrolling now sends
+twelve small `NotifyPointerAxis` events over roughly 440 ms, with focus checks
+throughout; Telegram search paging retains its discrete input. Deterministic
+tests pass. The owner then restarted and reported two smooth scroll commands
+that moved the list, each returning `launch_accepted`. The owner requested
+slightly slower movement, so the pause between pulses increased from 25 to
+40 ms. This timing adjustment needs a final live feel check. No new Remote
+Desktop dialog was reported, but the owner did not explicitly answer that
+part of the question.
+
+The owner then clarified that standalone `More` should repeat the previous
+scroll direction (up after up, down after down), while explicit `scroll ...
+more/less` should adjust the distance. The coordinator now carries the recent
+scroll direction and amount for at most 30 seconds and only in the same
+foreground app. Plain down/up use three units, explicit more uses four,
+explicit less uses two. The spoken `More Scrolls Down` variant is recognized
+as an ordinary down action. Deterministic tests pass; microphone validation
+of these new phrases is pending.
+
+The owner microphone retest confirmed `More` repeated an upward scroll and
+`Scroll down more` dispatched. Three attempts reached the interpreter as
+`More Skool Up`, `Scroll down list`, and `Scroll up Liz`, so they did not act.
+The direct grammar now accepts those bounded scroll-shaped ASR variants;
+`Oh` remains non-actionable because it is ambiguous. The owner reported the
+motion itself felt good. The new spelling aliases need a live retest.
+
+## 139. Voice listening modes
+
+The owner requested voice activation at startup, voice standby, and a spoken
+complete microphone shutoff. A configured KYRIN installation whose saved
+`listening_enabled` setting is true now starts its existing local STT/microphone
+session in standby. In standby, ordinary transcripts and activity are not sent
+to the command interpreter or normal live UI; an exact `Start listening`
+activates commands. Exact `Stop listening` returns to standby without closing
+the audio session. `Turn off microphone completely` (also the variant with
+`the`) closes the session via the application controller and persists
+`listening_enabled=false`. The separate GUI button does the same. An explicitly
+saved off setting stays fully off at next startup and requires the GUI button
+to reenable capture. Persian equivalents are implemented in the same bounded
+phrase matcher.
+
+This first version reuses the selected local STT engine while in standby and
+filters its output; it is not a separate low-power keyword spotting model.
+The fixed shutoff phrase is a control phrase, not an authentication secret.
+Deterministic runtime, controller, and Qt tests pass. In the first owner
+restart test, spoken `Start listening` did not activate the initial standby
+session despite repeated attempts. The owner used the GUI Start button; after
+that, spoken `Stop listening`, `Start listening`, and `Turn off microphone
+completely` worked. This establishes those later controls, but does not
+establish reliable first wake at startup.
+
+The controller had marked its session RUNNING before the STT session and
+microphone capture opened, so the UI could display standby before audio was
+actually available. The pipeline now emits `AudioCaptureReady` after its first
+captured chunk, and the UI displays a microphone-starting state until that
+event, resetting the indication after a speech-session restart. The GUI Start
+button is disabled until capture is ready. Unit tests and the full suite pass;
+the owner still needs to retry the first spoken wake after the UI shows
+standby. If it still fails, inspect the first STT transcript/segmentation
+without assuming readiness was the sole cause.
+
+The owner later found that saying `Turn microphone off` after `Stop listening`
+did not shut down capture, while resuming first and using the full phrase did.
+The runtime already checks exact control phrases while in standby; this
+shorter spoken wording was absent from its bounded phrase set. It now accepts
+`Turn microphone off` and close word-order/articles variants in both active
+and standby modes. A focused runtime test covers `Start listening` → `Stop
+listening` → `Turn microphone off` without a second start. Live microphone
+validation of the new wording remains pending.

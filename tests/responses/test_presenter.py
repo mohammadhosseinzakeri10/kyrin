@@ -72,6 +72,20 @@ def test_uncertain_chat_search_shows_the_name_kyrin_actually_searched() -> None:
     assert "call your email" in ResponsePresenter("en").present(feedback).text
 
 
+def test_scroll_dispatch_does_not_claim_visible_movement() -> None:
+    feedback = ActionFeedback(
+        KEY,
+        CommandIntent(CommandKind.SCROLL_DOWN, "telegram"),
+        ActionOutcome.LAUNCH_ACCEPTED,
+        ResponseChannel.TEXT_AND_VOICE,
+        None,
+        "en",
+    )
+    assert ResponsePresenter("en").present(feedback).text == (
+        "I sent the scroll input, but haven't verified that the page moved."
+    )
+
+
 def test_clarification_is_localized_and_keeps_candidate_order() -> None:
     event = ResponseRequest(
         7,

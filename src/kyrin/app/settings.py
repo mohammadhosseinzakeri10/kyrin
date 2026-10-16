@@ -152,6 +152,8 @@ class AppSettings:
     system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
     allowed_chat_apps: tuple[str, ...] = ()
+    remember_telegram_pointer: bool = False
+    allow_desktop_scroll: bool = False
     allowed_window_apps: tuple[str, ...] = ()
     allowed_close_apps: tuple[str, ...] = ()
     wake_aliases: tuple[str, ...] = ()
@@ -212,6 +214,12 @@ class AppSettings:
             or not set(self.allowed_chat_apps).issubset(app_ids)
         ):
             raise ValueError("chat permission requires a unique allowed app")
+        if type(self.remember_telegram_pointer) is not bool:
+            raise ValueError("remember_telegram_pointer must be a boolean")
+        if self.remember_telegram_pointer and "telegram" not in self.allowed_chat_apps:
+            raise ValueError("remembered Telegram pointer requires chat permission")
+        if type(self.allow_desktop_scroll) is not bool:
+            raise ValueError("allow_desktop_scroll must be a boolean")
         for label, identifiers in (
             ("window", self.allowed_window_apps),
             ("close", self.allowed_close_apps),

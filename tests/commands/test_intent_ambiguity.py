@@ -87,7 +87,7 @@ def test_chat_choice_uses_fresh_context_and_never_opens_app(tmp_path: Path) -> N
     assert isinstance(chat[0], CommandResolution)
     assert chat[0].intent is not None
     assert chat[0].intent.kind is CommandKind.OPEN_CHAT
-    assert chat[0].intent.target == "one"
+    assert chat[0].intent.target == "One"
     assert chat[0].intent.app == "telegram"
 
 
@@ -113,7 +113,7 @@ def test_number_two_selects_chat_with_fresh_context(
     result = coordinator.observe(_final(1, answer), observed_active_app="telegram")
     assert result == (
         CommandResolution(
-            1, CommandIntent(CommandKind.OPEN_CHAT, "one", "telegram"), language="en"
+            1, CommandIntent(CommandKind.OPEN_CHAT, "One", "telegram"), language="en"
         ),
     )
 

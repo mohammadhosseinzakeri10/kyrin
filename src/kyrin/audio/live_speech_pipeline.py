@@ -53,6 +53,7 @@ class LiveSpeechPipeline:
         start_confirm_ms: int = 64,
         pause_confirm_ms: int = 384,
         on_compute_device: Callable[[ComputeDevice], None] | None = None,
+        on_audio_ready: Callable[[], None] | None = None,
     ) -> None:
         vad_converter = SampleRateConverter(
             source_format, detector.input_format.sample_rate
@@ -73,6 +74,7 @@ class LiveSpeechPipeline:
         self.start_confirm_ms = start_confirm_ms
         self.pause_confirm_ms = pause_confirm_ms
         self.on_compute_device = on_compute_device
+        self.on_audio_ready = on_audio_ready
         self._vad_converter = vad_converter
         self._session_lock = Lock()
         self._stop_requested = Event()
@@ -184,10 +186,17 @@ class LiveSpeechPipeline:
                             errors.append(exc)
                         stt_done.set()
 
+                audio_ready = False
+
                 def source_chunks(capture: AudioCaptureQueue) -> Iterator[AudioData]:
+                    nonlocal audio_ready
                     for chunk in capture.chunks():
                         if errors or stopped.is_set():
                             return
+                        if not audio_ready:
+                            audio_ready = True
+                            if self.on_audio_ready is not None:
+                                self.on_audio_ready()
                         if not turn_aware:
                             with notice_lock:
                                 notice = backlog.put(chunk)

@@ -81,7 +81,12 @@ def _ready(operation: RequestedOperation, target: str) -> UnderstandingResult:
     )
 
 
-def _interpreter(tmp_path: Path, model: FakeModel) -> ModelAssistedInterpreter:
+def _interpreter(
+    tmp_path: Path,
+    model: FakeModel,
+    *,
+    supported_chat_apps: frozenset[str] = frozenset(),
+) -> ModelAssistedInterpreter:
     applications = tmp_path / "applications"
     applications.mkdir()
     (applications / "telegram.desktop").write_text(
@@ -108,7 +113,7 @@ def _interpreter(tmp_path: Path, model: FakeModel) -> ModelAssistedInterpreter:
         model,
         names,
         allowed_apps=frozenset({"telegram", "browser", "visual-studio-code"}),
-        supported_chat_apps=frozenset(),
+        supported_chat_apps=supported_chat_apps,
     )
 
 
@@ -118,6 +123,25 @@ def _interpret(
     return interpreter.interpret(
         text, language=language, context=CommandContext(), pending=None
     )
+
+
+def test_model_chat_target_keeps_source_capitalization(tmp_path: Path) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_CHAT, "my mother"))
+    interpreter = _interpreter(
+        tmp_path, model, supported_chat_apps=frozenset({"telegram"})
+    )
+
+    result = interpreter.interpret(
+        "Open the chat My Mother",
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+
+    assert result == ReadyCommand(
+        CommandIntent(CommandKind.OPEN_CHAT, "My Mother", "telegram")
+    )
+    assert model.calls == 1
 
 
 @pytest.mark.parametrize("phrase", ("Kindly open Telegram", "Gently open Telegram"))

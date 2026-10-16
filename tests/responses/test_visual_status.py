@@ -114,6 +114,29 @@ def test_non_command_does_not_hide_an_action_still_running() -> None:
     assert latest_status(states) is VisualStatus.EXECUTING
 
 
+def test_chat_choice_prompt_replaces_running_action_and_can_finish() -> None:
+    states: list[VisualPresentation] = []
+    controller = VisualStatusController(states.append)
+    intent = CommandIntent(CommandKind.OPEN_CHAT, "My Mother", "telegram")
+    request = ActionRequest(ActionKey(0, 1), intent, "en")
+    controller.on_action_start(request)
+    prompt = ResponseRequest(
+        1, ResponseKind.CONVERSATION, ResponseChannel.TEXT_AND_VOICE,
+        stream_id=0, language="en", message="Which chat? Say 1 or 2.",
+    )
+    controller.on_chat_selection_prompt(prompt)
+    assert states[-1] == VisualPresentation(
+        VisualStatus.QUESTION, "Which chat? Say 1 or 2."
+    )
+    controller.on_action_output(
+        ActionFeedback(
+            request.key, intent, ActionOutcome.FAILED,
+            ResponseChannel.TEXT_AND_VOICE, "chat_selection_expired", "en",
+        )
+    )
+    assert latest_status(states) is VisualStatus.FAILED
+
+
 def test_execution_status_requires_actual_start_and_evidence_for_success() -> None:
     states: list[VisualPresentation] = []
     controller = VisualStatusController(states.append)

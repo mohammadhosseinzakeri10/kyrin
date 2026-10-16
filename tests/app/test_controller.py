@@ -93,6 +93,40 @@ def test_start_stop_cleanup_and_restart_without_duplicate_session(
     assert closed == sessions
 
 
+def test_standby_session_switches_command_routing_without_stopping_audio(
+    tmp_path: Path,
+) -> None:
+    modes: list[bool] = []
+
+    class ModeSession(FakeSession):
+        def set_commands_active(self, active: bool) -> None:
+            modes.append(active)
+
+    sessions: list[ModeSession] = []
+    created = Event()
+
+    @contextmanager
+    def factory(_settings: AppSettings) -> Iterator[RuntimeSession]:
+        session = ModeSession()
+        sessions.append(session)
+        created.set()
+        yield session
+
+    controller = ApplicationController(factory, start_in_standby=True)
+    controller.start(_configured_settings(tmp_path))
+    assert created.wait(1)
+    assert sessions[0].running.wait(1)
+    assert modes == [False]
+    controller.set_commands_active(True)
+    assert controller.commands_active()
+    controller.set_commands_active(False)
+    assert not controller.commands_active()
+    assert not sessions[0].stop_called.is_set()
+    assert modes == [False, True, False]
+    controller.request_stop()
+    assert controller.wait_until_stopped(2)
+
+
 def test_controller_runs_existing_command_runtime_without_hardware(
     tmp_path: Path,
 ) -> None:

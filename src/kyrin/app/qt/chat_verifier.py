@@ -6,14 +6,17 @@ from threading import Event
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from kyrin.actions.telegram_verification import (
+    ChatSearchChoices,
     ChatSearchMatch,
     chat_header_visible,
+    search_choices,
     unique_search_result,
 )
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
 from kyrin.vision.text_reader import IdentifiedWindowText
+from kyrin.vision.text_targets import find_exact_phrases
 
 
 @dataclass(slots=True)
@@ -22,8 +25,9 @@ class _Request:
     pid: int | None
     target: str | None = None
     search: bool = False
+    choices: bool = False
     finished: Event = field(default_factory=Event)
-    result: bool | ChatSearchMatch | None = None
+    result: bool | ChatSearchMatch | ChatSearchChoices | None = None
 
 
 class QtChatVerifier(QObject):
@@ -41,6 +45,7 @@ class QtChatVerifier(QObject):
         self._access = access
         self._reader = reader
         self._pending: _Request | None = None
+        self._last_choice_status = "not_requested"
         self.requested.connect(self._start)
         reader.completed.connect(self._completed)
         reader.failed.connect(self._failed)
@@ -61,9 +66,23 @@ class QtChatVerifier(QObject):
         result = self._ask(_Request(app_id, pid, target, search=True), timeout_s=18)
         return result if isinstance(result, ChatSearchMatch) else None
 
+    def find_search_choices(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchChoices | None:
+        """Read local and numbered global rows without granting a click."""
+        self._last_choice_status = "pending"
+        result = self._ask(_Request(app_id, pid, target, choices=True), timeout_s=18)
+        if self._last_choice_status == "pending":
+            self._last_choice_status = "timeout"
+        return result if isinstance(result, ChatSearchChoices) else None
+
+    def choice_status(self) -> str:
+        """A content-free reason for the latest search-choice read."""
+        return self._last_choice_status
+
     def _ask(
         self, request: _Request, *, timeout_s: float
-    ) -> bool | ChatSearchMatch | None:
+    ) -> bool | ChatSearchMatch | ChatSearchChoices | None:
         if QThread.currentThread() == self.thread():
             return None
         self.requested.emit(request)
@@ -87,6 +106,8 @@ class QtChatVerifier(QObject):
             request.finished.set()
             return
         if not available or request.pid is None:
+            if request.choices:
+                self._last_choice_status = "unavailable"
             request.finished.set()
             return
         self._pending = request
@@ -116,14 +137,35 @@ class QtChatVerifier(QObject):
         pending = self._pending
         if pending is None:
             return
-        result: bool | ChatSearchMatch | None = None
+        result: bool | ChatSearchMatch | ChatSearchChoices | None = None
         if (
             isinstance(observation, IdentifiedWindowText)
             and pending.app_id is not None
             and pending.pid is not None
             and pending.target is not None
         ):
-            if pending.search:
+            if pending.choices:
+                result = search_choices(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+                matches = find_exact_phrases(observation.result, pending.target)
+                size = observation.image_size or (0, 0)
+                positions = "_".join(
+                    f"{match.box.left}-{match.box.top}-"
+                    f"{round(100 * (match.lowest_confidence or 0))}"
+                    for match in matches[:6]
+                ) or "none"
+                detail = (
+                    f"matches_{len(matches)}_size_{size[0]}x{size[1]}_"
+                    f"at_{positions}"
+                )
+                self._last_choice_status = (
+                    f"classified_local_{len(result.local_results)}_"
+                    f"global_{len(result.global_results)}_{detail}"
+                    if isinstance(result, ChatSearchChoices)
+                    else f"unclassified_{detail}"
+                )
+            elif pending.search:
                 result = unique_search_result(
                     observation, pending.app_id, pending.pid, pending.target
                 )
@@ -134,13 +176,22 @@ class QtChatVerifier(QObject):
         self._finish(result)
 
     def _failed(self, _reason: str) -> None:
+        if self._pending is not None and self._pending.choices:
+            self._last_choice_status = {
+                "access_off": "access_off",
+                "capture_unavailable": "capture_unavailable",
+                "window_changed": "window_changed",
+                "ocr_failed": "ocr_failed",
+            }.get(_reason, "read_failed")
         self._finish(False)
 
     def _access_changed(self, granted: bool) -> None:
         if not granted:
             self._finish(False)
 
-    def _finish(self, result: bool | ChatSearchMatch | None) -> None:
+    def _finish(
+        self, result: bool | ChatSearchMatch | ChatSearchChoices | None
+    ) -> None:
         pending = self._pending
         self._pending = None
         if pending is not None:

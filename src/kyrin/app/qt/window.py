@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
 )
 
 from kyrin.actions.models import ActionFeedback, ActionNotice
+from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
+from kyrin.actions.platforms.telegram import TELEGRAM_PORTAL_HELPER
 from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
-from kyrin.app.events import ApplicationEvent, SttDeviceReady
+from kyrin.app.events import ApplicationEvent, AudioCaptureReady, SttDeviceReady
 from kyrin.app.model_library import InstalledModel, ModelLibrary
-from kyrin.app.permission_token import permission_token_path
+from kyrin.app.permission_token import permission_token_path, read_opaque_token
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.archived_memory_dialog import ArchivedMemoryDialog
@@ -62,6 +64,8 @@ from kyrin.memory.history import SqliteConversationHistory, default_history_path
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
 from kyrin.runtime.latency import SpeechActionLatency
+from kyrin.runtime.speech_sessions import SpeechSessionEnded
+from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
@@ -155,8 +159,12 @@ class ControlWindow(QWidget):
         self._whisper_gpu_server_available = whisper_gpu_server_available
         self._omnilingual_python = omnilingual_python
         self._active_stt_device: ComputeDevice | None = None
+        self._audio_ready = False
         self._pending_settings: AppSettings | None = None
+        self._pointer_grant_process: QProcess | None = None
+        self._scroll_grant_process: QProcess | None = None
         self._quitting = False
+        self._microphone_off_pending = False
         self._last_status_error: Exception | None = None
         self._translations = ui_translations
         self._startup_registration = startup_registration
@@ -312,6 +320,12 @@ class ControlWindow(QWidget):
         self.pages.addWidget(self.tts_page)
 
         self.actions_page = DesktopActionsPage(app_catalog, settings, ui_translations)
+        self.actions_page.telegram_pointer_grant_button.clicked.connect(
+            self._grant_telegram_pointer
+        )
+        self.actions_page.desktop_scroll_grant_button.clicked.connect(
+            self._grant_desktop_scroll
+        )
         for action, button in self.actions_page.power_buttons.items():
             button.clicked.connect(
                 lambda checked=False, selected=action: self._start_power(selected)
@@ -352,6 +366,9 @@ class ControlWindow(QWidget):
         self.listening_button = QPushButton()
         self.listening_button.clicked.connect(self._toggle_listening)
         buttons.addWidget(self.listening_button)
+        self.microphone_off_button = QPushButton()
+        self.microphone_off_button.clicked.connect(self._turn_microphone_off)
+        buttons.addWidget(self.microphone_off_button)
         self.quit_button = QPushButton()
         self.quit_button.clicked.connect(self._quit)
         buttons.addWidget(self.quit_button)
@@ -364,6 +381,7 @@ class ControlWindow(QWidget):
             self._show_error(load_error)
             self.apply_button.setEnabled(False)
             self.listening_button.setEnabled(False)
+            self.microphone_off_button.setEnabled(False)
         elif self._translations.load_error is not None:
             self._show_error(self._translations.load_error)
         elif startup_error is not None:
@@ -421,6 +439,7 @@ class ControlWindow(QWidget):
         self.browse_button.setText(t("browse"))
         self.apply_button.setText(t("save"))
         self.quit_button.setText(t("quit"))
+        self.microphone_off_button.setText(t("microphone_off"))
         self.import_language_button.setText(t("import_language"))
         self.save_ui_button.setText(t("save"))
         self.startup_checkbox.setText(t("start_at_login"))
@@ -704,6 +723,8 @@ class ControlWindow(QWidget):
             system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
             allowed_chat_apps=self.actions_page.selected_chat_apps(),
+            remember_telegram_pointer=self.actions_page.remember_telegram_pointer(),
+            allow_desktop_scroll=self.actions_page.allow_desktop_scroll(),
             allowed_window_apps=self.actions_page.selected_window_apps(),
             allowed_close_apps=self.actions_page.selected_close_apps(),
             app_spoken_aliases=self.actions_page.selected_spoken_aliases(),
@@ -743,6 +764,109 @@ class ControlWindow(QWidget):
             )
         )
 
+    def _grant_telegram_pointer(self) -> None:
+        if self._pointer_grant_process is not None:
+            return
+        if (
+            self._settings is None
+            or "telegram" not in self._settings.allowed_chat_apps
+            or not self._settings.remember_telegram_pointer
+            or self.actions_page.has_unsaved_changes(self._settings)
+        ):
+            self.actions_page.telegram_pointer_grant_status.setText(
+                self._translations.text("telegram_pointer_save_first")
+            )
+            return
+        process = QProcess(self)
+        process.setProgram("/usr/bin/python3")
+        process.setArguments([str(TELEGRAM_PORTAL_HELPER), "grant-control"])
+        process.finished.connect(
+            lambda code, _status: self._finish_telegram_pointer_grant(process, code)
+        )
+        process.errorOccurred.connect(
+            lambda _error: self._finish_telegram_pointer_grant(process, -1)
+        )
+        self._pointer_grant_process = process
+        self.actions_page.telegram_pointer_grant_button.setEnabled(False)
+        self.actions_page.telegram_pointer_grant_status.setText(
+            self._translations.text("telegram_pointer_grant_running")
+        )
+        process.start()
+
+    def _finish_telegram_pointer_grant(self, process: QProcess, code: int) -> None:
+        if self._pointer_grant_process is not process:
+            return
+        ready = (
+            code == 0
+            and b"CONTROL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
+            and read_opaque_token(permission_token_path("telegram-control"))
+            is not None
+        )
+        if ready:
+            for legacy_name in ("telegram-keyboard", "telegram-pointer"):
+                try:
+                    permission_token_path(legacy_name).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        self._pointer_grant_process = None
+        process.deleteLater()
+        self.actions_page.telegram_pointer_grant_button.setEnabled(
+            self.actions_page.telegram_pointer_checkbox.isChecked()
+        )
+        self.actions_page.telegram_pointer_grant_status.setText(
+            self._translations.text(
+                "telegram_pointer_grant_done"
+                if ready else "telegram_pointer_grant_failed"
+            )
+        )
+
+    def _grant_desktop_scroll(self) -> None:
+        if self._scroll_grant_process is not None:
+            return
+        if (
+            self._settings is None
+            or not self._settings.allow_desktop_scroll
+            or self.actions_page.has_unsaved_changes(self._settings)
+        ):
+            self.actions_page.desktop_scroll_grant_status.setText(
+                self._translations.text("desktop_scroll_save_first")
+            )
+            return
+        process = QProcess(self)
+        process.setProgram("/usr/bin/python3")
+        process.setArguments([str(SCROLL_HELPER), "grant"])
+        process.finished.connect(
+            lambda code, _status: self._finish_desktop_scroll_grant(process, code)
+        )
+        process.errorOccurred.connect(
+            lambda _error: self._finish_desktop_scroll_grant(process, -1)
+        )
+        self._scroll_grant_process = process
+        self.actions_page.desktop_scroll_grant_button.setEnabled(False)
+        self.actions_page.desktop_scroll_grant_status.setText(
+            self._translations.text("desktop_scroll_running")
+        )
+        process.start()
+
+    def _finish_desktop_scroll_grant(self, process: QProcess, code: int) -> None:
+        if self._scroll_grant_process is not process:
+            return
+        ready = (
+            code == 0
+            and b"SCROLL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
+            and read_opaque_token(permission_token_path("desktop-scroll")) is not None
+        )
+        self._scroll_grant_process = None
+        process.deleteLater()
+        self.actions_page.desktop_scroll_grant_button.setEnabled(
+            self.actions_page.desktop_scroll_checkbox.isChecked()
+        )
+        self.actions_page.desktop_scroll_grant_status.setText(
+            self._translations.text(
+                "desktop_scroll_done" if ready else "desktop_scroll_failed"
+            )
+        )
+
     def _apply(self) -> None:
         try:
             candidate = self._candidate_settings()
@@ -772,9 +896,33 @@ class ControlWindow(QWidget):
         ):
             try:
                 permission_token_path("telegram-keyboard").unlink(missing_ok=True)
+                permission_token_path("telegram-control").unlink(missing_ok=True)
+            except OSError as error:
+                self._show_error(error)
+        if self._settings is not None and (
+            self._settings.remember_telegram_pointer
+            and not candidate.remember_telegram_pointer
+        ):
+            try:
+                permission_token_path("telegram-pointer").unlink(missing_ok=True)
+                permission_token_path("telegram-control").unlink(missing_ok=True)
+            except OSError as error:
+                self._show_error(error)
+        if self._settings is not None and (
+            self._settings.allow_desktop_scroll
+            and not candidate.allow_desktop_scroll
+        ):
+            try:
+                permission_token_path("desktop-scroll").unlink(missing_ok=True)
             except OSError as error:
                 self._show_error(error)
         self._settings = candidate
+        self.actions_page.set_pointer_grant_ready(
+            read_opaque_token(permission_token_path("telegram-control")) is not None
+        )
+        self.actions_page.set_scroll_grant_ready(
+            read_opaque_token(permission_token_path("desktop-scroll")) is not None
+        )
         if self._screen_reader is not None and self._ocr_default_root is not None:
             self._screen_reader.set_engine(
                 selected_ocr_engine(candidate.ocr, self._ocr_default_root)
@@ -792,6 +940,7 @@ class ControlWindow(QWidget):
     def _start_current(self) -> None:
         assert self._settings is not None
         self._active_stt_device = None
+        self._audio_ready = False
         self._update_active_device_label()
         try:
             self._controller.start(self._settings)
@@ -803,15 +952,10 @@ class ControlWindow(QWidget):
         if self._settings is None:
             return
         status = self._controller.status().state
-        if status in (ApplicationState.RUNNING, ApplicationState.STARTING):
-            candidate = replace(self._settings, listening_enabled=False)
-            try:
-                self._store.save(candidate)
-            except SettingsError as error:
-                self._show_error(error)
-                return
-            self._settings = candidate
-            self._controller.request_stop()
+        if status is ApplicationState.RUNNING:
+            self._controller.set_commands_active(
+                not self._controller.commands_active()
+            )
         elif status not in (ApplicationState.STOPPING,):
             if self._has_unsaved_changes():
                 self.feedback_label.setText(self._translations.text("save_first"))
@@ -827,18 +971,54 @@ class ControlWindow(QWidget):
                 return
             self._settings = candidate
             self._start_current()
+            self._controller.set_commands_active(True)
         self._refresh()
+
+    def _turn_microphone_off(self) -> None:
+        if self._settings is None:
+            return
+        # Stop capture even if saving the preference fails.
+        self._microphone_off_pending = True
+        self._controller.request_stop()
+        candidate = replace(self._settings, listening_enabled=False)
+        try:
+            self._store.save(candidate)
+        except SettingsError as error:
+            self._microphone_off_pending = False
+            self._show_error(error)
+            return
+        self._settings = candidate
+        self._refresh()
+        self.feedback_label.setText(
+            self._translations.text(
+                "voice_off"
+                if not self._microphone_off_pending
+                else "voice_turning_off"
+            )
+        )
 
     def _refresh(self) -> None:
         self._controller.expire_system_action()
         status = self._controller.status()
-        state_text = (
-            self._translations.text(_STATE_KEYS[ApplicationState.PAUSED])
-            if status.state is ApplicationState.STOPPED
+        if (
+            self._microphone_off_pending
+            and status.state is ApplicationState.STOPPED
+        ):
+            self._microphone_off_pending = False
+            self.feedback_label.setText(self._translations.text("voice_off"))
+        state_key = _STATE_KEYS[status.state]
+        if status.state is ApplicationState.RUNNING:
+            if not self._audio_ready:
+                state_key = "state_mic_starting"
+            elif not self._controller.commands_active():
+                state_key = "state_standby"
+        elif (
+            status.state is ApplicationState.STOPPED
             and self._settings is not None
             and not self._settings.listening_enabled
-            else self._translations.text(_STATE_KEYS[status.state])
-        )
+        ):
+            state_key = "state_paused"
+        state_text = self._translations.text(state_key)
         self.status_label.setText(f"{self._translations.text('status')}: {state_text}")
         if status.error is not None and status.error is not self._last_status_error:
             self._show_error(status.error)
@@ -862,17 +1042,48 @@ class ControlWindow(QWidget):
                 application.quit()
         self.listening_button.setText(
             self._translations.text("stop")
-            if status.state in (ApplicationState.STARTING, ApplicationState.RUNNING)
+            if status.state is ApplicationState.RUNNING
+            and self._controller.commands_active()
             else self._translations.text("start")
         )
         if self._settings is not None:
             self.listening_button.setEnabled(
-                not self._quitting and status.state is not ApplicationState.STOPPING
+                not self._quitting
+                and status.state not in (
+                    ApplicationState.STOPPING, ApplicationState.STARTING
+                )
+                and (status.state is not ApplicationState.RUNNING or self._audio_ready)
+            )
+            self.microphone_off_button.setEnabled(
+                not self._quitting
+                and self._settings.listening_enabled
+                and status.state is not ApplicationState.STOPPING
             )
             self.apply_button.setEnabled(not self._quitting)
 
     def _on_event(self, event: ApplicationEvent) -> None:
         t = self._translations.text
+        if isinstance(event, VoiceModeChanged):
+            if event.mode is VoiceMode.OFF:
+                self._turn_microphone_off()
+                return
+            self._controller.set_commands_active(event.mode is VoiceMode.ACTIVE)
+            self._refresh()
+            self.feedback_label.setText(
+                t(
+                    "voice_started"
+                    if event.mode is VoiceMode.ACTIVE
+                    else "voice_standby"
+                )
+            )
+            return
+        if isinstance(event, AudioCaptureReady):
+            self._audio_ready = True
+            self._refresh()
+            return
+        if isinstance(event, SpeechSessionEnded):
+            self._audio_ready = False
+            self._refresh()
         latency = self._action_latency.observe(event)
         if latency is not None:
             speech = (
@@ -959,6 +1170,10 @@ class ControlWindow(QWidget):
         if self._pending_settings is not None:
             self._pending_settings = None
         self._quitting = True
+        if self._pointer_grant_process is not None:
+            self._pointer_grant_process.kill()
+        if self._scroll_grant_process is not None:
+            self._scroll_grant_process.kill()
         self.power_dialog.dismiss()
         self._controller.request_stop()
         self._refresh()
