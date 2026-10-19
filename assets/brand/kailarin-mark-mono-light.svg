@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-label="Kailarin black-hole K logo">
+<defs></defs>
+
+  <g id="kailarin-mark" fill="#ffffff">
+    <path d="M 733 161 C 435 195 230 352 188 573 C 140 825 283 1028 777 1076 C 446 1046 282 917 271 730 C 257 499 416 254 733 161 Z"/>
+    <path d="M 620 480 C 777 357 961 238 1142 198 C 996 326 902 440 821 558 C 762 522 697 494 620 480 Z"/>
+    <path d="M 812 710 C 905 835 1016 989 1139 1070 C 965 1033 790 931 619 810 C 699 796 768 756 812 710 Z"/>
+    <path d="M 178 760 C 306 533 801 395 1062 542"
+          fill="none" stroke="#ffffff" stroke-width="17"/>
+    <circle cx="622" cy="650" r="179" fill="none" stroke="#ffffff" stroke-width="18"/>
+    <path d="M 175 763 C 319 799 694 758 1055 555" fill="none" stroke="#ffffff"
+          stroke-width="28" stroke-linecap="round"/>
+  </g>
+
+</svg>
