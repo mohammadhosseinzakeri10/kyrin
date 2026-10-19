@@ -7,7 +7,10 @@ from threading import Thread
 from PySide6.QtCore import QObject, Signal
 
 from kyrin.app.qt.screen_access import ScreenAccess
-from kyrin.vision.ocr.backends.document import DocumentOcrEngine
+from kyrin.vision.ocr.backends.document import (
+    DocumentOcrEngine,
+    DocumentOcrTimeoutError,
+)
 from kyrin.vision.screen_capture import IdentifiedWindowImage
 
 DocumentEngineFactory = Callable[[str], DocumentOcrEngine | None]
@@ -105,6 +108,8 @@ class DocumentTextReader(QObject):
                         text,
                     ),
                 )
+            except DocumentOcrTimeoutError:
+                events.failed.emit(generation, "ocr_timeout")
             except Exception:
                 # Contain failures from the optional model and identity providers.
                 events.failed.emit(generation, "ocr_failed")

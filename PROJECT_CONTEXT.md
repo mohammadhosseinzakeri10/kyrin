@@ -20,7 +20,12 @@
 > text. The supplied screenshot reproduced this locally; a right-panel crop
 > recovered text. Surya now retries that crop only after an empty first read.
 > Each Screen Access text panel has its own Clear button. GLM-OCR and dots.mocr
-> still need live desktop validation.
+> still need live desktop validation. The owner next observed dots.mocr still
+> showing Reading on a KYRIN window. A direct local read of the supplied
+> screenshot finished in 80.1 seconds and returned 682 characters using the
+> installed CPU-only runtime. Screen Access now shows elapsed time while a
+> document model runs and distinguishes its four-minute timeout from other
+> errors. Actual live completion after the change remains to be confirmed.
 
 > **Telegram Settings row correction (2026-10-18):** The owner confirmed
 > `Go to Settings` opens the panel, then `Go to My Account` tried to reopen it

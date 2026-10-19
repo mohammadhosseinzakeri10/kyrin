@@ -234,6 +234,13 @@ ENGLISH: dict[str, str] = {
     "screen_document_clear": "Clear document text",
     "screen_document_ready": "Choose a model to compare its text output.",
     "screen_document_reading": "Reading with the document model…",
+    "screen_document_progress": (
+        "{backend} is reading… {seconds} seconds elapsed (up to 4 minutes on CPU)."
+    ),
+    "screen_document_timeout": (
+        "The document model did not finish within 4 minutes on this device. "
+        "Try another model or a faster runtime."
+    ),
     "screen_document_no_text": (
         "{backend} returned no readable text from the captured {app_id} window. "
         "Try the screen text reader above to check whether that window has "

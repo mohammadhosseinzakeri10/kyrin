@@ -19,7 +19,10 @@ from kyrin.app.qt.document_text_reader import (  # noqa: E402
 from kyrin.app.qt.screen_access import ScreenAccess  # noqa: E402
 from kyrin.app.qt.screen_access_page import ScreenAccessPage  # noqa: E402
 from kyrin.app.qt.translations import UiTranslations  # noqa: E402
-from kyrin.vision.ocr.backends.document import DocumentOcrEngine  # noqa: E402
+from kyrin.vision.ocr.backends.document import (  # noqa: E402
+    DocumentOcrEngine,
+    DocumentOcrTimeoutError,
+)
 from kyrin.vision.screen_capture import IdentifiedWindowImage  # noqa: E402
 
 
@@ -46,6 +49,13 @@ class FakeEngine:
         assert image == b"\x89PNG\r\n\x1a\npng"
         assert self.gate.wait(2)
         return "Open Telegram"
+
+
+class TimeoutEngine:
+    backend = "dots"
+
+    def read_text(self, image: bytes) -> str:
+        raise DocumentOcrTimeoutError("Document OCR process exceeded four minutes")
 
 
 def _until(app: QApplication, predicate: Callable[[], bool]) -> None:
@@ -128,6 +138,26 @@ def test_document_reader_emits_text_only_for_the_same_window(
     assert completed == [
         DocumentObservation("telegram.desktop", 123, "surya", "Open Telegram")
     ]
+    assert not reader.busy
+    reader.close()
+
+
+def test_document_reader_reports_model_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    access = FakeAccess()
+    reader = DocumentTextReader(
+        cast(ScreenAccess, access),
+        lambda _backend: cast(DocumentOcrEngine, TimeoutEngine()),
+        lambda: ("telegram.desktop", 123),
+    )
+    failures: list[str] = []
+    reader.failed.connect(failures.append)
+    assert reader.read("dots")
+    _until(app, lambda: bool(failures))
+    assert failures == ["ocr_timeout"]
     assert not reader.busy
     reader.close()
 
@@ -224,5 +254,28 @@ def test_document_empty_result_identifies_model_and_captured_window(
         assert "surya" in page.document_status.text()
         assert "kyrin.desktop" in page.document_status.text()
         assert not page.document_output.toPlainText()
+    finally:
+        page.close()
+
+
+def test_document_page_shows_elapsed_time_and_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    page = ScreenAccessPage(None, UiTranslations(tmp_path))
+    try:
+        page.document_backend.addItem("dots.mocr", "dots")
+        page._document_busy_changed(True)
+        assert page._document_timer.isActive()
+        assert "dots" in page.document_status.text()
+        assert "0 seconds" in page.document_status.text()
+        assert not page.document_backend.isEnabled()
+        page._document_busy_changed(False)
+        assert not page._document_timer.isActive()
+        assert page.document_backend.isEnabled()
+        page._document_failed("ocr_timeout")
+        assert "4 minutes" in page.document_status.text()
     finally:
         page.close()

@@ -1,13 +1,14 @@
 """Document models return text only and stay in isolated offline runtimes."""
 
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import CompletedProcess, TimeoutExpired
 from unittest.mock import patch
 
 import pytest
 
 from kyrin.vision.ocr.backends.document import (
     DocumentOcrEngine,
+    DocumentOcrTimeoutError,
     document_model_ready,
 )
 from kyrin.vision.ocr.backends.tesseract import OcrInferenceError
@@ -55,4 +56,15 @@ def test_document_adapter_rejects_incomplete_or_invalid_result(tmp_path: Path) -
         return_value=CompletedProcess([], 0, b"KYRIN_DOCUMENT_OCR_RESULT:[]\n", b""),
     ):
         with pytest.raises(OcrInferenceError):
+            engine.read_text(b"png")
+
+
+def test_document_adapter_identifies_cpu_timeout(tmp_path: Path) -> None:
+    models, runtimes = _catalog(tmp_path)
+    engine = DocumentOcrEngine("surya", models, runtimes)
+    with patch(
+        "kyrin.vision.ocr.backends.document.subprocess.run",
+        side_effect=TimeoutExpired(["python"], 240),
+    ):
+        with pytest.raises(DocumentOcrTimeoutError):
             engine.read_text(b"png")

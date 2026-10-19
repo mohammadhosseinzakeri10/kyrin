@@ -16,6 +16,10 @@ _MODELS = {
 }
 
 
+class DocumentOcrTimeoutError(OcrInferenceError):
+    """The isolated document model exceeded its bounded read time."""
+
+
 def document_model_ready(
     backend: str, candidates_root: Path, runtimes_root: Path
 ) -> bool:
@@ -77,7 +81,11 @@ class DocumentOcrEngine:
                 check=False,
                 env=environment,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except subprocess.TimeoutExpired as error:
+            raise DocumentOcrTimeoutError(
+                "Document OCR process exceeded four minutes"
+            ) from error
+        except OSError as error:
             raise OcrInferenceError("Document OCR process did not finish") from error
         if process.returncode != 0:
             raise OcrInferenceError("Document OCR inference failed")

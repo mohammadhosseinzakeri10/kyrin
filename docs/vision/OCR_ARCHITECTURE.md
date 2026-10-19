@@ -97,6 +97,12 @@ are discarded if screen access is revoked or the active window changes. No
 captured image is saved. All three read `Open Telegram` in separate offline
 synthetic-image smoke tests. This is not an accuracy or full-screen latency
 benchmark, and the document models have no verified click coordinates.
+On the owner's 2026-10-19 KYRIN screenshot, dots.mocr in the installed CPU-only
+PyTorch runtime returned 682 characters after 80.1 seconds. The UI now shows
+elapsed time during a document read and reports a distinct four-minute timeout.
+This documents CPU latency rather than treating a long run as a frozen UI.
+The project has no working document-model GPU runtime yet; a CPU/GPU choice
+must verify runtime and hardware support before it can be offered as functional.
 The document model selector is independent of the saved Local OCR model above
 it. Clicking its read button captures the window that is active at that moment;
 when the control center is in front, that is KYRIN itself. Each read-only text

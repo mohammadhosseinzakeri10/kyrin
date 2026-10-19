@@ -1,6 +1,7 @@
 """User control for screen permission and a local OCR package."""
 
 from pathlib import Path
+from time import monotonic
 
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
@@ -48,6 +49,10 @@ class ScreenAccessPage(QWidget):
         self._document_reader = document_reader
         self._translations = translations
         self._ocr_default_root = ocr_default_root
+        self._document_started_at: float | None = None
+        self._document_timer = QTimer(self)
+        self._document_timer.setInterval(1000)
+        self._document_timer.timeout.connect(self._update_document_progress)
         layout, self.scroll_area = scrollable_page_layout(self)
         self.heading = QLabel()
         self.heading.setObjectName("PageTitle")
@@ -379,12 +384,32 @@ class ScreenAccessPage(QWidget):
             "ocr_unavailable": "screen_ocr_unavailable",
             "capture_unavailable": "screen_capture_unavailable",
             "window_changed": "screen_window_changed",
+            "ocr_timeout": "screen_document_timeout",
         }.get(reason, "screen_ocr_failed")
         self.document_status.setText(self._translations.text(key))
 
-    def _document_busy_changed(self, _busy: bool) -> None:
+    def _document_busy_changed(self, busy: bool) -> None:
         self._update_document_button()
-        self.clear_document_button.setEnabled(not _busy)
+        self.document_backend.setEnabled(not busy)
+        self.clear_document_button.setEnabled(not busy)
+        if busy:
+            self._document_started_at = monotonic()
+            self._document_timer.start()
+            self._update_document_progress()
+        else:
+            self._document_timer.stop()
+            self._document_started_at = None
+
+    def _update_document_progress(self) -> None:
+        if self._document_started_at is None:
+            return
+        backend = self.document_backend.currentData()
+        self.document_status.setText(
+            self._translations.text("screen_document_progress").format(
+                backend=backend if isinstance(backend, str) else "OCR",
+                seconds=int(monotonic() - self._document_started_at),
+            )
+        )
 
     def _update_document_button(self) -> None:
         self.document_button.setEnabled(
