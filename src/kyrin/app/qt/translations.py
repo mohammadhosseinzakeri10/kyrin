@@ -202,6 +202,7 @@ ENGLISH: dict[str, str] = {
         "if another process owns its session name."
     ),
     "screen_read": "Read text in the active window",
+    "screen_read_clear": "Clear screen text",
     "screen_ocr_model": "Local OCR model",
     "screen_ocr_browse": "Browse OCR folder…",
     "screen_ocr_hint": (
@@ -224,12 +225,20 @@ ENGLISH: dict[str, str] = {
     ),
     "screen_document_heading": "Experimental document OCR",
     "screen_document_hint": (
-        "Read the active window with a separate offline model. This can take minutes "
-        "on CPU. Results are text only and never used to click or run commands."
+        "Read the active window with a separate offline model. The Local OCR model "
+        "and Save Changes do not affect this choice. Clicking Read captures the "
+        "KYRIN window if it is in front. This can take minutes on CPU. Results "
+        "are text only and never used to click or run commands."
     ),
     "screen_document_read": "Read with selected document model",
+    "screen_document_clear": "Clear document text",
     "screen_document_ready": "Choose a model to compare its text output.",
     "screen_document_reading": "Reading with the document model…",
+    "screen_document_no_text": (
+        "{backend} returned no readable text from the captured {app_id} window. "
+        "Try the screen text reader above to check whether that window has "
+        "readable text."
+    ),
     "screen_document_result": "{backend} read the active {app_id} window.",
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",

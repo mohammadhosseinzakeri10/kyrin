@@ -1,5 +1,7 @@
 """Isolated CPU inference for optional document models; reads a PNG from stdin."""
 
+from __future__ import annotations
+
 import importlib.machinery
 import io
 import json
@@ -8,8 +10,10 @@ import sys
 import types
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PIL import Image  # type: ignore[import-not-found]
+if TYPE_CHECKING:
+    from PIL import Image  # type: ignore[import-not-found]
 
 _RESULT_PREFIX = "KYRIN_DOCUMENT_OCR_RESULT:"
 
@@ -34,20 +38,30 @@ def _surya(model_path: Path, image: Image.Image) -> str:
     from transformers import pipeline  # type: ignore[import-not-found]
 
     reader = pipeline("image-text-to-text", model=str(model_path), device="cpu")
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": "OCR this image to HTML."},
-            ],
-        }
-    ]
-    generated = reader(text=messages, max_new_tokens=1024)
-    html = generated[0]["generated_text"][-1]["content"]
-    parser = _PlainText()
-    parser.feed(html)
-    return "\n".join(parser.parts)
+
+    def recognize(frame: Image.Image) -> str:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": frame},
+                    {"type": "text", "text": "OCR this image to HTML."},
+                ],
+            }
+        ]
+        generated = reader(text=messages, max_new_tokens=1024)
+        html = generated[0]["generated_text"][-1]["content"]
+        parser = _PlainText()
+        parser.feed(html)
+        return "\n".join(parser.parts)
+
+    text = recognize(image)
+    if text.strip() or image.width < 800 or image.height < 400:
+        return text
+    # Full desktop UI frames can produce empty page HTML even when the main
+    # panel contains readable text. Retry once without the left navigation.
+    main_panel = image.crop((int(image.width * 0.15), 0, image.width, image.height))
+    return recognize(main_panel)
 
 
 def _glm(model_path: Path, image: Image.Image) -> str:
@@ -147,6 +161,8 @@ def _dots(model_path: Path, image: Image.Image) -> str:
 
 
 def main() -> None:
+    from PIL import Image
+
     if len(sys.argv) != 3 or sys.argv[1] not in {"surya", "glm", "dots"}:
         raise SystemExit(2)
     _memory_limit()

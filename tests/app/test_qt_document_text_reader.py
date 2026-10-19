@@ -176,3 +176,53 @@ def test_page_lists_complete_document_models_separately(
     ]
     assert not page.document_button.isEnabled()
     page.close()
+
+
+def test_screen_page_clears_each_read_result_independently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    translations = UiTranslations(tmp_path)
+    page = ScreenAccessPage(None, translations)
+    try:
+        page.read_output.setPlainText("screen result")
+        page.document_output.setPlainText("document result")
+        page.clear_read_button.click()
+        assert not page.read_output.toPlainText()
+        assert page.document_output.toPlainText() == "document result"
+        assert page.read_status.text() == translations.text("screen_read_hint")
+        page.clear_document_button.click()
+        assert not page.document_output.toPlainText()
+        assert page.document_status.text() == translations.text(
+            "screen_document_ready"
+        )
+        page._read_busy_changed(True)
+        page._document_busy_changed(True)
+        assert not page.clear_read_button.isEnabled()
+        assert not page.clear_document_button.isEnabled()
+        page._read_busy_changed(False)
+        page._document_busy_changed(False)
+        assert page.clear_read_button.isEnabled()
+        assert page.clear_document_button.isEnabled()
+    finally:
+        page.close()
+
+
+def test_document_empty_result_identifies_model_and_captured_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    page = ScreenAccessPage(None, UiTranslations(tmp_path))
+    try:
+        page._document_completed(
+            DocumentObservation("kyrin.desktop", 123, "surya", "")
+        )
+        assert "surya" in page.document_status.text()
+        assert "kyrin.desktop" in page.document_status.text()
+        assert not page.document_output.toPlainText()
+    finally:
+        page.close()

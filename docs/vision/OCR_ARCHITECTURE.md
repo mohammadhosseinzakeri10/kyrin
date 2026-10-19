@@ -97,6 +97,19 @@ are discarded if screen access is revoked or the active window changes. No
 captured image is saved. All three read `Open Telegram` in separate offline
 synthetic-image smoke tests. This is not an accuracy or full-screen latency
 benchmark, and the document models have no verified click coordinates.
+The document model selector is independent of the saved Local OCR model above
+it. Clicking its read button captures the window that is active at that moment;
+when the control center is in front, that is KYRIN itself. Each read-only text
+panel has its own Clear button, which removes displayed text and resets the
+panel's status without changing the selected model or screen permission. A
+blank document-model result now names the backend and captured application so
+it can be distinguished from a capture or permission failure. On 2026-10-19,
+the owner reported a blank Surya result while the standard screen OCR read
+text. The supplied full-window screenshot reproduced this: Surya returned no
+text for the full frame but read the central panel after a left-navigation
+crop. Surya now retries once on the right 85% of sufficiently wide, tall
+windows only when its first result is empty. This is a bounded text-only
+recovery path; it does not change action targeting or other document models.
 Multilingual model acquisition and a measured CPU/GPU benchmark remain
 separate product work. Model file size does
 not establish RAM or VRAM requirements; those must be measured with the chosen

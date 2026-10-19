@@ -146,6 +146,9 @@ class ScreenAccessPage(QWidget):
         self.read_output.setReadOnly(True)
         self.read_output.setMaximumBlockCount(40)
         layout.addWidget(self.read_output)
+        self.clear_read_button = QPushButton()
+        self.clear_read_button.clicked.connect(self._clear_read_output)
+        layout.addWidget(self.clear_read_button)
         layout.addSpacing(20)
         self.document_heading = QLabel()
         layout.addWidget(self.document_heading)
@@ -177,6 +180,9 @@ class ScreenAccessPage(QWidget):
         self.document_output.setMinimumHeight(180)
         self.document_output.setMaximumBlockCount(100)
         layout.addWidget(self.document_output)
+        self.clear_document_button = QPushButton()
+        self.clear_document_button.clicked.connect(self._clear_document_output)
+        layout.addWidget(self.clear_document_button)
         layout.addStretch()
         self.enabled_checkbox.toggled.connect(self._toggled)
         if access is not None:
@@ -207,9 +213,11 @@ class ScreenAccessPage(QWidget):
         self.ocr_browse.setText(text("screen_ocr_browse"))
         self.ocr_hint.setText(text("screen_ocr_hint"))
         self.read_button.setText(text("screen_read"))
+        self.clear_read_button.setText(text("screen_read_clear"))
         self.document_heading.setText(text("screen_document_heading"))
         self.document_hint.setText(text("screen_document_hint"))
         self.document_button.setText(text("screen_document_read"))
+        self.clear_document_button.setText(text("screen_document_clear"))
         if not self.document_output.toPlainText():
             self.document_status.setText(text("screen_document_ready"))
         if self._reader is None or not self._reader.available:
@@ -293,6 +301,14 @@ class ScreenAccessPage(QWidget):
         self.read_status.setText(self._translations.text("screen_reading"))
         reader.read()
 
+    def _clear_read_output(self) -> None:
+        self.read_output.clear()
+        self.read_status.setText(self._translations.text("screen_read_hint"))
+
+    def _clear_document_output(self) -> None:
+        self.document_output.clear()
+        self.document_status.setText(self._translations.text("screen_document_ready"))
+
     def _read_completed(self, observation: object) -> None:
         if not isinstance(observation, IdentifiedWindowText):
             self._read_failed("ocr_failed")
@@ -325,6 +341,7 @@ class ScreenAccessPage(QWidget):
 
     def _read_busy_changed(self, _busy: bool) -> None:
         self._update_read_button()
+        self.clear_read_button.setEnabled(not _busy)
 
     def _read_document(self) -> None:
         reader = self._document_reader
@@ -340,7 +357,12 @@ class ScreenAccessPage(QWidget):
             self._document_failed("ocr_failed")
             return
         if not observation.text.strip():
-            self.document_status.setText(self._translations.text("screen_no_text"))
+            self.document_status.setText(
+                self._translations.text("screen_document_no_text").format(
+                    backend=observation.backend,
+                    app_id=observation.app_id,
+                )
+            )
             return
         self.document_output.setPlainText(observation.text[:8000])
         self.document_status.setText(
@@ -362,6 +384,7 @@ class ScreenAccessPage(QWidget):
 
     def _document_busy_changed(self, _busy: bool) -> None:
         self._update_document_button()
+        self.clear_document_button.setEnabled(not _busy)
 
     def _update_document_button(self) -> None:
         self.document_button.setEnabled(

@@ -15,7 +15,12 @@
 > All four Paddle models ran offline on synthetic images. Surya, GLM-OCR, and
 > dots.mocr now have separate text-only experimental backends; they do not
 > participate in screen action targeting.
-> The owner has not yet tested the new choices in the live desktop.
+> The owner live-tested Surya on the KYRIN control window: a full-window read
+> sometimes returned no text, while the standard Tesseract screen reader found
+> text. The supplied screenshot reproduced this locally; a right-panel crop
+> recovered text. Surya now retries that crop only after an empty first read.
+> Each Screen Access text panel has its own Clear button. GLM-OCR and dots.mocr
+> still need live desktop validation.
 
 > **Telegram Settings row correction (2026-10-18):** The owner confirmed
 > `Go to Settings` opens the panel, then `Go to My Account` tried to reopen it
