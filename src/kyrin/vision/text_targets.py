@@ -11,7 +11,7 @@ from kyrin.vision.ocr.contracts import OcrResult, RecognizedText, TextBox
 def _word(value: str) -> str:
     normalized = fold_case(value)
     normalized = normalized.replace("ي", "ی").replace("ك", "ک").replace("‌", "")
-    return normalized.strip(" \t\r\n.,:;!?()[]{}«»\"'’")
+    return normalized.strip(" \t\r\n.,:;!?()[]{}«»\"'‘’")
 
 
 def _same_line(left: RecognizedText, right: RecognizedText) -> bool:

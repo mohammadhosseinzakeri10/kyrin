@@ -11,13 +11,14 @@ from typing import cast
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Signal  # noqa: E402
+from PySide6.QtGui import QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from kyrin.app.qt.ocr_setup import installed_ocr_engine, selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
-from kyrin.app.qt.screen_text_reader import ScreenTextReader
+from kyrin.app.qt.screen_text_reader import ScreenTextReader, _crop_png, _left_menu_png
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import OcrSelection
 from kyrin.vision.ocr.contracts import (
@@ -57,10 +58,15 @@ class FakeAccess(QObject):
 
 class FakeOcr:
     def __init__(
-        self, wait: Event | None = None, *, expected_language: str = "eng"
+        self,
+        wait: Event | None = None,
+        *,
+        expected_language: str = "eng",
+        expected_image: bytes = _IMAGE.image,
     ) -> None:
         self.wait = wait
         self.expected_language = expected_language
+        self.expected_image = expected_image
         self.started = Event()
         self.used_worker = False
 
@@ -75,7 +81,7 @@ class FakeOcr:
         self.started.set()
         if self.wait is not None:
             assert self.wait.wait(2)
-        assert image == _IMAGE.image
+        assert image == self.expected_image
         assert options.language == self.expected_language
         return OcrResult(
             (RecognizedText("Telegram", TextBox(1, 2, 30, 10), 0.9),),
@@ -89,6 +95,16 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> QApplication:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     existing = QApplication.instance()
     return existing if isinstance(existing, QApplication) else QApplication([])
+
+
+def _valid_png() -> bytes:
+    image = QImage(1000, 800, QImage.Format.Format_RGB888)
+    image.fill(0x202020)
+    output = QByteArray()
+    buffer = QBuffer(output)
+    assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert image.save(buffer, "PNG")
+    return bytes(output)
 
 
 def _until(app: QApplication, predicate: Callable[[], bool]) -> None:
@@ -173,6 +189,64 @@ def test_one_read_can_override_default_ocr_language(
         assert reader.read(OcrOptions("fas+eng"))
         _until(app, lambda: bool(results))
         assert engine.used_worker
+    finally:
+        reader.close()
+
+
+def test_menu_region_ocr_keeps_full_window_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    image = _valid_png()
+    cropped = _left_menu_png(image)
+    assert cropped is not None
+    access = FakeAccess()
+    access.image = IdentifiedWindowImage(
+        _IMAGE.platform_app_id, _IMAGE.process_id, image
+    )
+    engine = FakeOcr(expected_image=cropped)
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        engine,
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    results: list[IdentifiedWindowText] = []
+    reader.completed.connect(results.append)
+    try:
+        assert reader.read(region="left_menu")
+        _until(app, lambda: bool(results))
+        assert results[0].image_size == (1000, 800)
+        assert engine.used_worker
+    finally:
+        reader.close()
+
+
+def test_settings_region_ocr_restores_window_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    image = _valid_png()
+    cropped = _crop_png(image, "settings_pane")
+    assert cropped is not None
+    cropped_image, left = cropped
+    access = FakeAccess()
+    access.image = IdentifiedWindowImage(
+        _IMAGE.platform_app_id, _IMAGE.process_id, image
+    )
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        FakeOcr(expected_image=cropped_image),
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    results: list[IdentifiedWindowText] = []
+    reader.completed.connect(results.append)
+    try:
+        assert reader.read(region="settings_pane")
+        _until(app, lambda: bool(results))
+        assert results[0].image_size == (1000, 800)
+        assert results[0].result.spans[0].box.left == left + 1
     finally:
         reader.close()
 
@@ -276,3 +350,22 @@ def test_only_installed_local_ocr_runtime_is_discovered(tmp_path: Path) -> None:
     assert selected_ocr_engine(None, root) is not None
     assert selected_ocr_engine(OcrSelection("tesseract", root), tmp_path) is not None
     assert selected_ocr_engine(OcrSelection("unknown", root), tmp_path) is None
+
+
+def test_selected_tesseract_language_pack_uses_installed_executable(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "installed"
+    root.mkdir()
+    executable = root / "tesseract-local"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o700)
+    tessdata = tmp_path / "best"
+    tessdata.mkdir()
+    for language in ("eng", "fas"):
+        (tessdata / f"{language}.traineddata").write_bytes(b"model")
+
+    engine = selected_ocr_engine(OcrSelection("tesseract", tessdata), root)
+
+    assert engine is not None
+    assert engine.capabilities.supported_languages == frozenset({"eng", "fas"})

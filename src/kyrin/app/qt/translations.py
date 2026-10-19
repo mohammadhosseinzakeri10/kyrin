@@ -205,8 +205,9 @@ ENGLISH: dict[str, str] = {
     "screen_ocr_model": "Local OCR model",
     "screen_ocr_browse": "Browse OCR folder…",
     "screen_ocr_hint": (
-        "Choose a supported local Tesseract package. OCR runs on CPU; "
-        "KYRIN does not download models. Save changes to switch."
+        "Choose a ready local Tesseract or PaddleOCR model, then save to switch. "
+        "PaddleOCR-VL reads text and positions but has no confidence score; "
+        "screen actions that require confidence will stop safely."
     ),
     "screen_read_hint": (
         "Read a snapshot when you need it. Visible text stays in memory."
@@ -221,6 +222,15 @@ ENGLISH: dict[str, str] = {
     "screen_read_truncated": (
         "Snapshot from {app_id} (process {pid}); showing the first 2,000 characters."
     ),
+    "screen_document_heading": "Experimental document OCR",
+    "screen_document_hint": (
+        "Read the active window with a separate offline model. This can take minutes "
+        "on CPU. Results are text only and never used to click or run commands."
+    ),
+    "screen_document_read": "Read with selected document model",
+    "screen_document_ready": "Choose a model to compare its text output.",
+    "screen_document_reading": "Reading with the document model…",
+    "screen_document_result": "{backend} read the active {app_id} window.",
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",

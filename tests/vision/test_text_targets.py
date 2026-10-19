@@ -26,6 +26,15 @@ def test_duplicate_names_are_not_silently_reduced_to_one_match() -> None:
     assert len(find_exact_phrases(result, "Ali")) == 2
 
 
+def test_ocr_leading_curly_quote_does_not_hide_exact_label() -> None:
+    result = _result(
+        _span("‘Speakers", 10, 20),
+        _span("and", 62, 20),
+        _span("Camera", 114, 20),
+    )
+    assert len(find_exact_phrases(result, "Speakers and Camera")) == 1
+
+
 def test_different_or_distant_words_do_not_match() -> None:
     result = _result(_span("Saved", 10, 20), _span("Messages", 300, 20))
     assert find_exact_phrases(result, "Saved Messages") == ()

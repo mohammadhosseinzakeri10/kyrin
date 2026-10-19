@@ -226,6 +226,35 @@ def test_screen_page_selects_local_ocr_package_without_installing_it(
         app.processEvents()
 
 
+def test_screen_page_offers_downloaded_tesseract_packs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    candidates = tmp_path / "candidates"
+    for name in ("fast", "best"):
+        folder = candidates / "tesseract" / name
+        folder.mkdir(parents=True)
+        for language in ("eng", "fas"):
+            (folder / f"{language}.traineddata").write_bytes(b"model")
+    page = ScreenAccessPage(
+        None,
+        UiTranslations(tmp_path),
+        ocr_default_root=tmp_path / "installed",
+        ocr_candidates_root=candidates,
+    )
+    try:
+        assert page.ocr_backend.count() == 3
+        page.ocr_backend.setCurrentIndex(2)
+        assert page.selection() == OcrSelection(
+            "tesseract", candidates / "tesseract" / "best"
+        )
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
 def test_remembered_screen_token_survives_app_close(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

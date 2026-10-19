@@ -36,6 +36,7 @@ from kyrin.app.qt.audio_page import AudioPage
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.command_model_page import CommandModelPage
 from kyrin.app.qt.dashboard_page import DashboardPage
+from kyrin.app.qt.document_text_reader import DocumentTextReader
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.power_dialog import PowerConfirmationDialog
@@ -145,7 +146,12 @@ class ControlWindow(QWidget):
         app_catalog: AppPickerCatalog | None = None,
         screen_access: ScreenAccess | None = None,
         screen_reader: ScreenTextReader | None = None,
+        document_reader: DocumentTextReader | None = None,
         ocr_default_root: Path | None = None,
+        ocr_candidates_root: Path | None = None,
+        paddle_python: Path | None = None,
+        paddle_vl_python: Path | None = None,
+        document_runtimes_root: Path | None = None,
         startup_registration: StartupRegistration | None = None,
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
@@ -171,6 +177,9 @@ class ControlWindow(QWidget):
         self._configure_tts = configure_tts
         self._screen_reader = screen_reader
         self._ocr_default_root = ocr_default_root
+        self._ocr_candidates_root = ocr_candidates_root
+        self._paddle_python = paddle_python
+        self._paddle_vl_python = paddle_vl_python
         self._labels: dict[str, QLabel] = {}
         self._action_latency = SpeechActionLatency()
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
@@ -338,6 +347,11 @@ class ControlWindow(QWidget):
             ui_translations,
             screen_reader,
             ocr_default_root=ocr_default_root,
+            ocr_candidates_root=ocr_candidates_root,
+            paddle_python=paddle_python,
+            paddle_vl_python=paddle_vl_python,
+            document_reader=document_reader,
+            document_runtimes_root=document_runtimes_root,
             ocr_selection=settings.ocr if settings is not None else None,
         )
         self.pages.addWidget(self.screen_access_page)
@@ -700,7 +714,13 @@ class ControlWindow(QWidget):
         ocr = self.screen_access_page.selection()
         if ocr is not None and (
             self._ocr_default_root is None
-            or selected_ocr_engine(ocr, self._ocr_default_root) is None
+            or selected_ocr_engine(
+                ocr,
+                self._ocr_default_root,
+                candidates_root=self._ocr_candidates_root,
+                paddle_python=self._paddle_python,
+                paddle_vl_python=self._paddle_vl_python,
+            ) is None
         ):
             raise ValueError(self._translations.text("screen_ocr_unavailable"))
         actions_enabled = self.actions_page.enabled_checkbox.isChecked()
@@ -926,7 +946,13 @@ class ControlWindow(QWidget):
         )
         if self._screen_reader is not None and self._ocr_default_root is not None:
             self._screen_reader.set_engine(
-                selected_ocr_engine(candidate.ocr, self._ocr_default_root)
+                selected_ocr_engine(
+                    candidate.ocr,
+                    self._ocr_default_root,
+                    candidates_root=self._ocr_candidates_root,
+                    paddle_python=self._paddle_python,
+                    paddle_vl_python=self._paddle_vl_python,
+                )
             )
             self.screen_access_page.translate()
         if self._configure_tts is not None:

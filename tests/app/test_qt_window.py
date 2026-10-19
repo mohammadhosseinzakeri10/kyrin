@@ -28,6 +28,7 @@ from kyrin.app.events import AudioCaptureReady, SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
 from kyrin.app.permission_token import permission_token_path, save_opaque_token
 from kyrin.app.qt.model_library_page import ModelLibraryPage
+from kyrin.app.qt.screen_access_page import ScreenAccessPage
 from kyrin.app.qt.translations import ENGLISH, UiPreferences, UiTranslations
 from kyrin.app.qt.window import ControlWindow, EventBridge
 from kyrin.app.settings import (
@@ -423,6 +424,139 @@ def test_screen_page_saves_a_compatible_ocr_package(
     finally:
         window._timer.stop()
         window.deleteLater()
+        application.processEvents()
+
+
+def test_screen_page_saves_a_downloaded_tesseract_pack(
+    application: QApplication, tmp_path: Path
+) -> None:
+    root = tmp_path / "installed-ocr"
+    root.mkdir()
+    executable = root / "tesseract-local"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o700)
+    candidates = tmp_path / "candidates"
+    fast = candidates / "tesseract" / "fast"
+    fast.mkdir(parents=True)
+    for language in ("eng", "fas"):
+        (fast / f"{language}.traineddata").write_bytes(b"model")
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path),
+        ocr_default_root=root,
+        ocr_candidates_root=candidates,
+    )
+    try:
+        window.screen_access_page.ocr_backend.setCurrentIndex(1)
+        window.apply_button.click()
+        assert store.load().ocr == OcrSelection("tesseract", fast)
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_screen_page_saves_a_downloaded_paddle_pair(
+    application: QApplication, tmp_path: Path
+) -> None:
+    candidates = tmp_path / "candidates"
+    model = candidates / "paddleocr" / "v6-small"
+    for part in ("det", "rec"):
+        folder = model / part
+        folder.mkdir(parents=True)
+        (folder / "inference.json").write_text("{}", encoding="utf-8")
+        (folder / "inference.pdiparams").write_bytes(b"weights")
+    runtime_python = tmp_path / "runtime/bin/python"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime_python.chmod(0o700)
+    package = tmp_path / "runtime/lib/python3.12/site-packages/paddleocr"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    settings = AppSettings(listening_enabled=False)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    window = ControlWindow(
+        settings,
+        store,
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path),
+        ocr_default_root=tmp_path / "default-ocr",
+        ocr_candidates_root=candidates,
+        paddle_python=runtime_python,
+    )
+    try:
+        choice = window.screen_access_page.ocr_backend
+        index = next(
+            (
+                i
+                for i in range(choice.count())
+                if choice.itemData(i) == ("paddle_v6_small", model)
+            ),
+            -1,
+        )
+        assert index >= 0
+        choice.setCurrentIndex(index)
+        window.apply_button.click()
+        assert store.load().ocr == OcrSelection("paddle_v6_small", model)
+        restored = ScreenAccessPage(
+            None,
+            UiTranslations(tmp_path),
+            ocr_default_root=tmp_path / "default-ocr",
+            ocr_candidates_root=candidates,
+            paddle_python=runtime_python,
+            ocr_selection=store.load().ocr,
+        )
+        try:
+            assert restored.ocr_backend.currentData() == ("paddle_v6_small", model)
+        finally:
+            restored.deleteLater()
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_screen_page_lists_paddle_vl_for_reading(
+    application: QApplication, tmp_path: Path
+) -> None:
+    model = tmp_path / "candidates/paddleocr/vl-1.6"
+    model.mkdir(parents=True)
+    for name in ("config.json", "model.safetensors", "tokenizer.json"):
+        (model / name).write_bytes(b"model")
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n", encoding="utf-8")
+    python.chmod(0o700)
+    for package in ("paddleocr", "scipy"):
+        folder = runtime / "lib/python3.12/site-packages" / package
+        folder.mkdir(parents=True)
+        (folder / "__init__.py").write_text("", encoding="utf-8")
+    page = ScreenAccessPage(
+        None,
+        UiTranslations(tmp_path),
+        ocr_default_root=tmp_path / "default-ocr",
+        ocr_candidates_root=tmp_path / "candidates",
+        paddle_vl_python=python,
+        ocr_selection=OcrSelection("paddle_vl16", model),
+    )
+    try:
+        assert page.ocr_backend.currentData() == ("paddle_vl16", model)
+        assert "read only" in page.ocr_backend.currentText()
+    finally:
+        page.deleteLater()
         application.processEvents()
 
 

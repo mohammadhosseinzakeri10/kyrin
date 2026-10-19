@@ -15,11 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from kyrin.app.qt.document_text_reader import DocumentObservation, DocumentTextReader
+from kyrin.app.qt.ocr_setup import PADDLE_CHOICES, PADDLE_VL_CHOICE
 from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import OcrSelection
+from kyrin.vision.ocr.backends.document import document_model_ready
+from kyrin.vision.ocr.backends.paddle import paddle_model_ready
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 
@@ -31,11 +35,17 @@ class ScreenAccessPage(QWidget):
         reader: ScreenTextReader | None = None,
         *,
         ocr_default_root: Path | None = None,
+        ocr_candidates_root: Path | None = None,
+        paddle_python: Path | None = None,
+        paddle_vl_python: Path | None = None,
+        document_reader: DocumentTextReader | None = None,
+        document_runtimes_root: Path | None = None,
         ocr_selection: OcrSelection | None = None,
     ) -> None:
         super().__init__()
         self._access = access
         self._reader = reader
+        self._document_reader = document_reader
         self._translations = translations
         self._ocr_default_root = ocr_default_root
         layout, self.scroll_area = scrollable_page_layout(self)
@@ -57,12 +67,51 @@ class ScreenAccessPage(QWidget):
         self.ocr_label = QLabel()
         layout.addWidget(self.ocr_label)
         self.ocr_backend = QComboBox()
-        self.ocr_backend.addItem("Tesseract (CPU)", "tesseract")
-        if ocr_selection is not None and ocr_selection.backend != "tesseract":
-            self.ocr_backend.addItem(
-                f"{ocr_selection.backend} (unavailable)", ocr_selection.backend
+        self.ocr_backend.addItem(
+            "Tesseract · installed (CPU)", ("tesseract", ocr_default_root)
+        )
+        if ocr_candidates_root is not None:
+            for name, label in (
+                ("fast", "Tesseract Fast · English + Persian (CPU)"),
+                ("best", "Tesseract Best · English + Persian (CPU)"),
+            ):
+                tessdata = ocr_candidates_root / "tesseract" / name
+                if all(
+                    (tessdata / f"{code}.traineddata").is_file()
+                    for code in ("eng", "fas")
+                ):
+                    self.ocr_backend.addItem(label, ("tesseract", tessdata))
+            if paddle_python is not None:
+                for backend, label, folder in PADDLE_CHOICES:
+                    model = ocr_candidates_root / "paddleocr" / folder
+                    if paddle_model_ready(backend, model, paddle_python):
+                        self.ocr_backend.addItem(label, (backend, model))
+            if paddle_vl_python is not None:
+                backend, label, folder = PADDLE_VL_CHOICE
+                model = ocr_candidates_root / "paddleocr" / folder
+                if paddle_model_ready(backend, model, paddle_vl_python):
+                    self.ocr_backend.addItem(label, (backend, model))
+        if ocr_selection is not None:
+            selected_data = (ocr_selection.backend, ocr_selection.model_path)
+            index = next(
+                (
+                    item
+                    for item in range(self.ocr_backend.count())
+                    if self.ocr_backend.itemData(item) == selected_data
+                ),
+                -1,
             )
-            self.ocr_backend.setCurrentIndex(1)
+            if index < 0:
+                label = (
+                    "Custom Tesseract folder"
+                    if ocr_selection.backend == "tesseract"
+                    else f"{ocr_selection.backend} (unavailable)"
+                )
+                self.ocr_backend.addItem(
+                    label, (ocr_selection.backend, ocr_selection.model_path)
+                )
+                index = self.ocr_backend.count() - 1
+            self.ocr_backend.setCurrentIndex(index)
         self.ocr_backend.setAccessibleName("OCR engine")
         layout.addWidget(self.ocr_backend)
         ocr_row = QHBoxLayout()
@@ -71,9 +120,12 @@ class ScreenAccessPage(QWidget):
         self.ocr_path.setText(
             str(ocr_selection.model_path)
             if ocr_selection is not None
-            else str(ocr_default_root) if ocr_default_root is not None else ""
+            else str(ocr_default_root)
+            if ocr_default_root is not None
+            else ""
         )
         ocr_row.addWidget(self.ocr_path)
+        self.ocr_backend.currentIndexChanged.connect(self._ocr_choice_changed)
         self.ocr_browse = QPushButton()
         self.ocr_browse.clicked.connect(self._browse_ocr)
         ocr_row.addWidget(self.ocr_browse)
@@ -94,6 +146,37 @@ class ScreenAccessPage(QWidget):
         self.read_output.setReadOnly(True)
         self.read_output.setMaximumBlockCount(40)
         layout.addWidget(self.read_output)
+        layout.addSpacing(20)
+        self.document_heading = QLabel()
+        layout.addWidget(self.document_heading)
+        self.document_hint = QLabel()
+        self.document_hint.setWordWrap(True)
+        layout.addWidget(self.document_hint)
+        self.document_backend = QComboBox()
+        self.document_backend.setAccessibleName("Document OCR model")
+        if ocr_candidates_root is not None and document_runtimes_root is not None:
+            for backend, label in (
+                ("surya", "Surya OCR 2"),
+                ("glm", "GLM-OCR"),
+                ("dots", "dots.mocr"),
+            ):
+                if document_model_ready(
+                    backend, ocr_candidates_root, document_runtimes_root
+                ):
+                    self.document_backend.addItem(label, backend)
+        layout.addWidget(self.document_backend)
+        self.document_button = QPushButton()
+        self.document_button.clicked.connect(self._read_document)
+        layout.addWidget(self.document_button)
+        self.document_status = QLabel()
+        self.document_status.setWordWrap(True)
+        self.document_status.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.document_status)
+        self.document_output = QPlainTextEdit()
+        self.document_output.setReadOnly(True)
+        self.document_output.setMinimumHeight(180)
+        self.document_output.setMaximumBlockCount(100)
+        layout.addWidget(self.document_output)
         layout.addStretch()
         self.enabled_checkbox.toggled.connect(self._toggled)
         if access is not None:
@@ -103,6 +186,10 @@ class ScreenAccessPage(QWidget):
             reader.completed.connect(self._read_completed)
             reader.failed.connect(self._read_failed)
             reader.busy_changed.connect(self._read_busy_changed)
+        if document_reader is not None:
+            document_reader.completed.connect(self._document_completed)
+            document_reader.failed.connect(self._document_failed)
+            document_reader.busy_changed.connect(self._document_busy_changed)
         self.translate()
         self.enabled_checkbox.setEnabled(access is not None and access.available)
         self._changed(access.granted if access is not None else False)
@@ -120,6 +207,11 @@ class ScreenAccessPage(QWidget):
         self.ocr_browse.setText(text("screen_ocr_browse"))
         self.ocr_hint.setText(text("screen_ocr_hint"))
         self.read_button.setText(text("screen_read"))
+        self.document_heading.setText(text("screen_document_heading"))
+        self.document_hint.setText(text("screen_document_hint"))
+        self.document_button.setText(text("screen_document_read"))
+        if not self.document_output.toPlainText():
+            self.document_status.setText(text("screen_document_ready"))
         if self._reader is None or not self._reader.available:
             self.read_status.setText(text("screen_ocr_unavailable"))
         elif not self.read_output.toPlainText():
@@ -138,14 +230,23 @@ class ScreenAccessPage(QWidget):
         if directory:
             self.ocr_path.setText(directory)
 
+    def _ocr_choice_changed(self, _index: int) -> None:
+        _, path = self.ocr_backend.currentData()
+        self.ocr_path.setText(str(path) if path is not None else "")
+
     def selection(self) -> OcrSelection | None:
         path = self.ocr_path.text().strip()
         if not path:
             return None
         selected = Path(path)
-        if self._ocr_default_root is not None and selected == self._ocr_default_root:
+        backend, _ = self.ocr_backend.currentData()
+        if (
+            backend == "tesseract"
+            and self._ocr_default_root is not None
+            and selected == self._ocr_default_root
+        ):
             return None
-        return OcrSelection(str(self.ocr_backend.currentData()), selected)
+        return OcrSelection(backend, selected)
 
     def has_unsaved_changes(self, current: OcrSelection | None) -> bool:
         return self.selection() != current
@@ -173,8 +274,10 @@ class ScreenAccessPage(QWidget):
             else self._translations.text("screen_unavailable")
         )
         self._update_read_button()
+        self._update_document_button()
         if not granted:
             self.read_output.clear()
+            self.document_output.clear()
             if self._reader is not None and self._reader.available:
                 self.read_status.setText(self._translations.text("screen_off"))
 
@@ -222,6 +325,52 @@ class ScreenAccessPage(QWidget):
 
     def _read_busy_changed(self, _busy: bool) -> None:
         self._update_read_button()
+
+    def _read_document(self) -> None:
+        reader = self._document_reader
+        backend = self.document_backend.currentData()
+        if reader is None or not isinstance(backend, str):
+            return
+        self.document_output.clear()
+        self.document_status.setText(self._translations.text("screen_document_reading"))
+        reader.read(backend)
+
+    def _document_completed(self, observation: object) -> None:
+        if not isinstance(observation, DocumentObservation):
+            self._document_failed("ocr_failed")
+            return
+        if not observation.text.strip():
+            self.document_status.setText(self._translations.text("screen_no_text"))
+            return
+        self.document_output.setPlainText(observation.text[:8000])
+        self.document_status.setText(
+            self._translations.text("screen_document_result").format(
+                backend=observation.backend,
+                app_id=observation.app_id,
+            )
+        )
+
+    def _document_failed(self, reason: str) -> None:
+        self.document_output.clear()
+        key = {
+            "access_off": "screen_off",
+            "ocr_unavailable": "screen_ocr_unavailable",
+            "capture_unavailable": "screen_capture_unavailable",
+            "window_changed": "screen_window_changed",
+        }.get(reason, "screen_ocr_failed")
+        self.document_status.setText(self._translations.text(key))
+
+    def _document_busy_changed(self, _busy: bool) -> None:
+        self._update_document_button()
+
+    def _update_document_button(self) -> None:
+        self.document_button.setEnabled(
+            self._access is not None
+            and self._access.granted
+            and self._document_reader is not None
+            and not self._document_reader.busy
+            and self.document_backend.count() > 0
+        )
 
     def _update_read_button(self) -> None:
         reader = self._reader

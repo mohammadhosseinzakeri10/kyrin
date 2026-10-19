@@ -42,8 +42,8 @@ The first adapter runs the offline Tesseract CLI with a user-supplied absolute
 `tessdata` directory. It discovers installed `.traineddata` language codes,
 reports CPU capability only, and rejects a requested GPU rather than silently
 switching devices. It does not download models or modify system packages.
-Adding a PaddleOCR or another engine requires an adapter for this contract;
-the capture path and action code do not need to import that engine.
+The PaddleOCR adapter implements the same contract using a separate, local
+Python runtime. The capture path and action code do not import PaddleOCR.
 
 Tesseract is not installed as a system package on the development machine. A
 local, ignored test runtime and English model are described in
@@ -55,12 +55,48 @@ capture in that one run. This is a health check, not an accuracy or latency
 benchmark across applications or screen conditions.
 
 A local OCR package selector is now saved in application settings. The Screen
-Access page offers the installed Tesseract adapter and a folder picker for a
-compatible, already extracted Tesseract runtime with its language models. The
-saved choice is applied to new reads without changing the screen capture or
+Access page offers the installed Tesseract adapter, downloaded Fast and Best
+English/Persian language packs, and the ready PaddleOCR v5 Persian, v6 Small,
+and v6 Medium model pairs from the source-checkout catalog. PaddleOCR-VL 1.6
+is also available for screen reading when its separate runtime is installed.
+It returns text spotting polygons converted to real boxes, but no confidence
+score. Telegram and other action checks that require confidence therefore stop
+without clicking when this model is selected. A folder picker
+supports a compatible, already extracted Tesseract runtime or language
+directory. The selected Tesseract packs reuse the installed executable;
+PaddleOCR uses isolated Python runtimes under the ignored local app data.
+On the owner's machine, `runtimes/ocr/paddle/` and
+`runtimes/ocr/paddle-vl/` each contain PaddlePaddle 3.2.2, PaddleOCR 3.7.0,
+and PaddleX 3.7.2; the VL runtime also has PaddleX's `ocr` extras. These
+optional packages are not imported by KYRIN's main Python environment.
+The saved choice is applied to new reads without changing the screen capture or
 Telegram verification code; a read already in flight is discarded when the
-engine changes. Other OCR families still require a dedicated adapter before
-they can appear in this selector. The app does not download OCR models.
+engine changes. The Paddle worker loads local detection and recognition files
+in a CPU subprocess and returns real line boxes; it does not silently download
+missing model components. Other downloaded vision-language model families need
+runtime integration and verified text coordinates before they can safely drive
+screen actions. The app does not download OCR models.
+In local offline smoke checks, all three Paddle detector/recognizer pairs
+returned `Open Telegram` and nonempty boxes. The v5 Persian pair also read a
+synthetic `سلام مادر` image with a confidence score. PaddleOCR-VL 1.6 returned
+`Open Telegram` and a box with unknown confidence. These checks do not establish
+accuracy or responsiveness on full desktop windows.
+
+Surya OCR 2, GLM-OCR, and dots.mocr are available in a **separate read-only
+document comparison** section of Screen Access when their complete local
+checkpoint and isolated runtime are present. This section captures the active
+window only after the existing screen grant, runs offline CPU inference in a
+bounded subprocess, and displays text without coordinates. It never feeds
+Telegram verification or clicking. Surya and GLM share the local
+`document-vlm5` runtime; dots.mocr uses `document-dots` because its compatible
+Transformers version differs. The dots vision configuration must explicitly
+select eager attention on CPU; a process-local import shim makes the checkpoint's
+unconditional flash-attention import safe and raises if that code path is used.
+The subprocess has an address-space limit and a four-minute timeout. Results
+are discarded if screen access is revoked or the active window changes. No
+captured image is saved. All three read `Open Telegram` in separate offline
+synthetic-image smoke tests. This is not an accuracy or full-screen latency
+benchmark, and the document models have no verified click coordinates.
 Multilingual model acquisition and a measured CPU/GPU benchmark remain
 separate product work. Model file size does
 not establish RAM or VRAM requirements; those must be measured with the chosen

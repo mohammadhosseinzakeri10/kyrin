@@ -3,15 +3,24 @@
 from collections.abc import Callable
 from struct import unpack_from
 from threading import Thread
+from typing import Literal
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Signal
+from PySide6.QtGui import QImage
 
 from kyrin.app.qt.screen_access import ScreenAccess
-from kyrin.vision.ocr.contracts import OcrEngine, OcrOptions
+from kyrin.vision.ocr.contracts import (
+    OcrEngine,
+    OcrOptions,
+    OcrResult,
+    RecognizedText,
+    TextBox,
+)
 from kyrin.vision.screen_capture import IdentifiedWindowImage
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
+ReadRegion = Literal["left_menu", "settings_pane", "settings_header"] | None
 
 
 def _png_size(image: bytes) -> tuple[int, int] | None:
@@ -21,6 +30,65 @@ def _png_size(image: bytes) -> tuple[int, int] | None:
     if not (0 < width <= 20000 and 0 < height <= 20000):
         return None
     return width, height
+
+
+def _crop_png(image: bytes, region: ReadRegion) -> tuple[bytes, int] | None:
+    """Return a focused OCR image and its horizontal window offset."""
+    source = QImage.fromData(image)
+    if source.isNull() or source.width() < 300 or source.height() < 300:
+        return None
+    if region == "left_menu":
+        left, width, height = 0, int(source.width() * 0.3), int(source.height() * 0.65)
+    elif region == "settings_pane":
+        width = min(source.width(), max(430, int(source.width() * 0.23)))
+        left, height = (source.width() - width) // 2, int(source.height() * 0.85)
+    elif region == "settings_header":
+        width = min(source.width(), 350)
+        left, height = (source.width() - width) // 2, int(source.height() * 0.85)
+    else:
+        return None
+    cropped = source.copy(left, 0, max(1, width), max(1, height)).convertToFormat(
+        QImage.Format.Format_RGB888
+    )
+    output = QByteArray()
+    buffer = QBuffer(output)
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        return None
+    try:
+        if not cropped.save(buffer, "PNG"):  # type: ignore[call-overload]
+            return None
+        return bytes(output.data()), left
+    finally:
+        buffer.close()
+
+
+def _left_menu_png(image: bytes) -> bytes | None:
+    """Keep the existing menu-only image helper for its callers."""
+    cropped = _crop_png(image, "left_menu")
+    return cropped[0] if cropped is not None else None
+
+
+def _window_coordinates(result: OcrResult, left: int) -> OcrResult:
+    if left == 0:
+        return result
+    return OcrResult(
+        tuple(
+            RecognizedText(
+                span.text,
+                TextBox(
+                    span.box.left + left,
+                    span.box.top,
+                    span.box.width,
+                    span.box.height,
+                ),
+                span.confidence,
+            )
+            for span in result.spans
+        ),
+        result.language,
+        result.device,
+        result.engine_id,
+    )
 
 
 class _WorkerEvents(QObject):
@@ -81,7 +149,9 @@ class ScreenTextReader(QObject):
         self._finish()
         self.busy_changed.emit(self._busy)
 
-    def read(self, options: OcrOptions | None = None) -> bool:
+    def read(
+        self, options: OcrOptions | None = None, *, region: ReadRegion = None
+    ) -> bool:
         """Start at most one read; never ask for access implicitly."""
         if self._closed or self._busy:
             return False
@@ -96,7 +166,7 @@ class ScreenTextReader(QObject):
         generation = self._generation
         selected_options = options or self._options
         self._access.capture(
-            lambda image: self._captured(generation, image, selected_options)
+            lambda image: self._captured(generation, image, selected_options, region)
         )
         return True
 
@@ -105,6 +175,7 @@ class ScreenTextReader(QObject):
         generation: int,
         image: IdentifiedWindowImage | None,
         selected_options: OcrOptions,
+        region: ReadRegion,
     ) -> None:
         if generation != self._generation or self._closed:
             return
@@ -115,10 +186,19 @@ class ScreenTextReader(QObject):
         engine = self._engine
         assert engine is not None
         events = self._events
+        original_size = _png_size(image.image)
+        cropped = _crop_png(image.image, region) if region is not None else None
+        if region is not None and cropped is None:
+            self._finish()
+            self.failed.emit("capture_unavailable")
+            return
+        ocr_image, left_offset = cropped if cropped is not None else (image.image, 0)
 
         def work() -> None:
             try:
-                result = engine.recognize(image.image, selected_options)
+                result = _window_coordinates(
+                    engine.recognize(ocr_image, selected_options), left_offset
+                )
                 identity = self._identity_reader()
                 if identity != (image.platform_app_id, image.process_id):
                     events.failed.emit(generation, "window_changed")
@@ -127,7 +207,7 @@ class ScreenTextReader(QObject):
                     image.platform_app_id,
                     image.process_id,
                     result,
-                    _png_size(image.image),
+                    original_size,
                 )
                 events.completed.emit(generation, observation)
             except Exception:

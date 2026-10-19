@@ -27,6 +27,7 @@ from kyrin.app.platforms.xdg_startup import (
 )
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.chat_verifier import QtChatVerifier
+from kyrin.app.qt.document_text_reader import DocumentTextReader
 from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
@@ -62,6 +63,7 @@ from kyrin.system_power.flow import (
 from kyrin.system_power.gnome import GnomePowerBackend
 from kyrin.tts.models import TtsLanguageRoute
 from kyrin.tts.runtime import ConfiguredSpeechSynthesizer
+from kyrin.vision.ocr.backends.document import DocumentOcrEngine, document_model_ready
 from kyrin.vision.ocr.contracts import OcrOptions
 
 
@@ -320,14 +322,44 @@ def main() -> int:
         return observed.platform_app_id, observed.process_id
 
     ocr_root = linux_model_library_path().parent / "ocr" / "tesseract"
+    ocr_candidates_root = (
+        development_models.parent / "ocr/candidates"
+        if development_models is not None
+        else None
+    )
+    paddle_python = (
+        linux_model_library_path().parents[1] / "runtimes/ocr/paddle/bin/python"
+    )
+    paddle_vl_python = (
+        linux_model_library_path().parents[1] / "runtimes/ocr/paddle-vl/bin/python"
+    )
     screen_reader = ScreenTextReader(
         screen_access,
-        selected_ocr_engine(settings.ocr if settings is not None else None, ocr_root),
+        selected_ocr_engine(
+            settings.ocr if settings is not None else None,
+            ocr_root,
+            candidates_root=ocr_candidates_root,
+            paddle_python=paddle_python,
+            paddle_vl_python=paddle_vl_python,
+        ),
         focused_window,
         OcrOptions("eng"),
         app,
     )
     app.aboutToQuit.connect(screen_reader.close)
+    document_runtimes_root = linux_model_library_path().parents[1] / "runtimes/ocr"
+
+    def document_engine(backend: str) -> DocumentOcrEngine | None:
+        if ocr_candidates_root is None or not document_model_ready(
+            backend, ocr_candidates_root, document_runtimes_root
+        ):
+            return None
+        return DocumentOcrEngine(backend, ocr_candidates_root, document_runtimes_root)
+
+    document_reader = DocumentTextReader(
+        screen_access, document_engine, focused_window, app
+    )
+    app.aboutToQuit.connect(document_reader.close)
     chat_verifier = QtChatVerifier(screen_access, screen_reader, app)
     visual_sink = GnomeVisualStatusSink() if GnomeVisualStatusSink.available() else None
     observer_factory = (
@@ -398,7 +430,12 @@ def main() -> int:
         app_catalog=catalog,
         screen_access=screen_access,
         screen_reader=screen_reader,
+        document_reader=document_reader,
         ocr_default_root=ocr_root,
+        ocr_candidates_root=ocr_candidates_root,
+        paddle_python=paddle_python,
+        paddle_vl_python=paddle_vl_python,
+        document_runtimes_root=document_runtimes_root,
         startup_registration=registration,
         startup_error=startup_error,
     )

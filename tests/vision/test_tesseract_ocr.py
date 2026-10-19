@@ -49,7 +49,9 @@ def test_tesseract_parses_word_positions_and_confidence(tmp_path: Path) -> None:
     assert result.spans[0].confidence == 0.875
     assert result.device is OcrDevice.CPU
     assert run.call_args.kwargs["input"] == b"image"
-    assert "--tessdata-dir" in run.call_args.args[0]
+    args = run.call_args.args[0]
+    assert "--tessdata-dir" in args
+    assert args[args.index("-c") + 1] == "tessedit_create_tsv=1"
 
 
 def test_tesseract_rejects_unsupported_gpu_and_language(tmp_path: Path) -> None:
