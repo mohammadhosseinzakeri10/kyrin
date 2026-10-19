@@ -4,11 +4,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from kyrin.commands.app_names import SpokenAppCandidate
+from kyrin.commands.telegram_settings import SETTING_SECTIONS
 
 
 class CommandKind(StrEnum):
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
+    TELEGRAM_VIEW = "telegram_view"
+    TELEGRAM_SETTINGS = "telegram_settings"
+    TELEGRAM_SEARCH_FOCUS = "telegram_search_focus"
+    TELEGRAM_SEARCH = "telegram_search"
     SCROLL_UP = "scroll_up"
     SCROLL_DOWN = "scroll_down"
     RESTORE_APP = "restore_app"
@@ -36,6 +41,7 @@ class CommandIntent:
     app: str | None = None
     window_index: int | None = None
     scroll_steps: int | None = None
+    scroll_area: str | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -46,6 +52,34 @@ class CommandIntent:
             self.app is None or not self.app.strip()
         ):
             raise ValueError("open_chat requires a verified or explicit app")
+        if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
+            "archive",
+            "contacts",
+            "settings",
+            "profile",
+            "calls",
+            "new_group",
+            "new_channel",
+        }:
+            raise ValueError("unsupported Telegram destination")
+        if self.kind is CommandKind.TELEGRAM_SETTINGS:
+            explicit_label = self.target.removeprefix("label:").removeprefix("visible:")
+            if self.target not in (SETTING_SECTIONS.keys() | {"back", "cancel"}) and (
+                not self.target.startswith(("label:", "visible:"))
+                or not 1 <= len(explicit_label) <= 64
+                or any(
+                    not (char.isalnum() or char in " -'&")
+                    for char in explicit_label
+                )
+            ):
+                raise ValueError("unsupported Telegram settings action")
+        if self.kind is CommandKind.TELEGRAM_SEARCH_FOCUS and self.target != "telegram":
+            raise ValueError("Telegram search focus requires telegram target")
+        if self.kind is CommandKind.TELEGRAM_SEARCH and (
+            not 1 <= len(self.target) <= 64
+            or any(not (char.isalnum() or char in " -_.'@") for char in self.target)
+        ):
+            raise ValueError("unsupported Telegram search target")
         if self.kind in (CommandKind.SELECT_APP_WINDOW, CommandKind.CLOSE_SHOWN_WINDOW):
             if type(self.window_index) is not int or self.window_index < 1:
                 raise ValueError(
@@ -55,12 +89,15 @@ class CommandIntent:
             raise ValueError("only numbered window actions may carry a window number")
         if self.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
             if self.scroll_steps is not None and (
-                type(self.scroll_steps) is not int
-                or not 1 <= self.scroll_steps <= 4
+                type(self.scroll_steps) is not int or not 1 <= self.scroll_steps <= 4
             ):
                 raise ValueError("scroll steps must be an integer from 1 to 4")
+            if self.scroll_area not in (None, "chat", "list"):
+                raise ValueError("scroll area must be chat or list")
         elif self.scroll_steps is not None:
             raise ValueError("only scroll actions may carry scroll steps")
+        elif self.scroll_area is not None:
+            raise ValueError("only scroll actions may carry a scroll area")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +129,8 @@ class CommandContext:
     recent_scroll_kind: CommandKind | None = None
     recent_scroll_steps: int | None = None
     observed_scroll_app: str | None = None
+    recent_scroll_area: str | None = None
+    telegram_settings_context: bool = False
 
 
 @dataclass(frozen=True, slots=True)

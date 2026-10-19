@@ -122,6 +122,23 @@ def test_search_types_name_without_enter(
     assert 0xFF0D not in pressed  # Return/Enter could send a message.
 
 
+def test_focus_search_does_not_type_or_select(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keys: list[tuple[int, bool]] = []
+    monkeypatch.setattr(
+        helper, "_key", lambda _bus, _session, key, down: keys.append((key, down))
+    )
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    helper._focus_search(object(), "/session")
+    assert [key for key, down in keys if down] == [
+        helper.ESCAPE,
+        helper.ESCAPE,
+        helper.CONTROL,
+        helper.F_KEY,
+    ]
+
+
 def test_pointer_click_requires_matching_window_geometry_and_position(
     helper: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -150,6 +167,32 @@ def test_pointer_click_requires_matching_window_geometry_and_position(
         "NotifyPointerButton",
         "NotifyPointerButton",
     ]
+
+
+def test_settings_click_keeps_stricter_region_than_chat_click(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    observations = iter(
+        [
+            (*expected, 100, 50, 1600, 900, 500, 300),
+            (*expected, 100, 50, 1600, 900, 742, 267),
+        ]
+    )
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(observations))
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    helper.GLib.Variant = lambda signature, value: (signature, value)
+
+    class Bus:
+        def call_sync(self, *_args: object) -> None:
+            return None
+
+    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
+    box = (540, 205, 205, 24, 1600, 900)
+    assert not helper._click_verified_box(Bus(), "/session", expected, box)
+    assert helper._click_verified_box(
+        Bus(), "/session", expected, box, settings_item=True
+    )
 
 
 def test_pointer_accepts_first_chat_row_but_rejects_search_field(
@@ -221,7 +264,7 @@ def test_pointer_grant_restores_and_rotates_token_when_enabled(
     )
     monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
     monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _identity: True)
-    monkeypatch.setattr(helper, "_click_verified_box", lambda *_args: True)
+    monkeypatch.setattr(helper, "_click_verified_box", lambda *_args, **_kwargs: True)
     helper.Gio.bus_get_sync = lambda *_args: type(
         "Bus", (), {"call_sync": lambda *_args: None}
     )()

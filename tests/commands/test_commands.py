@@ -2,6 +2,7 @@
 
 import pytest
 
+from kyrin.commands.app_names import SpokenAppCandidate
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.interpreter import Interpretation, ReadyCommand
@@ -11,6 +12,7 @@ from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
     CommandResolution,
+    PendingAppClarification,
     PendingCommandClarification,
     ResponseChannel,
     ResponseKind,
@@ -103,6 +105,202 @@ def test_observed_stt_spellings_resolve_to_telegram(phrase: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("phrase", "destination"),
+    [
+        ("Go to archive", "archive"),
+        ("Go to Telegram contacts", "contacts"),
+        ("Go to contact", "contacts"),
+        ("Go to settings", "settings"),
+        ("Go to setting", "settings"),
+        ("Go to seating", "settings"),
+        ("Go to my seating", "settings"),
+        ("Go to setting telegram", "settings"),
+        ("Go to my profile", "profile"),
+        ("Go to calls", "calls"),
+        ("Go to my calls", "calls"),
+        ("Go to my carls", "calls"),
+        ("Go to carls", "calls"),
+        ("Create new group", "new_group"),
+        ("Create new channel", "new_channel"),
+        ("New channel", "new_channel"),
+    ],
+)
+def test_telegram_view_commands_require_focused_telegram(
+    phrase: str, destination: str
+) -> None:
+    rules = DemoCommandInterpreter()
+    active = rules.interpret(
+        phrase,
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+    assert active == ReadyCommand(CommandIntent(CommandKind.TELEGRAM_VIEW, destination))
+    inactive = rules.interpret(
+        phrase,
+        language="en",
+        context=CommandContext(),
+        pending=None,
+    )
+    assert inactive != active
+
+
+def test_observed_seating_stt_bypasses_stale_app_confirmation() -> None:
+    rules = DemoCommandInterpreter()
+    pending = PendingAppClarification(
+        (SpokenAppCandidate("settings", "Settings"),), confirmation=True
+    )
+    assert rules.interpret(
+        "Go to seating",
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=pending,
+    ) == ReadyCommand(CommandIntent(CommandKind.TELEGRAM_VIEW, "settings"))
+
+
+@pytest.mark.parametrize(
+    ("phrase", "destination"),
+    [
+        ("Go to my account", "my_account"),
+        ("Open Notifications and Sounds", "notifications"),
+        ("Go to Privacy and Security", "privacy"),
+        ("Go to chat settings", "chat_settings"),
+        ("Go to chat setting", "chat_settings"),
+        ("Go to chat seating", "chat_settings"),
+        ("Go to Battery and Animations", "battery"),
+        ("Open Telegram FAQ", "faq"),
+        ("Go to Default interface scale", "default_scale"),
+        ("Go to Back", "back"),
+        ("Cancel", "cancel"),
+    ],
+)
+def test_telegram_settings_commands_require_focused_telegram(
+    phrase: str, destination: str
+) -> None:
+    rules = DemoCommandInterpreter()
+    active = rules.interpret(
+        phrase,
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+    assert active == ReadyCommand(
+        CommandIntent(CommandKind.TELEGRAM_SETTINGS, destination)
+    )
+    assert rules.interpret(
+        phrase, language="en", context=CommandContext(), pending=None
+    ) != active
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["Open settings Display Name", "Go to Display Name in Telegram settings"],
+)
+def test_explicit_telegram_settings_label_can_use_live_ocr(
+    phrase: str,
+) -> None:
+    rules = DemoCommandInterpreter()
+    active = rules.interpret(
+        phrase,
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+    assert active == ReadyCommand(
+        CommandIntent(CommandKind.TELEGRAM_SETTINGS, "label:display name")
+    )
+    assert rules.interpret(
+        phrase, language="en", context=CommandContext(), pending=None
+    ) != active
+
+
+def test_short_settings_label_uses_recent_settings_context() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, "Go to Settings", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(0, CommandIntent(CommandKind.TELEGRAM_VIEW, "settings")),
+    )
+    assert coordinator.observe(
+        update(1, "Go to Display Name", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            1, CommandIntent(CommandKind.TELEGRAM_SETTINGS, "visible:display name")
+        ),
+    )
+
+
+def test_short_settings_label_needs_context_and_telegram_focus() -> None:
+    rules = DemoCommandInterpreter()
+    target = ReadyCommand(
+        CommandIntent(CommandKind.TELEGRAM_SETTINGS, "visible:display name")
+    )
+    assert rules.interpret(
+        "Go to Display Name",
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    ) != target
+    assert rules.interpret(
+        "Go to Display Name",
+        language="en",
+        context=CommandContext(
+            observed_active_app="firefox", telegram_settings_context=True
+        ),
+        pending=None,
+    ) != target
+
+
+def test_back_clears_short_settings_context() -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    coordinator.observe(
+        update(0, "Go to Settings", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )
+    assert coordinator.observe(
+        update(1, "Go to Back", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(1, CommandIntent(CommandKind.TELEGRAM_SETTINGS, "back")),
+    )
+    result = coordinator.observe(
+        update(2, "Go to Display Name", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )
+    assert CommandResolution(
+        2, CommandIntent(CommandKind.TELEGRAM_SETTINGS, "visible:display name")
+    ) not in result
+
+
+@pytest.mark.parametrize(
+    ("phrase", "kind", "target"),
+    [
+        ("Go to search", CommandKind.TELEGRAM_SEARCH_FOCUS, "telegram"),
+        ("Open Telegram search", CommandKind.TELEGRAM_SEARCH_FOCUS, "telegram"),
+        ("Search for My Mother", CommandKind.TELEGRAM_SEARCH, "My Mother"),
+        ("Search Telegram for Alice", CommandKind.TELEGRAM_SEARCH, "Alice"),
+        ("Find Bob in Telegram", CommandKind.TELEGRAM_SEARCH, "Bob"),
+    ],
+)
+def test_telegram_search_commands_require_focused_telegram(
+    phrase: str, kind: CommandKind, target: str
+) -> None:
+    rules = DemoCommandInterpreter()
+    active = rules.interpret(
+        phrase,
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+    assert active == ReadyCommand(CommandIntent(kind, target))
+    assert rules.interpret(
+        phrase, language="en", context=CommandContext(), pending=None
+    ) != active
+
+
 def test_revised_partial_retracts_candidate_and_final_can_disagree() -> None:
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     first = update(0, "تلگرام را باز کن", TranscriptStatus.PARTIAL)
@@ -179,9 +377,14 @@ def test_unknown_window_target_never_becomes_action() -> None:
     ] == (CommandResolution(0, None))
 
 
-@pytest.mark.parametrize("phrase", (
-    "Launch Telegram", "Please start Telegram", "Switch to Telegram",
-))
+@pytest.mark.parametrize(
+    "phrase",
+    (
+        "Launch Telegram",
+        "Please start Telegram",
+        "Switch to Telegram",
+    ),
+)
 def test_clear_open_synonyms_use_registered_open_action(phrase: str) -> None:
     coordinator = CommandCoordinator(DemoCommandInterpreter())
     assert coordinator.observe(update(0, phrase, TranscriptStatus.FINAL)) == (
@@ -347,11 +550,7 @@ def test_scroll_amount_is_bounded_and_explicit(
     assert coordinator.observe(
         update(0, phrase, TranscriptStatus.FINAL),
         observed_active_app="telegram",
-    ) == (
-        CommandResolution(
-            0, CommandIntent(kind, "telegram", scroll_steps=steps)
-        ),
-    )
+    ) == (CommandResolution(0, CommandIntent(kind, "telegram", scroll_steps=steps)),)
 
 
 def test_more_repeats_scroll_amount_too() -> None:
@@ -372,11 +571,64 @@ def test_more_repeats_scroll_amount_too() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("phrase", "kind", "area", "steps"),
+    (
+        ("Scroll chat down", CommandKind.SCROLL_DOWN, "chat", None),
+        ("Scroll up in the chat", CommandKind.SCROLL_UP, "chat", None),
+        ("Scroll conversation down less", CommandKind.SCROLL_DOWN, "chat", 2),
+        ("Scroll chat list up", CommandKind.SCROLL_UP, "list", None),
+        ("اسکرول فهرست چت ها پایین کن", CommandKind.SCROLL_DOWN, "list", None),
+    ),
+)
+def test_telegram_scroll_area_is_explicit(
+    phrase: str, kind: CommandKind, area: str, steps: int | None
+) -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(scroll_any_focused_app=True)
+    )
+    assert coordinator.observe(
+        update(0, phrase, TranscriptStatus.FINAL),
+        observed_scroll_app="org.telegram.desktop",
+    ) == (
+        CommandResolution(
+            0,
+            CommandIntent(
+                kind,
+                "org.telegram.desktop",
+                scroll_steps=steps,
+                scroll_area=area,
+            ),
+        ),
+    )
+
+
+def test_more_repeats_telegram_scroll_area() -> None:
+    coordinator = CommandCoordinator(
+        DemoCommandInterpreter(scroll_any_focused_app=True)
+    )
+    coordinator.observe(
+        update(0, "Scroll chat down", TranscriptStatus.FINAL),
+        observed_scroll_app="org.telegram.desktop",
+    )
+    assert coordinator.observe(
+        update(1, "More", TranscriptStatus.FINAL),
+        observed_scroll_app="org.telegram.desktop",
+    ) == (
+        CommandResolution(
+            1,
+            CommandIntent(
+                CommandKind.SCROLL_DOWN,
+                "org.telegram.desktop",
+                scroll_area="chat",
+            ),
+        ),
+    )
+
+
 def test_more_needs_recent_scroll_in_same_active_app() -> None:
     coordinator = CommandCoordinator(
-        DemoCommandInterpreter(
-            allowed_scroll_apps=frozenset({"telegram", "firefox"})
-        )
+        DemoCommandInterpreter(allowed_scroll_apps=frozenset({"telegram", "firefox"}))
     )
     assert coordinator.observe(
         update(0, "More", TranscriptStatus.FINAL),
@@ -624,15 +876,21 @@ def test_split_open_chat_cannot_join_late_or_negated_name() -> None:
     )
     coordinator.observe(update(0, "Open chat", TranscriptStatus.FINAL))
     now[0] = 5.0
-    assert coordinator.observe(
-        update(1, "Hunter VPN", TranscriptStatus.FINAL),
-        observed_active_app="telegram",
-    )[0].intent is None
+    assert (
+        coordinator.observe(
+            update(1, "Hunter VPN", TranscriptStatus.FINAL),
+            observed_active_app="telegram",
+        )[0].intent
+        is None
+    )
     coordinator.observe(update(2, "Open chat", TranscriptStatus.FINAL))
-    assert coordinator.observe(
-        update(3, "Do not open chat Hunter VPN", TranscriptStatus.FINAL),
-        observed_active_app="telegram",
-    )[0].intent is None
+    assert (
+        coordinator.observe(
+            update(3, "Do not open chat Hunter VPN", TranscriptStatus.FINAL),
+            observed_active_app="telegram",
+        )[0].intent
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -684,9 +942,7 @@ def test_fragment_does_not_join_negation_or_new_command() -> None:
     ) == (CommandResolution(1, None),)
     coordinator.observe(update(2, "Open", TranscriptStatus.FINAL))
     assert coordinator.observe(update(3, "Close Telegram", TranscriptStatus.FINAL)) == (
-        CommandResolution(
-            3, CommandIntent(CommandKind.CLOSE_APP_WINDOW, "telegram")
-        ),
+        CommandResolution(3, CommandIntent(CommandKind.CLOSE_APP_WINDOW, "telegram")),
     )
 
 
@@ -714,9 +970,7 @@ def test_a_complete_persian_window_command_supersedes_an_old_fragment() -> None:
     assert coordinator.observe(
         update(1, "تلگرام را از تمام صفحه خارج کن", TranscriptStatus.FINAL)
     ) == (
-        CommandResolution(
-            1, CommandIntent(CommandKind.UNFULLSCREEN_APP, "telegram")
-        ),
+        CommandResolution(1, CommandIntent(CommandKind.UNFULLSCREEN_APP, "telegram")),
     )
 
 

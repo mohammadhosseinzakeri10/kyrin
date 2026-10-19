@@ -2,6 +2,12 @@ from kyrin.actions.telegram_verification import (
     chat_header_visible,
     saved_messages_header_visible,
     search_choices,
+    telegram_left_label,
+    telegram_menu_item,
+    telegram_search_query_visible,
+    telegram_settings_header,
+    telegram_settings_item,
+    telegram_view_title_visible,
     unique_search_result,
 )
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
@@ -52,6 +58,155 @@ def test_generic_header_requires_exact_target() -> None:
     observation = _observation()
     assert chat_header_visible(observation, "telegram.desktop", 123, "Saved Messages")
     assert not chat_header_visible(observation, "telegram.desktop", 123, "Alice")
+
+
+def test_left_label_requires_unique_title_in_expected_telegram_window() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (RecognizedText("Settings", TextBox(75, 92, 95, 24), 0.91),),
+            "eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    assert (
+        telegram_left_label(observation, "telegram.desktop", 123, "settings", menu=True)
+        is not None
+    )
+    assert (
+        telegram_left_label(observation, "other.desktop", 123, "Settings", menu=True)
+        is None
+    )
+    assert telegram_menu_item(observation, "telegram.desktop", 123, "Settings") is None
+
+
+def test_menu_item_needs_a_second_menu_label_in_same_frame() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("Settings", TextBox(75, 150, 95, 24), 0.91),
+                RecognizedText("New", TextBox(75, 92, 45, 24), 0.90),
+                RecognizedText("Group", TextBox(126, 92, 65, 24), 0.90),
+            ),
+            "eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    assert telegram_menu_item(observation, "telegram.desktop", 123, "Settings")
+
+
+def test_menu_item_rejects_chat_named_settings_without_menu_context() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (RecognizedText("Settings", TextBox(75, 100, 90, 22), 0.9),),
+            "eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    assert telegram_menu_item(observation, "telegram.desktop", 123, "Settings") is None
+    assert not telegram_view_title_visible(
+        observation, "telegram.desktop", 123, "Settings"
+    )
+
+
+def test_settings_item_requires_heading_unique_row_and_same_window() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("Settings", TextBox(510, 45, 95, 24), 0.91),
+                RecognizedText("Privacy", TextBox(540, 205, 75, 24), 0.91),
+                RecognizedText("and", TextBox(620, 205, 35, 24), 0.91),
+                RecognizedText("Security", TextBox(660, 205, 85, 24), 0.91),
+            ),
+            "eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    assert telegram_settings_item(
+        observation, "telegram.desktop", 123, "Privacy and Security"
+    ) is not None
+    assert telegram_view_title_visible(observation, "telegram.desktop", 123, "Settings")
+    assert telegram_settings_item(
+        observation, "other.desktop", 123, "Privacy and Security"
+    ) is None
+    assert telegram_settings_item(
+        observation, "telegram.desktop", 123, "Language"
+    ) is None
+
+
+def test_settings_header_distinguishes_nested_page_from_root() -> None:
+    def observation(title: str) -> IdentifiedWindowText:
+        return IdentifiedWindowText(
+            "telegram.desktop",
+            123,
+            OcrResult(
+                (
+                    RecognizedText("<", TextBox(750, 86, 12, 14), 0.42),
+                    RecognizedText(title, TextBox(790, 86, 90, 16), 0.97),
+                    RecognizedText("Connection", TextBox(790, 174, 85, 15), 0.9),
+                ),
+                "eng",
+                OcrDevice.CPU,
+                "fake",
+            ),
+            (1853, 1048),
+        )
+
+    assert (
+        telegram_settings_header(observation("Advanced"), "telegram.desktop", 123)
+        == "advanced"
+    )
+    assert (
+        telegram_settings_header(observation("Settings"), "telegram.desktop", 123)
+        == "settings"
+    )
+    assert (
+        telegram_settings_header(observation("Advanced"), "other.desktop", 123)
+        is None
+    )
+
+
+def test_search_query_requires_exact_text_in_left_input_field() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("My", TextBox(60, 42, 26, 13), 0.05),
+                RecognizedText("Mother", TextBox(91, 42, 58, 13), 0.08),
+                RecognizedText("My", TextBox(68, 182, 26, 13), 0.95),
+                RecognizedText("Mother", TextBox(99, 182, 58, 13), 0.95),
+            ),
+            "eng",
+            OcrDevice.CPU,
+            "fake",
+        ),
+        (1600, 900),
+    )
+    assert telegram_search_query_visible(
+        observation, "telegram.desktop", 123, "my mother"
+    )
+    assert not telegram_search_query_visible(
+        observation, "other.desktop", 123, "my mother"
+    )
+    assert not telegram_search_query_visible(
+        observation, "telegram.desktop", 123, "alice"
+    )
 
 
 def test_chat_title_matching_ignores_latin_letter_case() -> None:
@@ -115,6 +270,28 @@ def test_search_result_requires_one_exact_left_pane_match() -> None:
         unique_search_result(
             _observation(left=60, top=92), "telegram.desktop", 123, "Saved Messages"
         )
+        is None
+    )
+
+
+def test_search_result_rejects_ocr_without_confidence() -> None:
+    original = _observation(left=60, top=92, query=True)
+    no_score = IdentifiedWindowText(
+        original.platform_app_id,
+        original.process_id,
+        OcrResult(
+            tuple(
+                RecognizedText(span.text, span.box, None)
+                for span in original.result.spans
+            ),
+            "eng",
+            OcrDevice.CPU,
+            "paddle_vl16",
+        ),
+        original.image_size,
+    )
+    assert (
+        unique_search_result(no_score, "telegram.desktop", 123, "Saved Messages")
         is None
     )
 
@@ -196,7 +373,8 @@ def test_low_confidence_query_still_locates_high_confidence_rows() -> None:
         RecognizedText("Mother", TextBox(177, 244, 44, 13), 0.95),
     )
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1853, 1048),
     )
@@ -214,7 +392,8 @@ def test_missing_query_ocr_can_use_unique_first_chat_row() -> None:
         RecognizedText("Mother", TextBox(177, 244, 44, 13), 0.95),
     )
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1853, 1048),
     )
@@ -238,7 +417,8 @@ def test_two_local_chats_are_separated_from_global_results_by_section_header() -
         RecognizedText("Mother", TextBox(109, 244, 44, 13), 0.95),
     )
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1853, 1048),
     )
@@ -247,8 +427,7 @@ def test_two_local_chats_are_separated_from_global_results_by_section_header() -
     assert tuple(row.top for row in choices.local_results) == (92, 154)
     assert tuple(row.top for row in choices.global_results) == (244,)
     assert (
-        unique_search_result(observation, "telegram.desktop", 123, "My Mother")
-        is None
+        unique_search_result(observation, "telegram.desktop", 123, "My Mother") is None
     )
 
 
@@ -263,7 +442,8 @@ def test_three_adjacent_local_chats_survive_missing_section_header() -> None:
         )
     )
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1853, 1048),
     )
@@ -272,8 +452,7 @@ def test_three_adjacent_local_chats_survive_missing_section_header() -> None:
     assert tuple(row.top for row in choices.local_results) == (92, 154, 216)
     assert tuple(row.top for row in choices.global_results) == (306,)
     assert (
-        unique_search_result(observation, "telegram.desktop", 123, "My Mother")
-        is None
+        unique_search_result(observation, "telegram.desktop", 123, "My Mother") is None
     )
 
 
@@ -288,7 +467,8 @@ def test_preview_text_is_not_numbered_as_a_second_chat() -> None:
         )
     ) + (RecognizedText("results", TextBox(100, 203, 50, 13), 0.9),)
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1920, 1080),
     )
@@ -308,7 +488,8 @@ def test_global_only_results_require_visible_section_heading() -> None:
         RecognizedText("Mother", TextBox(111, 244, 44, 13), 0.92),
     )
     observation = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
         (1920, 1080),
     )
@@ -319,22 +500,20 @@ def test_global_only_results_require_visible_section_heading() -> None:
     assert choices.global_section_verified
 
     without_heading = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans[3:], "eng", OcrDevice.CPU, "fake"),
         (1920, 1080),
     )
-    assert search_choices(
-        without_heading, "telegram.desktop", 123, "My Mother"
-    ) is None
+    assert search_choices(without_heading, "telegram.desktop", 123, "My Mother") is None
 
     missed_query = IdentifiedWindowText(
-        "telegram.desktop", 123,
+        "telegram.desktop",
+        123,
         OcrResult(spans[2:], "eng", OcrDevice.CPU, "fake"),
         (1920, 1080),
     )
-    choices = search_choices(
-        missed_query, "telegram.desktop", 123, "My Mother"
-    )
+    choices = search_choices(missed_query, "telegram.desktop", 123, "My Mother")
     assert choices is not None
     assert choices.local_results == ()
     assert tuple(row.top for row in choices.global_results) == (244,)

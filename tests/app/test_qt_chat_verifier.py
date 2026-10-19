@@ -47,9 +47,13 @@ class Reader(QObject):
         self.read_on_ui_thread = False
         self.supported_languages = frozenset({"eng", "fas"})
         self.last_options: OcrOptions | None = None
+        self.last_region: str | None = None
 
-    def read(self, options: OcrOptions | None = None) -> bool:
+    def read(
+        self, options: OcrOptions | None = None, *, region: str | None = None
+    ) -> bool:
         self.last_options = options
+        self.last_region = region
         self.read_on_ui_thread = current_thread() is main_thread()
         self.completed.emit(self.observation)
         return True
@@ -145,6 +149,76 @@ def test_search_result_is_only_returned_for_unique_left_pane_match(
         app,
         lambda: verifier.find_search_result("telegram.desktop", 123, "Bob") is None,
     )
+
+
+def test_menu_verification_requests_left_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(_observation())
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_left_label("telegram.desktop", 123, "Settings", menu=True)
+        is None,
+    )
+    assert reader.last_region == "left_menu"
+
+
+def test_settings_verification_requests_center_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(_observation())
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_settings_item(
+            "telegram.desktop", 123, "My Account"
+        ) is None,
+    )
+    assert reader.last_region == "settings_pane"
+    assert not _call_from_worker(
+        app, lambda: verifier.has_view_title("telegram.desktop", 123, "Settings")
+    )
+    assert reader.last_region == "settings_pane"
+
+
+def test_settings_page_header_uses_narrow_center_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(
+        IdentifiedWindowText(
+            "telegram.desktop",
+            123,
+            OcrResult(
+                (RecognizedText("Advanced", TextBox(790, 86, 80, 16), 0.96),),
+                "eng",
+                OcrDevice.CPU,
+                "fake",
+            ),
+            (1853, 1048),
+        )
+    )
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    assert _call_from_worker(
+        app,
+        lambda: verifier.settings_page_header("telegram.desktop", 123) == "advanced",
+    )
+    assert reader.last_region == "settings_header"
 
 
 def test_search_choices_keep_local_and_global_rows_separate(

@@ -10,6 +10,12 @@ from kyrin.actions.telegram_verification import (
     ChatSearchMatch,
     chat_header_visible,
     search_choices,
+    telegram_left_label,
+    telegram_menu_item,
+    telegram_search_query_visible,
+    telegram_settings_header,
+    telegram_settings_item,
+    telegram_view_title_visible,
     unique_search_result,
 )
 from kyrin.app.qt.screen_access import ScreenAccess
@@ -26,8 +32,14 @@ class _Request:
     target: str | None = None
     search: bool = False
     choices: bool = False
+    left_label: bool = False
+    menu: bool = False
+    settings_item: bool = False
+    settings_header: bool = False
+    view_title: bool = False
+    search_query: bool = False
     finished: Event = field(default_factory=Event)
-    result: bool | ChatSearchMatch | ChatSearchChoices | None = None
+    result: bool | str | ChatSearchMatch | ChatSearchChoices | None = None
 
 
 class QtChatVerifier(QObject):
@@ -80,9 +92,42 @@ class QtChatVerifier(QObject):
         """A content-free reason for the latest search-choice read."""
         return self._last_choice_status
 
+    def find_left_label(
+        self, app_id: str, pid: int, label: str, *, menu: bool = False
+    ) -> ChatSearchMatch | None:
+        result = self._ask(
+            _Request(app_id, pid, label, left_label=True, menu=menu),
+            timeout_s=18,
+        )
+        return result if isinstance(result, ChatSearchMatch) else None
+
+    def find_settings_item(
+        self, app_id: str, pid: int, label: str
+    ) -> ChatSearchMatch | None:
+        result = self._ask(
+            _Request(app_id, pid, label, settings_item=True), timeout_s=18
+        )
+        return result if isinstance(result, ChatSearchMatch) else None
+
+    def settings_page_header(self, app_id: str, pid: int) -> str | None:
+        result = self._ask(
+            _Request(app_id, pid, settings_header=True), timeout_s=18
+        )
+        return result if isinstance(result, str) else None
+
+    def has_view_title(self, app_id: str, pid: int, title: str) -> bool:
+        return self._ask(
+            _Request(app_id, pid, title, view_title=True), timeout_s=18
+        ) is True
+
+    def has_search_query(self, app_id: str, pid: int, query: str) -> bool:
+        return self._ask(
+            _Request(app_id, pid, query, search_query=True), timeout_s=18
+        ) is True
+
     def _ask(
         self, request: _Request, *, timeout_s: float
-    ) -> bool | ChatSearchMatch | ChatSearchChoices | None:
+    ) -> bool | str | ChatSearchMatch | ChatSearchChoices | None:
         if QThread.currentThread() == self.thread():
             return None
         self.requested.emit(request)
@@ -125,11 +170,18 @@ class QtChatVerifier(QObject):
         ):
             self._finish(False)
             return
-        started = (
-            self._reader.read()
-            if language is None
-            else self._reader.read(language)
-        )
+        if request.menu:
+            started = self._reader.read(language, region="left_menu")
+        elif request.settings_header:
+            started = self._reader.read(language, region="settings_header")
+        elif request.settings_item or (
+            request.view_title and request.target == "Settings"
+        ):
+            started = self._reader.read(language, region="settings_pane")
+        else:
+            started = (
+                self._reader.read() if language is None else self._reader.read(language)
+            )
         if not started and self._pending is request:
             self._finish(False)
 
@@ -137,27 +189,60 @@ class QtChatVerifier(QObject):
         pending = self._pending
         if pending is None:
             return
-        result: bool | ChatSearchMatch | ChatSearchChoices | None = None
+        result: bool | str | ChatSearchMatch | ChatSearchChoices | None = None
         if (
             isinstance(observation, IdentifiedWindowText)
             and pending.app_id is not None
             and pending.pid is not None
-            and pending.target is not None
+            and (pending.target is not None or pending.settings_header)
         ):
-            if pending.choices:
+            if pending.settings_header:
+                result = telegram_settings_header(
+                    observation, pending.app_id, pending.pid
+                )
+            elif pending.settings_item:
+                assert pending.target is not None
+                result = telegram_settings_item(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+            elif pending.search_query:
+                assert pending.target is not None
+                result = telegram_search_query_visible(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+            elif pending.view_title:
+                assert pending.target is not None
+                result = telegram_view_title_visible(
+                    observation, pending.app_id, pending.pid, pending.target
+                )
+            elif pending.left_label:
+                assert pending.target is not None
+                result = (
+                    telegram_menu_item(
+                        observation, pending.app_id, pending.pid, pending.target
+                    )
+                    if pending.menu
+                    else telegram_left_label(
+                        observation, pending.app_id, pending.pid, pending.target
+                    )
+                )
+            elif pending.choices:
+                assert pending.target is not None
                 result = search_choices(
                     observation, pending.app_id, pending.pid, pending.target
                 )
                 matches = find_exact_phrases(observation.result, pending.target)
                 size = observation.image_size or (0, 0)
-                positions = "_".join(
-                    f"{match.box.left}-{match.box.top}-"
-                    f"{round(100 * (match.lowest_confidence or 0))}"
-                    for match in matches[:6]
-                ) or "none"
+                positions = (
+                    "_".join(
+                        f"{match.box.left}-{match.box.top}-"
+                        f"{round(100 * (match.lowest_confidence or 0))}"
+                        for match in matches[:6]
+                    )
+                    or "none"
+                )
                 detail = (
-                    f"matches_{len(matches)}_size_{size[0]}x{size[1]}_"
-                    f"at_{positions}"
+                    f"matches_{len(matches)}_size_{size[0]}x{size[1]}_at_{positions}"
                 )
                 self._last_choice_status = (
                     f"classified_local_{len(result.local_results)}_"
@@ -166,10 +251,12 @@ class QtChatVerifier(QObject):
                     else f"unclassified_{detail}"
                 )
             elif pending.search:
+                assert pending.target is not None
                 result = unique_search_result(
                     observation, pending.app_id, pending.pid, pending.target
                 )
             else:
+                assert pending.target is not None
                 result = chat_header_visible(
                     observation, pending.app_id, pending.pid, pending.target
                 )
@@ -190,7 +277,7 @@ class QtChatVerifier(QObject):
             self._finish(False)
 
     def _finish(
-        self, result: bool | ChatSearchMatch | ChatSearchChoices | None
+        self, result: bool | str | ChatSearchMatch | ChatSearchChoices | None
     ) -> None:
         pending = self._pending
         self._pending = None

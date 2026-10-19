@@ -79,3 +79,27 @@ def test_smooth_scroll_stops_if_focus_changes(
         direction="down", steps=3, left_pane=True, smooth=True,
     )
     assert calls.count("NotifyPointerAxis") == 2
+
+
+def test_chat_scroll_aims_inside_telegram_conversation(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    before = (*expected, 100, 200, 1000, 800, 150, 440)
+    after = (*expected, 100, 200, 1000, 800, 750, 640)
+    frames = iter((before, after))
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(frames))
+    monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    calls: list[str] = []
+
+    class Bus:
+        def call_sync(self, _bus, _object, _interface, method, *_rest):
+            calls.append(method)
+
+    assert helper._scroll(
+        Bus(), "/session", expected,
+        direction="down", steps=1, left_pane=False, right_pane=True,
+        smooth=True,
+    )
+    assert calls.count("NotifyPointerAxis") == 4

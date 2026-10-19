@@ -204,6 +204,13 @@ class ActionGate:
             return intent.target in self.policy.allowed_close_apps
         if intent.kind is CommandKind.OPEN_CHAT:
             return intent.app in self.policy.allowed_chat_apps
+        if intent.kind in {
+            CommandKind.TELEGRAM_VIEW,
+            CommandKind.TELEGRAM_SETTINGS,
+            CommandKind.TELEGRAM_SEARCH_FOCUS,
+            CommandKind.TELEGRAM_SEARCH,
+        }:
+            return "telegram" in self.policy.allowed_chat_apps
         if intent.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
             return (
                 self.policy.allow_focused_scroll

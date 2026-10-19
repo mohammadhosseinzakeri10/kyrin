@@ -34,11 +34,15 @@ class Verifier:
         verified: bool = True,
         match: ChatSearchMatch | None = None,
         choices: ChatSearchChoices | None = None,
+        settings_header: str | None = None,
     ) -> None:
         self.available = ready
         self.verified = verified
         self.match = match
         self.choices = choices
+        self.settings_header = settings_header if settings_header is not None else (
+            "settings" if verified else None
+        )
         self.calls: list[tuple[str, int, str]] = []
 
     def ready(self) -> bool:
@@ -61,14 +65,357 @@ class Verifier:
     def choice_status(self) -> str:
         return "classified" if self.choices is not None else "unclassified"
 
+    def find_left_label(
+        self, app_id: str, pid: int, label: str, *, menu: bool = False
+    ) -> ChatSearchMatch | None:
+        self.calls.append((app_id, pid, label))
+        return self.match
+
+    def find_settings_item(
+        self, app_id: str, pid: int, label: str
+    ) -> ChatSearchMatch | None:
+        self.calls.append((app_id, pid, label))
+        return self.match
+
+    def has_view_title(self, app_id: str, pid: int, title: str) -> bool:
+        return self.verified
+
+    def settings_page_header(self, app_id: str, pid: int) -> str | None:
+        return self.settings_header
+
+    def has_search_query(self, app_id: str, pid: int, query: str) -> bool:
+        self.calls.append((app_id, pid, query))
+        return self.verified
+
+
+@pytest.mark.parametrize(
+    ("destination", "mode"),
+    [
+        ("archive", "view"),
+        ("contacts", "view"),
+        ("settings", "menu"),
+        ("new_group", "menu"),
+        ("new_channel", "menu"),
+    ],
+)
+def test_telegram_view_dispatch_and_verification(
+    destination: str, mode: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    match = ChatSearchMatch(80, 100, 70, 20, 1000, 800)
+    menu_visible = False
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal menu_visible
+        calls.append(args)
+        if args[4] == "menu":
+            menu_visible = True
+        elif args[4] == "menu-click":
+            menu_visible = False
+        marker = {
+            "view": "VIEW_SHORTCUT_DISPATCHED",
+            "menu": "MENU_CLICKED",
+            "menu-click": "CHAT_RESULT_CLICKED",
+        }[args[4]]
+        return subprocess.CompletedProcess(args, 0, marker, "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(match=match)
+    verifier.find_left_label = (  # type: ignore[method-assign]
+        lambda app_id, pid, label, *, menu=False: (
+            match if not menu or menu_visible else None
+        )
+    )
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_VIEW, destination)
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert calls[0][4] == mode
+    assert len(calls) == (1 if mode == "view" else 2)
+
+
+def test_telegram_menu_item_must_be_stable_before_click(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "MENU_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_VIEW, "settings")
+    )
+    assert result.error_code == "telegram_menu_uncertain"
+    assert len(calls) == 2
+
+
+def test_closed_menu_precheck_does_not_repeat_expensive_ocr() -> None:
+    verifier = Verifier()
+    executor = _executor(Delegate(), verifier, (DESKTOP_ID, 12))
+    assert executor._stable_menu_item(  # noqa: SLF001
+        (DESKTOP_ID, 12), "Settings", fast_missing=True
+    ) is None
+    assert verifier.calls == [(DESKTOP_ID, 12, "Settings")]
+
+
+def test_telegram_setting_clicks_only_stable_ocr_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "SETTING_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(match=ChatSearchMatch(540, 205, 205, 24, 1600, 900))
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "privacy")
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert modes == ["settings-click"]
+
+
+def test_named_visible_settings_row_uses_same_verified_click(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "SETTING_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(match=ChatSearchMatch(790, 244, 76, 14, 1853, 1048))
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "label:my account")
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert modes == ["settings-click"]
+
+
+def test_known_settings_section_returns_from_advanced_before_click(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+    match = ChatSearchMatch(790, 363, 95, 14, 1853, 1048)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        mode = args[4]
+        modes.append(mode)
+        marker = "ESCAPE_DISPATCHED" if mode == "escape" else "SETTING_CLICKED"
+        return subprocess.CompletedProcess(args, 0, marker, "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(settings_header="advanced")
+    verifier.settings_page_header = (  # type: ignore[method-assign]
+        lambda app_id, pid: "settings" if "escape" in modes else "advanced"
+    )
+    verifier.find_settings_item = (  # type: ignore[method-assign]
+        lambda app_id, pid, label: match if "escape" in modes else None
+    )
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "chat_settings")
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert modes == ["escape", "settings-click"]
+
+
+def test_nested_settings_navigation_stops_if_back_is_not_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "ESCAPE_DISPATCHED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(settings_header="advanced")
+    verifier.settings_page_header = (  # type: ignore[method-assign]
+        lambda app_id, pid: None if modes else "advanced"
+    )
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "chat_settings")
+    )
+    assert result.error_code == "telegram_settings_navigation_uncertain"
+    assert modes == ["escape"]
+
+
+def test_short_settings_label_never_reopens_a_closed_settings_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "MENU_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(
+        Delegate(), Verifier(verified=False), (DESKTOP_ID, 12)
+    ).execute(_request(CommandKind.TELEGRAM_SETTINGS, "visible:display name"))
+    assert result.error_code == "telegram_settings_not_open"
+    assert modes == []
+
+
+def test_missing_my_account_keeps_open_settings_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "MENU_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "my_account")
+    )
+    assert result.error_code == "telegram_setting_not_found"
+    assert modes == []
+
+
+def test_settings_control_is_not_clicked_as_navigation() -> None:
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "default_scale")
+    )
+    assert result.error_code == "telegram_setting_requires_value"
+
+
+def test_telegram_back_sends_only_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "ESCAPE_DISPATCHED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "back")
+    )
+    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert modes == ["escape"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "target", "marker", "outcome"),
+    [
+        (
+            CommandKind.TELEGRAM_SEARCH_FOCUS,
+            "telegram",
+            "SEARCH_FOCUSED",
+            ActionOutcome.LAUNCH_ACCEPTED,
+        ),
+        (
+            CommandKind.TELEGRAM_SEARCH,
+            "My Mother",
+            "SEARCH_TYPED",
+            ActionOutcome.CONFIRMED,
+        ),
+    ],
+)
+def test_telegram_search_never_clicks_a_result(
+    kind: CommandKind,
+    target: str,
+    marker: str,
+    outcome: ActionOutcome,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, marker, "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(kind, target)
+    )
+    assert result.outcome is outcome
+    assert len(calls) == 1
+    assert calls[0][4] == (
+        "focus-search" if kind is CommandKind.TELEGRAM_SEARCH_FOCUS else "search"
+    )
+
+
+def test_missing_setting_never_dispatches_a_setting_click(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modes: list[str] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        modes.append(args[4])
+        return subprocess.CompletedProcess(args, 0, "MENU_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(Delegate(), Verifier(verified=False), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_SETTINGS, "label:unlisted section")
+    )
+    assert result.outcome is ActionOutcome.FAILED
+    assert result.error_code == "telegram_menu_uncertain"
+    assert "settings-click" not in modes
+
+
+def test_telegram_menu_navigation_exits_archive_then_opens_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    match = ChatSearchMatch(80, 100, 70, 20, 1000, 800)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        mode = args[4]
+        calls.append(mode)
+        marker = {
+            "menu": "MENU_CLICKED",
+            "menu-click": "CHAT_RESULT_CLICKED",
+        }[mode]
+        return subprocess.CompletedProcess(args, 0, marker, "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    verifier = Verifier(match=match)
+    verifier.find_left_label = (  # type: ignore[method-assign]
+        lambda app_id, pid, label, *, menu=False: (
+            match if not menu or calls.count("menu") >= 2 else None
+        )
+    )
+    result = _executor(Delegate(), verifier, (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_VIEW, "profile")
+    )
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert calls == ["menu", "menu", "menu-click"]
+
+
+def test_telegram_shortcut_with_unverified_heading_is_accepted_not_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 0, "VIEW_SHORTCUT_DISPATCHED", ""
+        ),
+    )
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _request(CommandKind.TELEGRAM_VIEW, "archive")
+    )
+    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert result.error_code is None
+
 
 def _request(kind: CommandKind, target: str, app: str | None = None) -> ActionRequest:
     return ActionRequest(KEY, CommandIntent(kind, target, app), "en")
 
 
 def _executor(
-    delegate: Delegate, verifier: Verifier, identity: tuple[str, int] | None,
-    *, remember_pointer: bool = True,
+    delegate: Delegate,
+    verifier: Verifier,
+    identity: tuple[str, int] | None,
+    *,
+    remember_pointer: bool = True,
 ) -> telegram.TelegramSavedMessagesExecutor:
     return telegram.TelegramSavedMessagesExecutor(
         delegate,
@@ -264,9 +611,7 @@ def test_other_chat_waits_for_two_stable_search_results(
     verifier = DelayedVerifier()
     result = _executor(
         Delegate(), verifier, (DESKTOP_ID, 12), remember_pointer=True
-    ).execute(
-        _request(CommandKind.OPEN_CHAT, "Alice", "telegram")
-    )
+    ).execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
     assert result.outcome is ActionOutcome.CONFIRMED
     assert len(calls) == 2
     assert calls[1][4:11] == ["click", "72", "219", "91", "24", "1600", "900"]
@@ -325,9 +670,7 @@ def test_other_chat_clicks_only_the_verified_box_and_checks_header(
     verifier = Verifier(match=ChatSearchMatch(70, 220, 90, 24, 1600, 900))
     result = _executor(
         Delegate(), verifier, (DESKTOP_ID, 12), remember_pointer=True
-    ).execute(
-        _request(CommandKind.OPEN_CHAT, "Alice", "telegram")
-    )
+    ).execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
     assert result.outcome is ActionOutcome.CONFIRMED
     assert calls[1] == [
         "/usr/bin/python3",
@@ -358,9 +701,7 @@ def test_chat_click_requires_advance_pointer_setup(
     verifier = Verifier(match=ChatSearchMatch(70, 92, 90, 13, 1600, 900))
     result = _executor(
         Delegate(), verifier, (DESKTOP_ID, 12), remember_pointer=False
-    ).execute(
-        _request(CommandKind.OPEN_CHAT, "Alice", "telegram")
-    )
+    ).execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
     assert result.error_code == "telegram_control_setup_required"
     assert calls == []  # Setup is required before any action-time portal request.
 
@@ -374,14 +715,19 @@ def test_one_local_chat_opens_without_prompt_despite_global_results(
     verifier = Verifier(
         match=own,
         choices=ChatSearchChoices(
-            own, (ChatSearchMatch(70, 182, 90, 13, 1600, 900),)
+            own,
+            (ChatSearchMatch(70, 182, 90, 13, 1600, 900),),
+            global_section_verified=True,
         ),
     )
     selection = TelegramChatSelection(prompts.append, lambda _: None)
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     selection.set_completion(executor.complete_selection)
@@ -398,6 +744,142 @@ def test_one_local_chat_opens_without_prompt_despite_global_results(
     assert len(calls) == 2
     assert calls[1][6] == "92"
     assert calls[1][-1] == "900"
+
+
+def test_one_visible_local_without_section_boundary_waits_for_user_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    prompts: list[ResponseRequest] = []
+    own = ChatSearchMatch(70, 92, 90, 13, 1600, 900)
+    verifier = Verifier(match=own, choices=ChatSearchChoices(own, ()))
+    selection = TelegramChatSelection(prompts.append, lambda _: None)
+    executor = telegram.TelegramSavedMessagesExecutor(
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
+        helper_path=Path("/tmp/telegram-helper.py"),
+    )
+    selection.set_completion(executor.complete_selection)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "SEARCH_TYPED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = executor.execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
+    assert result.error_code == "chat_selection_pending"
+    assert len(calls) == 1
+    assert "personal chats" in prompts[0].message
+    selection.cancel()
+
+
+def test_global_paging_keeps_scope_after_heading_scrolls_away(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = ChatSearchChoices(
+        None,
+        (ChatSearchMatch(70, 244, 90, 13, 1600, 900),),
+        global_section_verified=True,
+        view_signature="first",
+    )
+    # Without the heading, the OCR fallback calls this top row local.
+    later = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        view_signature="later",
+    )
+    verifier = Verifier(choices=later)
+    executor = _executor(Delegate(), verifier, (DESKTOP_ID, 12))
+    readings = iter((first, later, later))
+    monkeypatch.setattr(executor, "_settled_search_choices", lambda *_: next(readings))
+    monkeypatch.setattr(executor, "_scroll_search_results", lambda *_: True)
+    monkeypatch.setattr(
+        executor,
+        "_run_helper",
+        lambda *_: subprocess.CompletedProcess([], 0, "CHAT_RESULT_CLICKED", ""),
+    )
+    identity = (DESKTOP_ID, 12)
+    next_page = executor.next_search_page(identity, "Alice", first, Event())
+    assert next_page is not None
+    assert not next_page.local_results
+    assert len(next_page.global_results) == 1
+    result = executor.complete_selection(
+        _request(CommandKind.OPEN_CHAT, "Alice", "telegram"),
+        identity,
+        "Alice",
+        next_page,
+        1,
+        Event(),
+    )
+    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
+
+
+def test_personal_paging_never_switches_to_global_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        view_signature="first",
+    )
+    later = ChatSearchChoices(
+        None,
+        (ChatSearchMatch(70, 244, 90, 13, 1600, 900),),
+        global_section_verified=True,
+        view_signature="later",
+    )
+    executor = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12))
+    readings = iter((first, later))
+    monkeypatch.setattr(executor, "_settled_search_choices", lambda *_: next(readings))
+    monkeypatch.setattr(executor, "_scroll_search_results", lambda *_: True)
+    assert executor.next_search_page((DESKTOP_ID, 12), "Alice", first, Event()) is None
+
+
+def test_personal_paging_rejects_unverified_section_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        view_signature="first",
+    )
+    # This might be another personal row or a global row after its heading
+    # scrolled out of view; neither is safe to label personal.
+    ambiguous = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        view_signature="later",
+    )
+    executor = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12))
+    readings = iter((first, ambiguous))
+    monkeypatch.setattr(executor, "_settled_search_choices", lambda *_: next(readings))
+    monkeypatch.setattr(executor, "_scroll_search_results", lambda *_: True)
+    assert executor.next_search_page((DESKTOP_ID, 12), "Alice", first, Event()) is None
+
+
+def test_personal_paging_accepts_local_row_above_verified_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        view_signature="first",
+    )
+    later = ChatSearchChoices(
+        ChatSearchMatch(70, 92, 90, 13, 1600, 900),
+        (),
+        global_section_verified=True,
+        view_signature="later",
+    )
+    executor = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12))
+    readings = iter((first, later))
+    monkeypatch.setattr(executor, "_settled_search_choices", lambda *_: next(readings))
+    monkeypatch.setattr(executor, "_scroll_search_results", lambda *_: True)
+    assert executor.next_search_page((DESKTOP_ID, 12), "Alice", first, Event()) == later
 
 
 @pytest.mark.parametrize(
@@ -424,9 +906,12 @@ def test_named_chat_asks_then_rechecks_selected_row(
 
     selection = TelegramChatSelection(prompts.append, on_feedback)
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     selection.set_completion(executor.complete_selection)
@@ -448,7 +933,7 @@ def test_named_chat_asks_then_rechecks_selected_row(
     )
     assert selection.on_final_speech(answer)
     assert done.wait(4)
-    assert feedback[0].outcome is ActionOutcome.CONFIRMED
+    assert feedback[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
     assert calls[1][6] == str(expected_top)
 
 
@@ -472,9 +957,12 @@ def test_global_only_chat_asks_and_rechecks_selected_row(
         prompts.append, lambda item: (feedback.append(item), done.set())
     )
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     selection.set_completion(executor.complete_selection)
@@ -491,7 +979,7 @@ def test_global_only_chat_asks_and_rechecks_selected_row(
     assert len(calls) == 1
     assert selection.on_final_speech("number two")
     assert done.wait(4)
-    assert feedback[0].outcome is ActionOutcome.CONFIRMED
+    assert feedback[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
     assert calls[1][6] == "306"
 
 
@@ -511,9 +999,12 @@ def test_global_only_chat_rejects_moved_row_before_click(
         lambda _: None, lambda item: (feedback.append(item), done.set())
     )
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     selection.set_completion(executor.complete_selection)
@@ -557,9 +1048,12 @@ def test_named_chat_rejects_moved_result_after_spoken_selection(
 
     selection = TelegramChatSelection(lambda _: None, on_feedback)
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     selection.set_completion(executor.complete_selection)
@@ -612,11 +1106,15 @@ def test_stopping_selection_during_fresh_read_prevents_click(
     verifier = PausingVerifier()
     selection = TelegramChatSelection(lambda _: None, lambda _: None)
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=verifier,
-        selection=selection, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
+
     def complete(*args):
         try:
             return executor.complete_selection(*args)
@@ -648,11 +1146,13 @@ def test_refreshing_global_results_do_not_block_local_choice_prompt(
     choices = cycle(
         (
             ChatSearchChoices(
-                own, (ChatSearchMatch(70, 244, 90, 13, 1600, 900),),
+                own,
+                (ChatSearchMatch(70, 244, 90, 13, 1600, 900),),
                 (second_local,),
             ),
             ChatSearchChoices(
-                own, (ChatSearchMatch(70, 310, 90, 13, 1600, 900),),
+                own,
+                (ChatSearchMatch(70, 310, 90, 13, 1600, 900),),
                 (second_local,),
             ),
         )
@@ -672,9 +1172,12 @@ def test_refreshing_global_results_do_not_block_local_choice_prompt(
     prompts: list[ResponseRequest] = []
     flow = TelegramChatSelection(prompts.append, lambda _: None)
     executor = telegram.TelegramSavedMessagesExecutor(
-        Delegate(), telegram_desktop_id=DESKTOP_ID,
-        identity_reader=lambda: (DESKTOP_ID, 12), verifier=UnstableVerifier(),
-        selection=flow, remember_pointer=True,
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=UnstableVerifier(),
+        selection=flow,
+        remember_pointer=True,
         helper_path=Path("/tmp/telegram-helper.py"),
     )
     flow.set_completion(executor.complete_selection)

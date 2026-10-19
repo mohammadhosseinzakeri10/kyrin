@@ -34,6 +34,7 @@ def _scroll(
     steps: int,
     left_pane: bool,
     smooth: bool,
+    right_pane: bool = False,
 ) -> bool:
     frame = _window_and_pointer()
     if frame is None or frame[:2] != expected:
@@ -41,7 +42,9 @@ def _scroll(
     _, _, frame_x, frame_y, width, height, pointer_x, pointer_y = frame
     if width < 300 or height < 200:
         return False
-    target_x = frame_x + int(width * (0.15 if left_pane else 0.5))
+    target_x = frame_x + int(
+        width * (0.65 if right_pane else 0.15 if left_pane else 0.5)
+    )
     target_y = frame_y + int(height * 0.55)
     connection.call_sync(
         BUS,
@@ -118,12 +121,15 @@ def main() -> int:
         direction = "down"
         steps = 1
         left_pane = False
+        right_pane = False
         token_name = "desktop-scroll"
     else:
         if len(sys.argv) != 7:
             raise ValueError("expected app ID, PID, direction, steps, area, token")
         _, app_id, pid_text, direction, steps_text, area, token_name = sys.argv
-        if direction not in {"up", "down"} or area not in {"center", "left"}:
+        if direction not in {"up", "down"} or area not in {
+            "center", "left", "right"
+        }:
             raise ValueError("invalid scroll direction or area")
         steps = int(steps_text)
         if not 1 <= steps <= 4:
@@ -137,6 +143,7 @@ def main() -> int:
             print("FOCUS_CHANGED", flush=True)
             return 2
         left_pane = area == "left"
+        right_pane = area == "right"
         mode = "scroll"
 
     token_path = permission_token_path(token_name)
@@ -188,6 +195,7 @@ def main() -> int:
             steps=steps,
             left_pane=left_pane,
             smooth=token_name == "desktop-scroll",
+            right_pane=right_pane,
         ):
             print("SCROLL_UNCERTAIN", flush=True)
             return 2

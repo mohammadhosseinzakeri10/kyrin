@@ -81,6 +81,30 @@ _TEXT: dict[str, dict[str, str]] = {
         "scroll_unavailable": "نتوانستم اسکرول را انجام دهم. لطفاً صفحه را بررسی کنید.",
         "scroll_dispatched": "فرمان اسکرول ارسال شد؛ حرکت صفحه را هنوز تأیید نکرده‌ام.",
         "chat_unverified": "بازشدن چت را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید.",
+        "telegram_menu_uncertain": (
+            "گزینهٔ موردنظر را در منوی تلگرام با اطمینان پیدا نکردم."
+        ),
+        "telegram_setting_not_found": (
+            "گزینهٔ تنظیمات را در صفحهٔ فعلی تلگرام با اطمینان پیدا نکردم."
+        ),
+        "telegram_settings_not_open": (
+            "صفحهٔ تنظیمات تلگرام باز نیست؛ ابتدا آن را باز کنید."
+        ),
+        "telegram_settings_navigation_uncertain": (
+            "بازگشت به فهرست تنظیمات تلگرام تأیید نشد؛ فرمان متوقف شد."
+        ),
+        "telegram_setting_requires_value": (
+            "این مورد یک کنترل تنظیمات است، نه صفحهٔ قابل‌بازکردن؛ تغییری اعمال نشد."
+        ),
+        "telegram_input_unknown": (
+            "نتیجهٔ ورودی تلگرام مشخص نیست؛ لطفاً صفحه را بررسی کنید."
+        ),
+        "telegram_view_dispatched": (
+            "فرمان به تلگرام فرستاده شد؛ صفحهٔ مقصد را هنوز تأیید نکرده‌ام."
+        ),
+        "telegram_search_dispatched": (
+            "فرمان جست‌وجو به تلگرام فرستاده شد؛ وضعیت کادر را هنوز تأیید نکرده‌ام."
+        ),
         "no_window": "پنجره‌ای از این برنامه پیدا نکردم.",
         "multiple_windows": (
             "این برنامه چند پنجره دارد. پنجرهٔ موردنظر را فعال کنید "
@@ -101,6 +125,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "confirmed_active_app": "برنامهٔ موردنظر اکنون فعال است.",
         "launch_accepted": (
             "درخواست انجام کار پذیرفته شد؛ نتیجهٔ آن هنوز تأیید نشده است."
+        ),
+        "chat_selection_dispatched": (
+            "روی نتیجهٔ انتخاب‌شده کلیک شد؛ به‌دلیل عنوان‌های یکسان، "
+            "هویت دقیق چت تأیید نشد."
         ),
         "unknown": "نتیجهٔ انجام کار مشخص نیست. لطفاً وضعیت را بررسی کنید.",
         "failed": "نتوانستم این کار را انجام دهم. لطفاً دوباره تلاش کنید.",
@@ -149,8 +177,7 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "choose_operation_only_open": "Open {target}? Say yes or no.",
         "choose_window": (
-            "Only {target} windows are shown. "
-            "Say a window number or click its preview."
+            "Only {target} windows are shown. Say a window number or click its preview."
         ),
         "choose_open_window": (
             "Windows of apps you've allowed to be controlled are shown. "
@@ -196,6 +223,30 @@ _TEXT: dict[str, dict[str, str]] = {
         "chat_unverified": (
             "I couldn't verify that the chat opened. Please check the screen."
         ),
+        "telegram_menu_uncertain": (
+            "I couldn't confidently find that Telegram menu item."
+        ),
+        "telegram_setting_not_found": (
+            "I couldn't confidently find that item in Telegram Settings."
+        ),
+        "telegram_settings_not_open": (
+            "Telegram Settings is not open. Open it first."
+        ),
+        "telegram_settings_navigation_uncertain": (
+            "I couldn't verify the return to Telegram Settings, so I stopped."
+        ),
+        "telegram_setting_requires_value": (
+            "That item is a settings control, not a page to open. No change was made."
+        ),
+        "telegram_input_unknown": (
+            "The Telegram input result is unclear. Please check the screen."
+        ),
+        "telegram_view_dispatched": (
+            "I sent the command to Telegram, but haven't verified the destination."
+        ),
+        "telegram_search_dispatched": (
+            "I sent the search input to Telegram, but haven't verified the field."
+        ),
         "no_window": "I couldn't find an open window for that app.",
         "unavailable": "This window does not support the requested change.",
         "multiple_windows": (
@@ -215,6 +266,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "confirmed_active_app": "The requested app is now active.",
         "launch_accepted": (
             "The request was accepted; completion has not been confirmed."
+        ),
+        "chat_selection_dispatched": (
+            "I clicked the selected result, but identical titles prevent "
+            "exact chat identity confirmation."
         ),
         "unknown": "The result is unclear. Please check what happened.",
         "failed": "I couldn't complete that action. Please try again.",
@@ -303,6 +358,23 @@ class ResponsePresenter:
             ):
                 text = messages["scroll_dispatched"]
             elif (
+                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                and event.intent.kind is CommandKind.OPEN_CHAT
+            ):
+                text = messages["chat_selection_dispatched"]
+            elif (
+                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                and event.intent.kind
+                in (CommandKind.TELEGRAM_VIEW, CommandKind.TELEGRAM_SETTINGS)
+            ):
+                text = messages["telegram_view_dispatched"]
+            elif (
+                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                and event.intent.kind
+                in (CommandKind.TELEGRAM_SEARCH_FOCUS, CommandKind.TELEGRAM_SEARCH)
+            ):
+                text = messages["telegram_search_dispatched"]
+            elif (
                 event.error_code in {"unsupported_action", "unsupported_chat"}
                 and event.intent.kind is CommandKind.OPEN_CHAT
             ):
@@ -316,6 +388,12 @@ class ResponsePresenter:
                 "telegram_not_active",
                 "telegram_focus_changed",
                 "chat_unverified",
+                "telegram_menu_uncertain",
+                "telegram_setting_not_found",
+                "telegram_setting_requires_value",
+                "telegram_settings_not_open",
+                "telegram_settings_navigation_uncertain",
+                "telegram_input_unknown",
                 "chat_search_uncertain",
                 "chat_selection_expired",
                 "chat_selection_cancelled",
@@ -376,7 +454,8 @@ class ResponsePresenter:
                 options=("؛ " if language == "fa" else "; ").join(
                     f"{index}. {name}"
                     for index, name in enumerate(event.app_candidates, start=1)
-                ) + "."
+                )
+                + "."
             )
         if event.kind is ResponseKind.CHOOSE_OPERATION:
             labels = {
@@ -413,9 +492,7 @@ class ResponsePresenter:
                 template = messages["choose_operation_open"]
             else:
                 template = messages["choose_operation"]
-            return template.format(
-                target=event.target, options=options
-            )
+            return template.format(target=event.target, options=options)
         if event.kind is ResponseKind.CONFIRM_ACTION:
             return messages["confirm_action"].format(target=event.target)
         if event.kind is ResponseKind.CONFIRM_NUMBERED_CLOSE:

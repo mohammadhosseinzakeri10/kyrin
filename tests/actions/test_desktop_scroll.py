@@ -101,6 +101,48 @@ def test_scroll_amount_reaches_bounded_helper(
     assert commands[0][-3:] == ["2", "left", "desktop-scroll"]
 
 
+def test_telegram_open_chat_scroll_targets_right_pane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
+
+    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    executor = desktop_scroll.DesktopScrollExecutor(
+        Delegate(), desktop_ids={"telegram": "org.telegram.desktop"},
+        identity_reader=lambda: ("org.telegram.desktop", 42),
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(
+            CommandKind.SCROLL_DOWN, "telegram", scroll_area="chat"
+        ),
+    )
+    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert commands[0][-2:] == ["right", "desktop-scroll"]
+
+
+def test_chat_area_cannot_be_sent_to_another_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        desktop_scroll.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("scroll must not dispatch"),
+    )
+    executor = desktop_scroll.DesktopScrollExecutor(
+        Delegate(), desktop_ids={"firefox": "firefox.desktop"},
+        identity_reader=lambda: ("firefox.desktop", 21),
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(CommandKind.SCROLL_DOWN, "firefox", scroll_area="chat"),
+    )
+    assert executor.execute(request).error_code == "unsupported_scroll_area"
+
+
 def test_global_scroll_dispatches_for_unselected_focused_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

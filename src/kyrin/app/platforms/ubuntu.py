@@ -345,19 +345,24 @@ class UbuntuSessionFactory:
                     }
                 )
         if window_presence is not None and settings.allowed_window_apps:
-            supported_kinds.update({
-                CommandKind.SHOW_ALL_WINDOWS,
-                CommandKind.SELECT_APP_WINDOW,
-                CommandKind.CLOSE_SHOWN_WINDOW,
-                CommandKind.HIDE_APP_WINDOWS,
-                CommandKind.SELECT_OPEN_APP_WINDOW,
-            })
+            supported_kinds.update(
+                {
+                    CommandKind.SHOW_ALL_WINDOWS,
+                    CommandKind.SELECT_APP_WINDOW,
+                    CommandKind.CLOSE_SHOWN_WINDOW,
+                    CommandKind.HIDE_APP_WINDOWS,
+                    CommandKind.SELECT_OPEN_APP_WINDOW,
+                }
+            )
         if chat_enabled:
-            supported_kinds.add(CommandKind.OPEN_CHAT)
-        if (
-            settings.allow_desktop_scroll
-            and self._focused_window is not None
-        ):
+            supported_kinds.update({
+                CommandKind.OPEN_CHAT,
+                CommandKind.TELEGRAM_VIEW,
+                CommandKind.TELEGRAM_SETTINGS,
+                CommandKind.TELEGRAM_SEARCH_FOCUS,
+                CommandKind.TELEGRAM_SEARCH,
+            })
+        if settings.allow_desktop_scroll and self._focused_window is not None:
             supported_kinds.update({CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN})
         if window_controls_available:
             supported_kinds.update(
@@ -381,8 +386,7 @@ class UbuntuSessionFactory:
                 else frozenset(),
                 allowed_window_apps=frozenset(settings.allowed_window_apps),
                 allow_focused_scroll=(
-                    settings.allow_desktop_scroll
-                    and self._focused_window is not None
+                    settings.allow_desktop_scroll and self._focused_window is not None
                 ),
                 allowed_close_apps=frozenset(settings.allowed_close_apps),
                 supported_kinds=frozenset(supported_kinds),
@@ -564,9 +568,8 @@ class UbuntuSessionFactory:
                 self._on_event(output)
                 if (
                     isinstance(output, ActionFeedback)
-                    and output.intent.kind in (
-                        CommandKind.SHOW_APP_WINDOWS, CommandKind.SHOW_ALL_WINDOWS
-                    )
+                    and output.intent.kind
+                    in (CommandKind.SHOW_APP_WINDOWS, CommandKind.SHOW_ALL_WINDOWS)
                     and output.outcome is ActionOutcome.LAUNCH_ACCEPTED
                 ):
                     return
@@ -612,9 +615,9 @@ class UbuntuSessionFactory:
                 and settings.system_power_enabled
             )
             power_flow.set_voice_ready(
-                lambda: echo_cancel is not None
-                or speaker is None
-                or not speaker.is_active
+                lambda: (
+                    echo_cancel is not None or speaker is None or not speaker.is_active
+                )
             )
             if self._system_power is not None and self._response_speaker is None:
                 power_flow.set_announcement(

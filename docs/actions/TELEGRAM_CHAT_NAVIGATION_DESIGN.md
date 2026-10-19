@@ -1,5 +1,29 @@
 # Telegram chat navigation: first bounded action
 
+## Telegram destination commands (2026-10-18)
+
+With Telegram in the foreground, English commands for Archive, Contacts,
+Settings, My Profile, and Calls route through `TELEGRAM_VIEW`. `Create new
+group` and `Create new channel` only open their respective creation screens;
+they never choose members, enter a name, or submit creation. Existing Telegram
+screen and input consent plus a fresh desktop ID/PID match are required.
+Archive and Contacts use Telegram Desktop's default Ctrl+9 and Ctrl+J
+shortcuts. Other destinations use the main menu: KYRIN locates one exact OCR
+label twice before clicking, then checks the destination title. A click with
+uncertain title verification is reported as dispatched, not confirmed. The
+main-menu geometry and local UI labels require a live owner test on the
+installed Telegram build.
+
+The initial live menu test revealed that the top-left button is a back button
+inside Archive. Navigation now performs at most two bounded top-left clicks,
+checking for a stable menu item after each. A menu target also requires a
+second known main-menu label in the same OCR frame, so a similarly named chat
+row cannot by itself authorize a click. The rule path accepts `Go to setting`
+as Telegram Settings when Telegram is the observed active app.
+The owner's STT repeatedly rendered spoken `my calls` as `my carls` in a live
+trial. That exact observed spelling is a bounded English alias for Calls while
+Telegram is active; unrelated phrases remain unrecognized.
+
 ## Status and evidence
 
 The Ubuntu application has a verified `Saved Messages` action and a guarded
@@ -344,6 +368,16 @@ STT rendered other tries as `More Skool Up`, `Scroll down list`, and
 `Scroll up Liz`; these exact scroll-shaped spellings are accepted. A lone
 `Oh` remains non-actionable because it is ambiguous ordinary speech.
 
+Telegram voice scrolling now supports an explicit area. `Scroll chat down`
+or `Scroll up in the chat` aims the smooth pointer-axis input inside the open
+conversation at 65% of the window width; `Scroll chat list down` targets the
+left chat list at 15%. `More` repeats both the previous direction and area.
+The short `Scroll down/up` command keeps its existing left-list target.
+Other applications continue to use the window center. These commands reuse
+the saved general desktop-scroll grant, with the same fresh app/PID and pointer
+checks. Deterministic tests pass; movement inside a live Telegram conversation
+was subsequently confirmed by the owner. No action diagnostic was supplied.
+
 Telegram named-chat search can now scroll the left results pane up to four
 times, with a total scan deadline, when no selectable exact-name result is
 visible after typing the target. Each move is followed by fresh OCR and
@@ -353,6 +387,24 @@ up to page five. The current page is reread before scrolling; the next page
 must have a changed in-memory digest of visible left-pane OCR text. That
 digest is not logged or persisted. Selecting a number still rechecks the
 focused Telegram window and current result boxes before clicking.
+
+When one personal chat is visible but the Global Search Results boundary is
+not verified, that row is no longer treated as unique. KYRIN asks for a
+number and offers `next` so an offscreen same-name chat can be reached. A
+visible, verified global boundary still permits automatic opening of one
+personal match. Numbered result paging preserves the personal/global category;
+it refuses to switch a personal choice to global rows, and retains the global
+category after its heading has scrolled away. A later personal-chat page is
+offered only when its local rows appear above a verified section boundary;
+an ambiguous page stops safely. A numbered click followed by a
+matching chat header reports `launch_accepted`, because equal chat titles
+cannot prove which account or conversation was opened. The user-facing reply
+states this limitation. Bounded paging and these safeguards have deterministic
+tests; offscreen duplicate and global-only pages still need live owner tests.
+Spoken `Cancel` is also recognized while a page read or numbered click is in
+progress. Cancellation prevents a click that has not yet started. If Telegram
+already received a click, KYRIN reports that actual result instead of silently
+hiding it; an in-flight OS input cannot be undone.
 
 In the first owner microphone test, `Scroll down` reached the portal and
 returned `confirmed` but the Telegram page did not visibly move. That exposed
@@ -373,3 +425,123 @@ pages are numbered per visible page.
 
 References: [XDG RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html),
 [Telegram Desktop shortcut source](https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/core/shortcuts.cpp).
+
+## Telegram Settings navigation (2026-10-18)
+
+The English voice grammar now recognizes the owner's named Settings sections,
+plus `Go to Back` and `Cancel`, only when Telegram is the freshly observed
+foreground app. Each section is an exact, case-insensitive spoken label mapped
+to a visible label. It does not synthesize arbitrary Telegram actions.
+
+Section navigation reads the active Telegram window through OCR. A settings
+row is eligible only when a unique Settings heading appears above it in the
+right pane, its text is unique and high confidence, and two reads agree on
+its position. The RemoteDesktop helper separately checks the Telegram app/PID,
+unchanged window geometry and pointer position before clicking. If the row
+is not visible, the executor can open Settings through the existing verified
+menu path and scan up to three right-pane scrolls. It stops without a settings
+click on uncertain or missing labels. The destination title must be observed
+to report `confirmed`; otherwise the result is `launch_accepted`.
+
+`Back` and `Cancel` currently send one Escape to the focused Telegram window
+and report only dispatch. Escape may close a menu or dialog rather than return
+to the prior settings page; the resulting page is not yet verified. `Cancel`
+for a pending chat or app clarification retains its earlier dialogue behavior.
+
+The section labels were supplied by the owner. A screenshot of Telegram
+Desktop 7.3.1 now confirms the visible top-level rows described below.
+Individual switches, colors, account settings,
+and sensitive changes are **not yet implemented**. The agreed rule for future
+sensitive changes is a separate voice confirmation before committing them.
+Implementation of each control requires a verified current-state reader and
+post-change observation; OCR of a label alone is not enough to infer a toggle
+state. Nested control changes still need their own observed UI states to
+ground a safe implementation.
+
+The owner's later STT output rendered `Go to setting` as `go to seating` and
+the generic app resolver asked whether to open the Settings application.
+The exact observed `seating` and `my seating` phrases now map to Telegram
+Settings only when Telegram is the freshly observed foreground app. The
+direct rule also supersedes an older pending app-name clarification. The
+application Settings command remains separate outside that context.
+
+In a later live trial, `go to seating` reached `telegram_view: settings`, but
+the top-left menu opened without entering Settings. The action spent about
+14 seconds after the final transcript and returned `telegram_menu_uncertain`.
+The owner's screenshot of the open menu was read with the installed OCR
+runtime. Whole-window OCR found no menu words; OCR of the left 30% and top
+65% of the same pixels found the Settings label at `(61, 432)` with 0.77
+confidence, plus the other menu labels. Menu verification now requests that
+cropped region, while preserving original full-window dimensions for the
+subsequent geometry and pointer checks. The pre-menu OCR check stops after
+one missing read and post-menu matching uses at most three. The destination
+Settings title is checked in the right pane. The cropped read and menu
+matcher passed on the supplied screenshot; the complete live command awaits
+owner retest.
+
+The owner later confirmed Settings opens, but `Go to My Account` returned
+`telegram_setting_not_found` after about 32 seconds and the executor tried to
+open Settings again. The supplied Settings screenshot shows `My Account` as the
+first row in a centered panel. The installed Tesseract runtime recognized both
+`Settings` and `My Account` in that screenshot; replacing OCR is not supported
+by this evidence. Settings-item and Settings-title verification now OCR only
+the centered panel and translate text boxes back to full-window coordinates.
+When the Settings title is already visible, a missed row no longer reopens the
+main menu. `My Account` is the fixed first row, so a miss does not trigger
+useless scrolling. A live owner retest is still needed to verify the corrected
+desktop behavior.
+
+The screenshot confirms these top-level rows: My Account, Notifications and
+Sounds, Privacy and Security, Chat Settings, Folders, Advanced, Speakers and
+Camera, Battery and Animations, Language, Telegram FAQ, Telegram Features, and
+Ask a Question. `Default interface scale` is a control, not a destination;
+`Go to` does not click it. The earlier `Default`, `Interface`, and `Skills`
+destinations did not appear as separate rows in this screenshot and were
+removed from the fixed list. Known spoken names remain short aliases. For an
+unlisted visible row, `Open settings <label>` or
+`Go to <label> in Telegram settings` sends the exact spoken label to OCR
+verification. It can click only one stable matching row below the Settings
+title; it does not infer, toggle, or commit a settings value. This keeps new
+navigation labels data-driven without granting arbitrary screen clicks.
+
+For shorter speech, a successful *interpretation* of `Go to Settings` gives
+the next 90 seconds of Telegram dialogue a Settings-navigation context.
+During that period, `Go to <label>` can name an unlisted row. The executor
+must freshly verify that the Settings title is visible before looking for or
+clicking that row. This context is only a routing hint; it does not establish
+that the UI action succeeded, and it is cleared by Back/Cancel or another app
+command. Known forms such as `Go to My Account` continue to work directly.
+
+In a later live trial, the owner said `Go to Chat Setting` but STT produced
+`go to chat seating`. That exact observed variant now maps to Chat Settings,
+including after `Cancel` clears the dialogue context. The owner also supplied
+an Advanced-page screenshot and confirmed `Back` moves one Settings level up.
+The OCR reader now makes a narrower center-panel read for the current page
+header. If a known top-level section is requested while a nested page such
+as Advanced is open, the executor sends a bounded Back input, verifies that
+the root Settings heading reappears, and then searches for the requested row.
+It stops if the return cannot be verified. The supplied root and Advanced
+screenshots both yielded the expected headings with the installed OCR runtime.
+The new voice flow still needs live validation.
+
+Arbitrary controls within Advanced are not yet actionable through this path.
+OCR text can locate a label but cannot by itself establish whether the row is
+a navigation target, a checkbox, a switch, or a value with side effects. A
+cross-app screen-navigation layer should combine a fresh foreground-window
+identity, UI roles when available, OCR for visible text, and post-action state
+checks. It should capture only on a relevant command and read the smallest
+useful region to keep latency bounded. This broader layer remains a proposal.
+
+## Explicit Telegram search (2026-10-18)
+
+`Go to search` and `Open Telegram search` focus Telegram's global search box.
+`Search for <name>`, `Search Telegram for <name>` and
+`Find <name> in Telegram` type a bounded name and leave the results visible;
+they do not press Enter or select a result. These commands require freshly
+observed Telegram focus and the saved control permission. The helper exits an
+open conversation before Ctrl+F, matching the existing named-chat search
+behavior. A typed query is reported as confirmed only if OCR sees its exact
+case-insensitive text in the left search field; otherwise the result merely
+says input was dispatched. Automatic result selection remains the separate
+`Open chat <name>` flow. This path has deterministic tests but no owner live
+validation yet.

@@ -106,6 +106,12 @@ class _Pending:
     page: int = 1
 
 
+@dataclass(slots=True)
+class _Active:
+    cancellation: Event
+    report_after_spoken_cancel: bool = False
+
+
 Completion = Callable[
     [ActionRequest, tuple[str, int], str, ChatSearchChoices, int | None, Event],
     ActionResult,
@@ -130,7 +136,7 @@ class TelegramChatSelection:
         self._page_navigation: PageNavigation | None = None
         self._pending: _Pending | None = None
         self._timer: Timer | None = None
-        self._active: set[Event] = set()
+        self._active: dict[Event, _Active] = {}
         self._lock = Lock()
 
     def set_completion(self, completion: Completion) -> None:
@@ -146,7 +152,11 @@ class TelegramChatSelection:
         target: str,
         choices: ChatSearchChoices,
     ) -> bool:
-        local_choice = len(choices.local_results) >= 2
+        # Without a visible global-section boundary, another local chat may
+        # be below the viewport. Keep the choice open for bounded paging.
+        local_choice = bool(choices.local_results) and (
+            len(choices.local_results) >= 2 or not choices.global_section_verified
+        )
         global_choice = (
             not choices.local_results
             and choices.global_section_verified
@@ -164,8 +174,9 @@ class TelegramChatSelection:
         with self._lock:
             if self._timer is not None:
                 self._timer.cancel()
-            for cancellation in self._active:
-                cancellation.set()
+            for active in self._active.values():
+                active.cancellation.set()
+                active.report_after_spoken_cancel = False
             self._pending = pending
             timer = Timer(_TIMEOUT_SECONDS, lambda: self._expire(pending))
             timer.daemon = True
@@ -175,9 +186,15 @@ class TelegramChatSelection:
         return True
 
     def on_final_speech(self, speech: str) -> bool:
+        answer = fold_case(speech).strip(" .!?؟")
         with self._lock:
             pending = self._pending
             if pending is None:
+                if answer in {"cancel", "no", "لغو", "خیر", "نه"} and self._active:
+                    for active in self._active.values():
+                        active.cancellation.set()
+                        active.report_after_spoken_cancel = True
+                    return True
                 return False
             if monotonic() >= pending.expires_at:
                 self._pending = None
@@ -189,7 +206,6 @@ class TelegramChatSelection:
             self._feedback(pending.request, "chat_selection_expired")
             return True
 
-        answer = fold_case(speech).strip(" .!?؟")
         if answer in {"cancel", "no", "لغو", "خیر", "نه"}:
             with self._lock:
                 cancelled = self._pending == pending
@@ -228,8 +244,9 @@ class TelegramChatSelection:
             pending = self._pending
             self._pending = None
             self._cancel_timer_locked()
-            for cancellation in self._active:
-                cancellation.set()
+            for active in self._active.values():
+                active.cancellation.set()
+                active.report_after_spoken_cancel = False
         if pending is not None:
             self._feedback(pending.request, "chat_selection_cancelled")
 
@@ -289,7 +306,7 @@ class TelegramChatSelection:
             self._pending = None
             self._cancel_timer_locked()
             cancellation = Event()
-            self._active.add(cancellation)
+            self._active[cancellation] = _Active(cancellation)
         completion = self._completion
         assert completion is not None
 
@@ -314,8 +331,12 @@ class TelegramChatSelection:
                     error_code="executor_exception",
                 )
             with self._lock:
-                self._active.discard(cancellation)
-            if not cancellation.is_set():
+                active = self._active.pop(cancellation)
+                report = (
+                    not cancellation.is_set()
+                    or active.report_after_spoken_cancel
+                )
+            if report:
                 self._on_feedback(
                     ActionFeedback(
                         result.key,
@@ -339,7 +360,7 @@ class TelegramChatSelection:
             self._pending = None
             self._cancel_timer_locked()
             cancellation = Event()
-            self._active.add(cancellation)
+            self._active[cancellation] = _Active(cancellation)
         navigation = self._page_navigation
         assert navigation is not None
 
@@ -352,12 +373,16 @@ class TelegramChatSelection:
                 _LOGGER.exception("Telegram result paging failed")
                 choices = None
             with self._lock:
-                self._active.discard(cancellation)
-                if cancellation.is_set():
-                    return
-                if choices is None:
+                active = self._active.pop(cancellation)
+                was_cancelled = cancellation.is_set()
+                if was_cancelled:
+                    report_cancel = active.report_after_spoken_cancel
+                    next_pending = None
+                elif choices is None:
+                    report_cancel = False
                     next_pending = None
                 else:
+                    report_cancel = False
                     next_pending = _Pending(
                         pending.request,
                         pending.identity,
@@ -374,6 +399,10 @@ class TelegramChatSelection:
                     timer.daemon = True
                     self._timer = timer
                     timer.start()
+            if was_cancelled:
+                if report_cancel:
+                    self._feedback(pending.request, "chat_selection_cancelled")
+                return
             if next_pending is None:
                 self._feedback(pending.request, "chat_search_uncertain")
             else:
@@ -383,15 +412,17 @@ class TelegramChatSelection:
 
     def _prompt(self, pending: _Pending) -> None:
         count = len(pending.choices.selectable_results)
-        if pending.page > 1:
-            english = f"I found {count} matching results on this page. "
-            persian = f"در این صفحه {count} نتیجهٔ هم‌نام پیدا شد. "
-        elif pending.choices.local_results:
-            english = f"I found {count} chats with that name. "
-            persian = f"{count} چت با این نام پیدا شد. "
+        if pending.choices.local_results:
+            place = " on this page" if pending.page > 1 else ""
+            english = f"I found {count} personal chats with that name{place}. "
+            persian = f"{count} چت شخصی با این نام در این صفحه پیدا شد. "
         else:
-            english = f"I found {count} matching global search results in Telegram. "
-            persian = f"{count} نتیجهٔ سراسری با این نام در تلگرام پیدا شد. "
+            place = " on this page" if pending.page > 1 else ""
+            english = (
+                f"I found {count} matching global search results{place} "
+                "in Telegram. "
+            )
+            persian = f"{count} نتیجهٔ سراسری با این نام در این صفحه پیدا شد. "
         if count == 1:
             english += "Say one or the first to open it."
             persian += "برای بازکردن آن «یک» یا «اول» را بگویید."

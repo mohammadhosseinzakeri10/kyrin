@@ -86,6 +86,20 @@ def test_scroll_dispatch_does_not_claim_visible_movement() -> None:
     )
 
 
+def test_duplicate_chat_click_does_not_claim_unique_identity() -> None:
+    feedback = ActionFeedback(
+        KEY,
+        CommandIntent(CommandKind.OPEN_CHAT, "My Mother", "telegram"),
+        ActionOutcome.LAUNCH_ACCEPTED,
+        ResponseChannel.TEXT_ONLY,
+        None,
+        "en",
+    )
+    text = ResponsePresenter("en").present(feedback).text
+    assert "clicked the selected result" in text
+    assert "prevent exact chat identity confirmation" in text
+
+
 def test_clarification_is_localized_and_keeps_candidate_order() -> None:
     event = ResponseRequest(
         7,

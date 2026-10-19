@@ -232,3 +232,85 @@ def test_next_results_replaces_visible_numbered_page() -> None:
     assert flow.on_final_speech("number two")
     assert selected.wait(2)
     assert chosen_tops == [292]
+    assert "personal chats" in prompts[1].message
+
+
+def test_global_next_page_keeps_global_wording() -> None:
+    prompts: list[ResponseRequest] = []
+    second_prompt = Event()
+
+    def prompt(item: ResponseRequest) -> None:
+        prompts.append(item)
+        if len(prompts) == 2:
+            second_prompt.set()
+
+    flow = TelegramChatSelection(prompt, lambda _: None)
+    first = ChatSearchChoices(
+        None, (ChatSearchMatch(70, 182, 90, 13, 1600, 900),),
+        global_section_verified=True, view_signature="first",
+    )
+    later = ChatSearchChoices(
+        None, (ChatSearchMatch(70, 92, 90, 13, 1600, 900),),
+        global_section_verified=True, view_signature="later",
+    )
+    flow.set_completion(lambda *args: pytest.fail("no selection expected"))
+    flow.set_page_navigation(lambda *_args: later)
+    assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", first)
+    assert flow.on_final_speech("next")
+    assert second_prompt.wait(2)
+    assert "global search results" in prompts[1].message
+    flow.cancel()
+
+
+def test_spoken_cancel_while_paging_stops_the_prompt() -> None:
+    prompts: list[ResponseRequest] = []
+    feedback = []
+    started = Event()
+    release = Event()
+    finished = Event()
+    flow = TelegramChatSelection(
+        prompts.append,
+        lambda item: (feedback.append(item), finished.set()),
+    )
+    flow.set_completion(lambda *args: pytest.fail("no chat should be clicked"))
+
+    def navigate(identity, target, choices, cancellation):
+        started.set()
+        assert release.wait(2)
+        return _choices()
+
+    flow.set_page_navigation(navigate)
+    assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", _choices())
+    assert flow.on_final_speech("next")
+    assert started.wait(2)
+    assert flow.on_final_speech("cancel")
+    release.set()
+    assert finished.wait(2)
+    assert feedback[0].error_code == "chat_selection_cancelled"
+    assert len(prompts) == 1
+
+
+def test_spoken_cancel_during_click_reports_actual_result() -> None:
+    feedback = []
+    started = Event()
+    release = Event()
+    finished = Event()
+    flow = TelegramChatSelection(
+        lambda _: None,
+        lambda item: (feedback.append(item), finished.set()),
+    )
+
+    def complete(request, identity, target, choices, number, cancellation):
+        started.set()
+        assert release.wait(2)
+        # A click already sent to Telegram cannot be undone by speech.
+        return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    flow.set_completion(complete)
+    assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", _choices())
+    assert flow.on_final_speech("number one")
+    assert started.wait(2)
+    assert flow.on_final_speech("cancel")
+    release.set()
+    assert finished.wait(2)
+    assert feedback[0].outcome is ActionOutcome.LAUNCH_ACCEPTED

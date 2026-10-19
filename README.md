@@ -42,6 +42,8 @@ confirmations; only the inert safe preview has been validated end to end.
 Finalized speech text can be retained in a bounded local conversation history;
 audio is not stored by that feature.
 
+For spoken command examples and their meanings, see the [Persian command guide](docs/commands/USER_COMMAND_GUIDE_FA.md).
+
 Vosk currently runs on CPU. Whisper can use CPU or a separately installed
 CUDA runtime on supported NVIDIA hardware; the same weights serve both. A
 local Omnilingual ASR runtime can use one of six separately stored v2

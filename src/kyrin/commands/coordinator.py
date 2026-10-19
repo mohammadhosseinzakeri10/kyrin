@@ -37,6 +37,8 @@ from kyrin.commands.models import (
 )
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
+_TELEGRAM_SETTINGS_CONTEXT_SECONDS = 90.0
+
 
 class CommandCoordinator:
     """Track one STT stream and its dialogue reference across pauses.
@@ -61,7 +63,10 @@ class CommandCoordinator:
         self._emitted_candidate: CommandIntent | None = None
         self._pending: PendingCommandClarification | None = None
         self._last_referenced_app: str | None = None
-        self._last_scroll: tuple[str, CommandKind, int | None, float] | None = None
+        self._last_scroll: (
+            tuple[str, CommandKind, int | None, str | None, float] | None
+        ) = None
+        self._telegram_settings_context_at: float | None = None
 
     @property
     def pending_clarification(
@@ -81,6 +86,7 @@ class CommandCoordinator:
         """Drop a pending question when normal command listening is paused."""
         self._pending = None
         self._fragments.clear()
+        self._telegram_settings_context_at = None
 
     def start_new_stream(self) -> Sequence[CommandEvent]:
         """Reset segment IDs after STT reconnect; keep the pending dialogue."""
@@ -146,12 +152,16 @@ class CommandCoordinator:
             interpreted_text = self._fragments.combine(update.text) or update.text
         recent_scroll_kind: CommandKind | None = None
         recent_scroll_steps: int | None = None
+        recent_scroll_area: str | None = None
         current_scroll_app = observed_scroll_app or observed_active_app
         if self._last_scroll is not None and current_scroll_app is not None:
-            scroll_app, scroll_kind, scroll_steps, recorded_at = self._last_scroll
+            scroll_app, scroll_kind, scroll_steps, scroll_area, recorded_at = (
+                self._last_scroll
+            )
             if scroll_app == current_scroll_app and monotonic() - recorded_at <= 30:
                 recent_scroll_kind = scroll_kind
                 recent_scroll_steps = scroll_steps
+                recent_scroll_area = scroll_area
         interpretation = self.interpreter.interpret(
             interpreted_text,
             language=update.language,
@@ -166,6 +176,11 @@ class CommandCoordinator:
                 recent_scroll_kind,
                 recent_scroll_steps,
                 observed_scroll_app,
+                recent_scroll_area,
+                self._telegram_settings_context_at is not None
+                and observed_active_app == "telegram"
+                and monotonic() - self._telegram_settings_context_at
+                <= _TELEGRAM_SETTINGS_CONTEXT_SECONDS,
             ),
             pending=self._pending,
         )
@@ -223,9 +238,23 @@ class CommandCoordinator:
                 else (interpretation.intent,)
             )
             for item in intents:
+                if item.kind is CommandKind.TELEGRAM_VIEW and item.target == "settings":
+                    self._telegram_settings_context_at = monotonic()
+                elif item.kind is CommandKind.TELEGRAM_SETTINGS and item.target not in {
+                    "back", "cancel"
+                }:
+                    self._telegram_settings_context_at = monotonic()
+                elif (
+                    item.kind in {CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN}
+                    and item.target == "telegram"
+                ):
+                    pass
+                else:
+                    self._telegram_settings_context_at = None
                 if item.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
                     self._last_scroll = (
-                        item.target, item.kind, item.scroll_steps, monotonic()
+                        item.target, item.kind, item.scroll_steps,
+                        item.scroll_area, monotonic()
                     )
                 else:
                     self._last_scroll = None

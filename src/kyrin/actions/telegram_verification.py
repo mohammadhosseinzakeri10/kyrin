@@ -70,7 +70,8 @@ def search_choices(
         for span in observation.result.spans
         if span.box.left < width * 0.3
         and height * 0.075 < span.box.top < height * 0.75
-        and span.confidence is not None and span.confidence >= 0.65
+        and span.confidence is not None
+        and span.confidence >= 0.65
     )
     view_signature = sha256(visible_text.encode("utf-8")).hexdigest()
     visible = [
@@ -86,38 +87,38 @@ def search_choices(
     if len(queries) > 1:
         return None
     matches = [
-        match for match in visible
+        match
+        for match in visible
         if match.lowest_confidence is not None and match.lowest_confidence >= 0.75
     ]
-    query_bottom = (
-        queries[0].box.top + queries[0].box.height if queries else None
-    )
+    query_bottom = queries[0].box.top + queries[0].box.height if queries else None
     section_headers = [
-        match for match in find_exact_phrases(observation.result, "Search Results")
-        if height * 0.1 < match.box.top < height * 0.75
-        and match.box.left < width * 0.3
+        match
+        for match in find_exact_phrases(observation.result, "Search Results")
+        if height * 0.1 < match.box.top < height * 0.75 and match.box.left < width * 0.3
     ]
     if not section_headers:
         # Telegram may render "Global Search Results" while OCR keeps only
         # its final word. The heading starts close to the left edge.
         section_headers = [
-            match for match in find_exact_phrases(observation.result, "Results")
+            match
+            for match in find_exact_phrases(observation.result, "Results")
             if match.lowest_confidence is not None
             and match.lowest_confidence >= 0.65
             and height * 0.1 < match.box.top < height * 0.75
             and match.box.left < width * 0.15
         ]
     section_top = min((match.box.top for match in section_headers), default=None)
-    row_candidates = sorted((
-        match
-        for match in matches
-        if height * 0.075 < match.box.top < height * 0.75
-        and width * 0.025 <= match.box.left < width * 0.15
-        and (
-            query_bottom is None
-            or query_bottom + height * 0.015 < match.box.top
-        )
-    ), key=lambda match: match.box.top)
+    row_candidates = sorted(
+        (
+            match
+            for match in matches
+            if height * 0.075 < match.box.top < height * 0.75
+            and width * 0.025 <= match.box.left < width * 0.15
+            and (query_bottom is None or query_bottom + height * 0.015 < match.box.top)
+        ),
+        key=lambda match: match.box.top,
+    )
     # Two titles in the same row are ambiguous. Text farther right and below
     # a title belongs to its preview, not to another numbered chat.
     if any(
@@ -145,8 +146,7 @@ def search_choices(
             previous = local_candidates[-1]
             if (
                 match.box.top - previous.box.top <= height * 0.07
-                and abs(match.box.left - local_candidates[0].box.left)
-                <= width * 0.04
+                and abs(match.box.left - local_candidates[0].box.left) <= width * 0.04
             ):
                 local_candidates.append(match)
             else:
@@ -240,3 +240,166 @@ def saved_messages_header_visible(
     return chat_header_visible(
         observation, expected_app_id, expected_pid, "Saved Messages"
     )
+
+
+def telegram_left_label(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    label: str,
+    *,
+    menu: bool = False,
+) -> ChatSearchMatch | None:
+    """Locate exactly one title in Telegram's left pane or open main menu."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return None
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    matches = [
+        match
+        for match in find_exact_phrases(observation.result, label)
+        if match.lowest_confidence is not None
+        and match.lowest_confidence >= 0.65
+        and width * 0.025 <= match.box.left
+        and match.box.left + match.box.width < width * 0.3
+        and height * (0.07 if menu else 0.025)
+        < match.box.top
+        < height * (0.75 if menu else 0.22)
+    ]
+    if len(matches) != 1:
+        return None
+    box = matches[0].box
+    return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+
+
+def telegram_menu_item(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    label: str,
+) -> ChatSearchMatch | None:
+    """Require another main-menu label in the same frame before a menu click."""
+    target = telegram_left_label(
+        observation, expected_app_id, expected_pid, label, menu=True
+    )
+    if target is None:
+        return None
+    anchors = (
+        "New Group",
+        "New Channel",
+        "My Profile",
+        "Contacts",
+        "Calls",
+        "Settings",
+        "Saved Messages",
+    )
+    if not any(
+        telegram_left_label(
+            observation, expected_app_id, expected_pid, anchor, menu=True
+        )
+        is not None
+        for anchor in anchors
+        if anchor != label
+    ):
+        return None
+    return target
+
+
+def telegram_settings_item(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    label: str,
+) -> ChatSearchMatch | None:
+    """Find one settings row only beneath a visible Settings heading."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return None
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    headings = [
+        item for item in find_exact_phrases(observation.result, "Settings")
+        if item.lowest_confidence is not None
+        and item.lowest_confidence >= 0.65
+        and item.box.top < height * 0.2
+        and item.box.left >= width * 0.25
+    ]
+    if len(headings) != 1:
+        return None
+    matches = [
+        item for item in find_exact_phrases(observation.result, label)
+        if item.lowest_confidence is not None
+        and item.lowest_confidence >= 0.70
+        and width * 0.25 <= item.box.left
+        and item.box.left + item.box.width < width * 0.9
+        and headings[0].box.top + headings[0].box.height < item.box.top
+        and item.box.top < height * 0.86
+    ]
+    if len(matches) != 1:
+        return None
+    box = matches[0].box
+    return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+
+
+def telegram_view_title_visible(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    title: str,
+) -> bool:
+    """Confirm one high-confidence title near the top of the same window."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return False
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    return len([
+        item for item in find_exact_phrases(observation.result, title)
+        if item.lowest_confidence is not None
+        and item.lowest_confidence >= 0.70
+        and item.box.top < height * 0.2
+        and item.box.left >= width * 0.25
+    ]) == 1
+
+
+def telegram_settings_header(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+) -> str | None:
+    """Read the first word of a centered settings-page heading, not page rows."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return None
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    headings = [
+        span
+        for span in observation.result.spans
+        if span.confidence is not None
+        and span.confidence >= 0.65
+        and height * 0.06 < span.box.top < height * 0.12
+        and width * 0.25 < span.box.left < width * 0.6
+        and (word := span.text.strip("‘’'\".,:;!?"))
+        and word[0].isalpha()
+    ]
+    if not headings:
+        return None
+    first = min(headings, key=lambda span: span.box.left)
+    return first.text.strip("‘’'\".,:;!?").casefold()
+
+
+def telegram_search_query_visible(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    query: str,
+) -> bool:
+    """Check only the left search field; result-row text cannot confirm input."""
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return False
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    return len([
+        item for item in find_exact_phrases(observation.result, query)
+        if 0 <= item.box.left
+        and item.box.left + item.box.width < width * 0.3
+        and item.box.top < height * 0.075
+    ]) == 1

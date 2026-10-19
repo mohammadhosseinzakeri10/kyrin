@@ -36,6 +36,7 @@ from kyrin.commands.models import (
     PendingWindowSelection,
 )
 from kyrin.commands.open_window_meaning import requests_open_window_overview
+from kyrin.commands.telegram_settings import SPOKEN_SECTIONS
 from kyrin.commands.wake_names import DEFAULT_WAKE_NAMES
 from kyrin.desktop.window_presence import AppWindowPresence, WindowPresence
 from kyrin.text_normalization import fold_case, source_spelling
@@ -88,15 +89,46 @@ _OPEN_CHAT_WITH_APP_FA = re.compile(r"^چت (.+?) را در (تلگرام|وات
 _OPEN_CHAT_FA = re.compile(r"^(?:چت|گفتگوی) (.+?) را باز کن$")
 _GO_CHAT_FA = re.compile(r"^به (?:چت|گفتگوی) (.+?) برو$")
 _OPEN_CHAT_EN = re.compile(r"^(?:open|go to) chat (.+)$")
-_OPEN_CHAT_SUFFIX_EN = re.compile(
-    r"^(?:open|go to) (?:the )?(.+?)(?:'s)? chat$"
+_OPEN_CHAT_SUFFIX_EN = re.compile(r"^(?:open|go to) (?:the )?(.+?)(?:'s)? chat$")
+_TELEGRAM_VIEW_EN = re.compile(
+    r"^(?:(?:please )?(?:go to|open|show) (?:telegram(?:'s)? )?"
+    r"(?:the )?(archive|archived chats|contact|contacts|setting|settings|"
+    r"seating|my seating|my settings|my profile|profile|my calls|my carls|"
+    r"calls|carls)"
+    r"(?: in telegram| telegram)?"
+    r"|(?:please )?(?:(?:create|start) (?:a )?)?new (group|channel))$"
+)
+_TELEGRAM_SECTION_EN = re.compile(
+    r"^(?:please )?(?:go to|open|show) (?:the )?(.+?)"
+    r"(?: in telegram)?$"
+)
+_TELEGRAM_SETTINGS_NAMED_EN = re.compile(
+    r"^(?:please )?(?:go to|open|show) (?:the )?"
+    r"(?:(?:telegram )?settings? (.+)|(.+) in telegram settings?)$"
+)
+_TELEGRAM_SEARCH_FOCUS_EN = re.compile(
+    r"^(?:please )?(?:go to|open|show) (?:the )?"
+    r"(?:telegram )?search(?: in telegram)?$"
+)
+_TELEGRAM_SEARCH_EN = re.compile(
+    r"^(?:please )?(?:search (?:telegram )?for (.+?)(?: in telegram)?"
+    r"|find (.+?) in telegram)$"
 )
 _SCROLL_EN = re.compile(
     r"^(?:please )?(?:more )?(?:scrolls?|skool) (a little )?(up|down)"
     r"(?: (more|less|list|liz|a little))?$"
 )
-_SCROLL_FA = re.compile(
-    r"^(کمی )?اسکرول (بالا|پایین)(?: کن)?(?: (بیشتر|کمتر))?$"
+_SCROLL_AREA_EN = re.compile(
+    r"^(?:please )?(?:scrolls?|skool) "
+    r"(?:(?:the )?(chat list|conversation|chat|messages) (up|down)"
+    r"|(up|down) (?:in|inside) (?:the )?"
+    r"(chat list|conversation|chat|messages))"
+    r"(?: (more|less|a little))?$"
+)
+_SCROLL_FA = re.compile(r"^(کمی )?اسکرول (بالا|پایین)(?: کن)?(?: (بیشتر|کمتر))?$")
+_SCROLL_AREA_FA = re.compile(
+    r"^اسکرول (فهرست چت ها|لیست چت ها|چت|گفتگو) "
+    r"(بالا|پایین)(?: کن)?(?: (بیشتر|کمتر))?$"
 )
 _SCROLL_SHORT_EN = re.compile(r"^(?:(?:come|go) )?(up|down)$")
 _SCROLL_SHORT_FA = re.compile(r"^(?:برو )?(بالا|پایین)$")
@@ -104,9 +136,7 @@ _WAKE_PREFIXES = (*DEFAULT_WAKE_NAMES, "کایری")
 _NUMBERED_CLOSE_EN = re.compile(
     r"^(?:please )?(?:(?:close|exit|quit) (.+)|(.+) (?:close|exit|quit))$"
 )
-_NUMBERED_CLOSE_FA = re.compile(
-    r"^(?:(.+?)(?: (?:را|رو))? ببند|ببند (.+))$"
-)
+_NUMBERED_CLOSE_FA = re.compile(r"^(?:(.+?)(?: (?:را|رو))? ببند|ببند (.+))$")
 
 
 def _close_window_index(text: str, count: int) -> int | None:
@@ -114,11 +144,11 @@ def _close_window_index(text: str, count: int) -> int | None:
     answer = text.strip()
     for prefix in ("the window ", "window ", "the ", "پنجره "):
         if answer.startswith(prefix):
-            answer = answer[len(prefix):]
+            answer = answer[len(prefix) :]
             break
     for suffix in (" window", " پنجره"):
         if answer.endswith(suffix):
-            answer = answer[:-len(suffix)]
+            answer = answer[: -len(suffix)]
             break
     return choice_index(answer, count)
 
@@ -186,18 +216,109 @@ class DemoCommandInterpreter:
         if not phrase:
             return WakeOnly() if addressed else NotACommand()
 
+        if context.observed_active_app == "telegram" and pending is None:
+            if _TELEGRAM_SEARCH_FOCUS_EN.fullmatch(phrase):
+                return ReadyCommand(
+                    CommandIntent(CommandKind.TELEGRAM_SEARCH_FOCUS, "telegram")
+                )
+            search_match = _TELEGRAM_SEARCH_EN.fullmatch(phrase)
+            if search_match is not None:
+                search_target = source_spelling(
+                    text, (search_match[1] or search_match[2]).strip()
+                )
+                try:
+                    return ReadyCommand(
+                        CommandIntent(CommandKind.TELEGRAM_SEARCH, search_target)
+                    )
+                except ValueError:
+                    return UnrecognizedCommand()
+
+        telegram_view = _TELEGRAM_VIEW_EN.fullmatch(phrase)
+        if telegram_view is not None:
+            destination = telegram_view[1] or f"new_{telegram_view[2]}"
+            destination = {
+                "archived chats": "archive",
+                "contact": "contacts",
+                "setting": "settings",
+                "seating": "settings",
+                "my seating": "settings",
+                "my settings": "settings",
+                "my profile": "profile",
+                "my calls": "calls",
+                "my carls": "calls",
+                "carls": "calls",
+            }.get(destination, destination)
+            if context.observed_active_app == "telegram":
+                return ReadyCommand(
+                    CommandIntent(CommandKind.TELEGRAM_VIEW, destination)
+                )
+            return UnrecognizedCommand()
+
+        if pending is None and context.observed_active_app == "telegram":
+            if phrase in {"back", "go back", "go to back", "previous page"}:
+                return ReadyCommand(
+                    CommandIntent(CommandKind.TELEGRAM_SETTINGS, "back")
+                )
+            if phrase in {"cancel", "cancel this", "cancel process"}:
+                return ReadyCommand(
+                    CommandIntent(CommandKind.TELEGRAM_SETTINGS, "cancel")
+                )
+            section_match = _TELEGRAM_SECTION_EN.fullmatch(phrase)
+            if section_match is not None:
+                section = section_match[1]
+                key = SPOKEN_SECTIONS.get(section)
+                if key is None:
+                    section = re.sub(r"^telegram(?:'s)? ", "", section)
+                    section = re.sub(r"^settings? ", "", section)
+                    section = re.sub(r" telegram$", "", section)
+                    key = SPOKEN_SECTIONS.get(section)
+                if key is not None:
+                    return ReadyCommand(
+                        CommandIntent(CommandKind.TELEGRAM_SETTINGS, key)
+                    )
+                settings_named_match = _TELEGRAM_SETTINGS_NAMED_EN.fullmatch(phrase)
+                if settings_named_match is not None:
+                    label = (
+                        settings_named_match[1] or settings_named_match[2]
+                    ).strip()
+                    try:
+                        return ReadyCommand(
+                            CommandIntent(
+                                CommandKind.TELEGRAM_SETTINGS, f"label:{label}"
+                            )
+                        )
+                    except ValueError:
+                        return UnrecognizedCommand()
+                if context.telegram_settings_context and phrase.startswith("go to "):
+                    try:
+                        return ReadyCommand(
+                            CommandIntent(
+                                CommandKind.TELEGRAM_SETTINGS,
+                                f"visible:{section}",
+                            )
+                        )
+                    except ValueError:
+                        return UnrecognizedCommand()
+
         # A later explicit "do not open" also withdraws a pending app suggestion.
         # Otherwise a still-pending "yes" could act on the older request.
         if "باز نکن" in phrase or phrase.startswith(("don't open ", "do not open ")):
             return DeclinedClarification() if pending is not None else NotACommand()
 
         english_scroll = _SCROLL_EN.fullmatch(phrase)
+        english_area_scroll = _SCROLL_AREA_EN.fullmatch(phrase)
         persian_scroll = _SCROLL_FA.fullmatch(phrase)
-        short_scroll = (
-            _SCROLL_SHORT_EN.fullmatch(phrase)
-            or _SCROLL_SHORT_FA.fullmatch(phrase)
+        persian_area_scroll = _SCROLL_AREA_FA.fullmatch(phrase)
+        short_scroll = _SCROLL_SHORT_EN.fullmatch(phrase) or _SCROLL_SHORT_FA.fullmatch(
+            phrase
         )
-        scroll_match = english_scroll or persian_scroll or short_scroll
+        scroll_match = (
+            english_scroll
+            or english_area_scroll
+            or persian_scroll
+            or persian_area_scroll
+            or short_scroll
+        )
         repeat_scroll = phrase in {"more", "again", "بیشتر", "دوباره"}
         if scroll_match is not None or repeat_scroll:
             active = (
@@ -218,10 +339,21 @@ class DemoCommandInterpreter:
                         context.recent_scroll_kind,
                         active,
                         scroll_steps=context.recent_scroll_steps,
+                        scroll_area=context.recent_scroll_area,
                     )
                 )
             assert scroll_match is not None
-            if english_scroll is not None:
+            scroll_area: str | None = None
+            if english_area_scroll is not None:
+                area_name = english_area_scroll[1] or english_area_scroll[4]
+                direction = english_area_scroll[2] or english_area_scroll[3]
+                modifier = english_area_scroll[5]
+                scroll_area = "list" if area_name == "chat list" else "chat"
+            elif persian_area_scroll is not None:
+                scroll_area = "list" if "چت ها" in persian_area_scroll[1] else "chat"
+                direction = persian_area_scroll[2]
+                modifier = persian_area_scroll[3]
+            elif english_scroll is not None:
                 direction = english_scroll[2]
                 modifier = english_scroll[3] or english_scroll[1]
             elif persian_scroll is not None:
@@ -230,19 +362,24 @@ class DemoCommandInterpreter:
             else:
                 direction = scroll_match[1]
                 modifier = None
+            if scroll_area is not None and "telegram" not in active.casefold():
+                return UnrecognizedCommand()
             kind = (
                 CommandKind.SCROLL_UP
                 if direction in {"up", "بالا"}
                 else CommandKind.SCROLL_DOWN
             )
             steps = (
-                4 if modifier in {"more", "بیشتر"}
-                else 2 if modifier in {
-                    "less", "list", "liz", "a little", "a little ", "کمتر", "کمی "
-                }
+                4
+                if modifier in {"more", "بیشتر"}
+                else 2
+                if modifier
+                in {"less", "list", "liz", "a little", "a little ", "کمتر", "کمی "}
                 else None
             )
-            return ReadyCommand(CommandIntent(kind, active, scroll_steps=steps))
+            return ReadyCommand(
+                CommandIntent(kind, active, scroll_steps=steps, scroll_area=scroll_area)
+            )
 
         if isinstance(pending, PendingActionConfirmation):
             if phrase in ("no", "nein", "نه", "خیر", "لغو", "cancel"):
@@ -255,19 +392,25 @@ class DemoCommandInterpreter:
 
         if isinstance(pending, PendingNumberedCloseConfirmation):
             if phrase in ("لغو", "cancel"):
-                return ReadyCommand(CommandIntent(
-                    CommandKind.HIDE_APP_WINDOWS, pending.app_candidate.app_id
-                ))
+                return ReadyCommand(
+                    CommandIntent(
+                        CommandKind.HIDE_APP_WINDOWS, pending.app_candidate.app_id
+                    )
+                )
             if phrase in ("no", "nein", "نه", "خیر"):
-                return NeedsClarification(PendingWindowSelection(
-                    pending.app_candidate, pending.count, pending.all_apps
-                ))
+                return NeedsClarification(
+                    PendingWindowSelection(
+                        pending.app_candidate, pending.count, pending.all_apps
+                    )
+                )
             if phrase in ("yes", "ja", "بله", "آره"):
-                return ReadyCommand(CommandIntent(
-                    CommandKind.CLOSE_SHOWN_WINDOW,
-                    pending.app_candidate.app_id,
-                    window_index=pending.window_index,
-                ))
+                return ReadyCommand(
+                    CommandIntent(
+                        CommandKind.CLOSE_SHOWN_WINDOW,
+                        pending.app_candidate.app_id,
+                        window_index=pending.window_index,
+                    )
+                )
             return NeedsClarification(pending)
 
         if isinstance(pending, PendingWindowSelection):
@@ -286,10 +429,14 @@ class DemoCommandInterpreter:
                 )
                 close_index = _close_window_index(number_text, pending.count)
                 if close_index is not None:
-                    return NeedsClarification(PendingNumberedCloseConfirmation(
-                        pending.app_candidate, close_index + 1,
-                        pending.count, pending.all_apps,
-                    ))
+                    return NeedsClarification(
+                        PendingNumberedCloseConfirmation(
+                            pending.app_candidate,
+                            close_index + 1,
+                            pending.count,
+                            pending.all_apps,
+                        )
+                    )
                 return NeedsClarification(pending)
             index = choice_index(phrase, pending.count)
             if index is None:
@@ -299,13 +446,14 @@ class DemoCommandInterpreter:
                     if (
                         app_reply.exact
                         and len(app_reply.candidates) == 1
-                        and app_reply.candidates[0].app_id
-                        in self._allowed_window_apps
+                        and app_reply.candidates[0].app_id in self._allowed_window_apps
                     ):
-                        return ReadyCommand(CommandIntent(
-                            CommandKind.SELECT_OPEN_APP_WINDOW,
-                            app_reply.candidates[0].app_id,
-                        ))
+                        return ReadyCommand(
+                            CommandIntent(
+                                CommandKind.SELECT_OPEN_APP_WINDOW,
+                                app_reply.candidates[0].app_id,
+                            )
+                        )
                 if phrase.startswith(
                     ("open ", "go to ", "close ", "restore ", "minimize ")
                 ):
@@ -331,28 +479,34 @@ class DemoCommandInterpreter:
                 return DeclinedClarification()
             if phrase in ("yes", "ja", "بله", "آره"):
                 if CommandKind.OPEN_APP in pending.options:
-                    return ReadyCommand(CommandIntent(
-                        CommandKind.OPEN_APP, pending.app_candidate.app_id
-                    ))
+                    return ReadyCommand(
+                        CommandIntent(
+                            CommandKind.OPEN_APP, pending.app_candidate.app_id
+                        )
+                    )
                 return NeedsClarification(pending)
             index = choice_index(phrase, len(pending.options))
-            selected_operation = pending.options[index] if index is not None else {
-                "open": CommandKind.OPEN_APP,
-                "باز کن": CommandKind.OPEN_APP,
-                "minimize": CommandKind.MINIMIZE_APP,
-                "hide": CommandKind.MINIMIZE_APP,
-                "کوچک کن": CommandKind.MINIMIZE_APP,
-                "close": CommandKind.CLOSE_APP_WINDOW,
-                "ببند": CommandKind.CLOSE_APP_WINDOW,
-                "normal size": CommandKind.UNMAXIMIZE_APP,
-                "restore size": CommandKind.UNMAXIMIZE_APP,
-                "اندازه عادی": CommandKind.UNMAXIMIZE_APP,
-                "new window": CommandKind.NEW_APP_WINDOW,
-                "new tab": CommandKind.NEW_APP_TAB,
-                "preferences": CommandKind.APP_PREFERENCES,
-                "all windows": CommandKind.SHOW_ALL_WINDOWS,
-                "terminal windows": CommandKind.SHOW_APP_WINDOWS,
-            }.get(phrase)
+            selected_operation = (
+                pending.options[index]
+                if index is not None
+                else {
+                    "open": CommandKind.OPEN_APP,
+                    "باز کن": CommandKind.OPEN_APP,
+                    "minimize": CommandKind.MINIMIZE_APP,
+                    "hide": CommandKind.MINIMIZE_APP,
+                    "کوچک کن": CommandKind.MINIMIZE_APP,
+                    "close": CommandKind.CLOSE_APP_WINDOW,
+                    "ببند": CommandKind.CLOSE_APP_WINDOW,
+                    "normal size": CommandKind.UNMAXIMIZE_APP,
+                    "restore size": CommandKind.UNMAXIMIZE_APP,
+                    "اندازه عادی": CommandKind.UNMAXIMIZE_APP,
+                    "new window": CommandKind.NEW_APP_WINDOW,
+                    "new tab": CommandKind.NEW_APP_TAB,
+                    "preferences": CommandKind.APP_PREFERENCES,
+                    "all windows": CommandKind.SHOW_ALL_WINDOWS,
+                    "terminal windows": CommandKind.SHOW_APP_WINDOWS,
+                }.get(phrase)
+            )
             if selected_operation not in pending.options:
                 return NeedsClarification(pending)
             if selected_operation is CommandKind.CLOSE_APP_WINDOW:
@@ -380,13 +534,21 @@ class DemoCommandInterpreter:
                 return DeclinedClarification()
             selected = choice_index(phrase, 2)
             if selected == 0 or phrase in (
-                "app", "the app", "application", "برنامه", "خود برنامه"
+                "app",
+                "the app",
+                "application",
+                "برنامه",
+                "خود برنامه",
             ):
                 return ReadyCommand(
                     CommandIntent(CommandKind.OPEN_APP, pending.app_candidate.app_id)
                 )
             if selected == 1 or phrase in (
-                "chat", "the chat", "conversation", "چت", "گفتگو"
+                "chat",
+                "the chat",
+                "conversation",
+                "چت",
+                "گفتگو",
             ):
                 return self._chat_command(
                     pending.chat_target, context, pending.chat_app
@@ -443,9 +605,10 @@ class DemoCommandInterpreter:
                         CommandKind.OPEN_APP, app_name_match.candidates[0].app_id
                     )
                 )
-            candidates = app_name_match.candidates or self._app_name_resolver.suggest(
-                name
-            ).candidates
+            candidates = (
+                app_name_match.candidates
+                or self._app_name_resolver.suggest(name).candidates
+            )
             if candidates:
                 return NeedsClarification(
                     PendingAppClarification(
@@ -499,10 +662,12 @@ class DemoCommandInterpreter:
             if resolved_smaller_app.exact and len(resolved_smaller_app.candidates) == 1:
                 candidate = resolved_smaller_app.candidates[0]
                 if candidate.app_id in self._allowed_window_apps:
-                    return NeedsClarification(PendingOperationClarification(
-                        candidate,
-                        (CommandKind.MINIMIZE_APP, CommandKind.UNMAXIMIZE_APP),
-                    ))
+                    return NeedsClarification(
+                        PendingOperationClarification(
+                            candidate,
+                            (CommandKind.MINIMIZE_APP, CommandKind.UNMAXIMIZE_APP),
+                        )
+                    )
             return UnrecognizedCommand()
 
         bring_match = _BRING_TO_FRONT_EN.fullmatch(phrase)
@@ -605,9 +770,7 @@ class DemoCommandInterpreter:
             or _OPEN_CHAT_SUFFIX_EN.fullmatch(phrase)
         )
         if match is not None:
-            return self._chat_command(
-                source_spelling(text, match[1].strip()), context
-            )
+            return self._chat_command(source_spelling(text, match[1].strip()), context)
 
         if self._app_name_resolver is not None:
             match = _OPEN_NAMED_APP_FA.fullmatch(
@@ -661,8 +824,7 @@ class DemoCommandInterpreter:
             if uncertain is not None:
                 operation = uncertain[2]
                 if (
-                    SequenceMatcher(None, operation.replace(" ", ""), "بازکن")
-                    .ratio()
+                    SequenceMatcher(None, operation.replace(" ", ""), "بازکن").ratio()
                     >= 0.60
                 ):
                     return UnrecognizedCommand()
@@ -690,10 +852,13 @@ class DemoCommandInterpreter:
                 )
 
         if phrase in (
-            "open", "go to", "close", "exit", "quit", "باز کن"
-        ) or phrase.startswith(
-            ("تلگرام", "مرورگر", "چت ", "به گفتگوی ")
-        ):
+            "open",
+            "go to",
+            "close",
+            "exit",
+            "quit",
+            "باز کن",
+        ) or phrase.startswith(("تلگرام", "مرورگر", "چت ", "به گفتگوی ")):
             return IncompleteCommand()
         if (
             "باز کن" in phrase
@@ -704,9 +869,7 @@ class DemoCommandInterpreter:
             return UnrecognizedCommand()
         return NotACommand()
 
-    def _interpret_english_plan(
-        self, phrase: str, *, source: str
-    ) -> Interpretation:
+    def _interpret_english_plan(self, phrase: str, *, source: str) -> Interpretation:
         """Recognize two explicit steps; never execute a fragment of unclear text."""
         clauses = phrase.split(" and ")
         if len(clauses) != 2:
@@ -730,9 +893,7 @@ class DemoCommandInterpreter:
                 and self._app_name_resolver.resolve(second_app_match[1]).candidates
             ):
                 return UnrecognizedCommand()
-            person = source_spelling(
-                source, (chat_match[1] or chat_match[2]).strip()
-            )
+            person = source_spelling(source, (chat_match[1] or chat_match[2]).strip())
             if person:
                 return ReadyPlan(
                     CommandPlan(
@@ -835,14 +996,10 @@ class DemoCommandInterpreter:
             PendingOperationClarification(candidate, tuple(options))
         )
 
-    def _review_window_action(
-        self, kind: CommandKind, target: str
-    ) -> Interpretation:
+    def _review_window_action(self, kind: CommandKind, target: str) -> Interpretation:
         if kind is CommandKind.CLOSE_APP_WINDOW and target == self._terminal_app_id:
             return NeedsClarification(
-                PendingActionConfirmation(
-                    SpokenAppCandidate(target, "Terminal"), kind
-                )
+                PendingActionConfirmation(SpokenAppCandidate(target, "Terminal"), kind)
             )
         return ReadyCommand(CommandIntent(kind, target))
 
@@ -857,7 +1014,8 @@ class DemoCommandInterpreter:
                 intent,
                 PendingWindowSelection(
                     SpokenAppCandidate("desktop", "open applications"),
-                    99, all_apps=True,
+                    99,
+                    all_apps=True,
                 ),
             )
         if (

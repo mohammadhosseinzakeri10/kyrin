@@ -44,6 +44,17 @@ class DesktopScrollExecutor:
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="scroll_focus_changed"
             )
+        is_telegram = "telegram" in identity[0].casefold()
+        if request.intent.scroll_area is not None and not is_telegram:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED,
+                error_code="unsupported_scroll_area",
+            )
+        area = (
+            "right" if request.intent.scroll_area == "chat"
+            else "left" if request.intent.scroll_area == "list" or is_telegram
+            else "center"
+        )
         try:
             completed = subprocess.run(
                 [
@@ -53,7 +64,7 @@ class DesktopScrollExecutor:
                     str(identity[1]),
                     "up" if kind is CommandKind.SCROLL_UP else "down",
                     str(request.intent.scroll_steps or 3),
-                    "left" if "telegram" in identity[0].casefold() else "center",
+                    area,
                     "desktop-scroll",
                 ],
                 capture_output=True,

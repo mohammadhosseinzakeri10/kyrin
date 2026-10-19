@@ -37,6 +37,8 @@ ESCAPE = 0xFF1B
 F_KEY = ord("f")
 A_KEY = ord("a")
 ZERO = ord("0")
+NINE = ord("9")
+J_KEY = ord("j")
 LEFT_BUTTON = 0x110
 CONTROL_TOKEN_PATH = permission_token_path("telegram-control")
 
@@ -226,6 +228,24 @@ def _type_search_target(
         not (char.isalnum() or char in " -_.'@") for char in target
     ):
         raise ValueError("unsupported chat search characters")
+    _focus_search(connection, session, expected)
+    _key(connection, session, CONTROL, True)
+    try:
+        _press(connection, session, A_KEY)
+    finally:
+        _key(connection, session, CONTROL, False)
+    for char in target:
+        codepoint = ord(char)
+        symbol = codepoint if codepoint < 128 else 0x01000000 | codepoint
+        _press(connection, session, symbol)
+
+
+def _focus_search(
+    connection: Gio.DBusConnection,
+    session: str,
+    expected: tuple[str, int] | None = None,
+) -> None:
+    """Exit a chat-specific search before focusing Telegram's global search."""
     # The first Escape closes an existing search; the second exits an open chat.
     # Ctrl+F can otherwise search only within that conversation.
     for _ in range(2):
@@ -238,16 +258,6 @@ def _type_search_target(
         _press(connection, session, F_KEY)
     finally:
         _key(connection, session, CONTROL, False)
-    sleep(0.15)
-    _key(connection, session, CONTROL, True)
-    try:
-        _press(connection, session, A_KEY)
-    finally:
-        _key(connection, session, CONTROL, False)
-    for char in target:
-        codepoint = ord(char)
-        symbol = codepoint if codepoint < 128 else 0x01000000 | codepoint
-        _press(connection, session, symbol)
 
 
 def _click_verified_box(
@@ -255,14 +265,34 @@ def _click_verified_box(
     session: str,
     expected: tuple[str, int],
     box: tuple[int, int, int, int, int, int],
+    *,
+    menu_button: bool = False,
+    menu_item: bool = False,
+    settings_item: bool = False,
 ) -> bool:
     left, top, width, height, image_width, image_height = box
     if (
         min(left, top, width, height, image_width, image_height) < 0
         or width == 0
         or height == 0
-        or left + width >= image_width * 0.3
-        or not image_height * 0.07 < top < image_height * 0.75
+    ):
+        return False
+    if settings_item:
+        if (
+            left < image_width * 0.02
+            or left + width >= image_width * 0.9
+            or not image_height * 0.06 < top < image_height * 0.86
+        ):
+            return False
+    elif (
+        left + width >= image_width * 0.3
+        or not (
+            0 < top < image_height * 0.075
+            if menu_button
+            else image_height * (0.025 if menu_item else 0.07)
+            < top
+            < image_height * 0.75
+        )
     ):
         return False
     before = _window_and_pointer()
@@ -321,12 +351,29 @@ def main() -> int:
             raise ValueError("expected Telegram desktop ID and PID")
         expected = (sys.argv[1], int(sys.argv[2]))
         mode = "saved" if len(sys.argv) == 3 else sys.argv[3]
-    if mode not in {"saved", "search", "click", "grant-control"}:
+    if mode not in {
+        "saved",
+        "search",
+        "focus-search",
+        "click",
+        "menu-click",
+        "settings-click",
+        "escape",
+        "grant-control",
+        "view",
+        "menu",
+    }:
         raise ValueError("unsupported chat input mode")
     if not grant_control and (
         (mode == "saved" and len(sys.argv) not in (3, 4))
         or (mode == "search" and len(sys.argv) != 5)
-        or (mode == "click" and len(sys.argv) != 10)
+        or (mode == "focus-search" and len(sys.argv) != 4)
+        or (mode in {"click", "menu-click", "settings-click"} and len(sys.argv) != 10)
+        or (
+            mode == "view"
+            and (len(sys.argv) != 5 or sys.argv[4] not in {"archive", "contacts"})
+        )
+        or (mode in {"menu", "escape"} and len(sys.argv) != 4)
     ):
         raise ValueError("invalid chat input arguments")
     if expected is not None:
@@ -409,6 +456,40 @@ def main() -> int:
         elif mode == "search":
             _type_search_target(connection, session, sys.argv[4], expected)
             print("SEARCH_TYPED", flush=True)
+        elif mode == "focus-search":
+            _focus_search(connection, session, expected)
+            print("SEARCH_FOCUSED", flush=True)
+        elif mode == "view":
+            _key(connection, session, CONTROL, True)
+            try:
+                _press(connection, session, NINE if sys.argv[4] == "archive" else J_KEY)
+            finally:
+                _key(connection, session, CONTROL, False)
+            print("VIEW_SHORTCUT_DISPATCHED", flush=True)
+        elif mode == "escape":
+            if _focused_identity() != expected:
+                print("FOCUS_CHANGED", flush=True)
+                return 2
+            _press(connection, session, ESCAPE)
+            print("ESCAPE_DISPATCHED", flush=True)
+        elif mode == "menu":
+            frame = _window_and_pointer()
+            if (
+                frame is None
+                or frame[:2] != expected
+                or frame[4] < 300
+                or frame[5] < 300
+            ):
+                print("TARGET_CHANGED", flush=True)
+                return 2
+            # Telegram Desktop's hamburger is confined to this top-left box.
+            box = (14, 26, 28, 32, frame[4], frame[5])
+            if not _click_verified_box(
+                connection, session, expected, box, menu_button=True
+            ):
+                print("TARGET_CHANGED", flush=True)
+                return 2
+            print("MENU_CLICKED", flush=True)
         else:
             box = (
                 int(sys.argv[4]),
@@ -418,10 +499,23 @@ def main() -> int:
                 int(sys.argv[8]),
                 int(sys.argv[9]),
             )
-            if not _click_verified_box(connection, session, expected, box):
+            clicked = _click_verified_box(
+                connection,
+                session,
+                expected,
+                box,
+                menu_item=mode == "menu-click",
+                settings_item=mode == "settings-click",
+            )
+            if not clicked:
                 print("TARGET_CHANGED", flush=True)
                 return 2
-            print("CHAT_RESULT_CLICKED", flush=True)
+            marker = (
+                "SETTING_CLICKED"
+                if mode == "settings-click"
+                else "CHAT_RESULT_CLICKED"
+            )
+            print(marker, flush=True)
         return 0
     finally:
         if session is not None:
