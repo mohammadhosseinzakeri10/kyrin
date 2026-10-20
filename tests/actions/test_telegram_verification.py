@@ -202,6 +202,49 @@ def test_visible_chat_marks_clipped_bottom_row_for_one_scroll() -> None:
     assert assessment.status == "partial_bottom_row"
 
 
+def test_visible_chat_accepts_unreadable_preview_with_strong_row_anchors() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("matin", TextBox(66, 872, 33, 22), 0.94),
+                RecognizedText("10/3/26", TextBox(606, 880, 45, 9), 0.96),
+                RecognizedText("fragment", TextBox(545, 842, 12, 9), 0.78),
+                RecognizedText("unreadable", TextBox(68, 904, 70, 9), 0.29),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "Matin"
+    )
+    assert assessment.choices is not None
+    assert tuple(item.top for item in assessment.choices.local_results) == (872,)
+    assert assessment.status == "classified_local_1_preview_fallback_1"
+
+
+def test_visible_chat_does_not_promote_preview_with_previous_row_time() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("Alice", TextBox(70, 200, 55, 18), 0.95),
+                RecognizedText("8:12", TextBox(606, 200, 45, 10), 0.93),
+                RecognizedText("matin", TextBox(70, 227, 42, 12), 0.95),
+                RecognizedText("7:30", TextBox(606, 227, 45, 10), 0.94),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "matin"
+    )
+    assert assessment.choices is None
+    assert assessment.status == "rows_1_low_0_time_0_preview_1"
+
+
 @pytest.mark.parametrize(
     ("second_time_visible", "status"),
     (

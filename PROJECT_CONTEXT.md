@@ -81,6 +81,17 @@
 > supplied screenshot reproduces the expected classifier statuses; live
 > owner retest of these two commands remains pending.
 
+> **Unreadable visible-chat previews (2026-10-20):** The owner confirmed that
+> `Spotify Downloader` opens with the focused OCR pass, then showed a `matin`
+> row with a stylized Latin title and Persian preview. The diagnostic found
+> one title at x=66,y=872 with 94% confidence and a strong aligned date, but
+> reported `preview_1`: the selected English OCR did not read the Persian
+> preview. The classifier now permits a row without a readable preview only
+> when the exact title and same-row right-column date are both high-confidence
+> and no prior row date aligns with that same column above it. This keeps the
+> two-read stability and post-click header checks. Focused synthetic tests pass;
+> the owner has not yet retested `matin` with this correction.
+
 > **Owner status corrections (2026-10-20):** The owner confirmed that the
 > current dashboard behaves as intended; its particle renderer and preferences
 > were committed locally as `953e4ed`, with no GitHub action. The owner also

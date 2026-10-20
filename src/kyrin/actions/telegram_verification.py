@@ -123,6 +123,7 @@ def assess_visible_chat_choices(
     missing_time = 0
     missing_preview = 0
     fallback_time = 0
+    fallback_preview = 0
     strict_time_rows = sum(
         any(
             span.confidence is not None
@@ -139,12 +140,16 @@ def assess_visible_chat_choices(
         if match.lowest_confidence is None or match.lowest_confidence < 0.8:
             low_confidence += 1
             continue
-        aligned_right = any(
-            span.confidence is not None
-            and span.confidence >= 0.55
+        aligned_time_spans = [
+            span
+            for span in observation.result.spans
+            if span.confidence is not None
             and width * 0.24 < span.box.left < width * 0.36
             and abs(span.box.top - box.top) <= max(10, box.height // 2)
-            for span in observation.result.spans
+        ]
+        aligned_right = any(
+            span.confidence is not None and span.confidence >= 0.55
+            for span in aligned_time_spans
         )
         preview_below = any(
             span.confidence is not None
@@ -167,13 +172,32 @@ def assess_visible_chat_choices(
             and preview_below
             and not time_above
         )
+        preview_fallback = (
+            aligned_right
+            and not preview_below
+            and match.lowest_confidence >= 0.90
+            and any(
+                span.confidence is not None and span.confidence >= 0.85
+                for span in aligned_time_spans
+            )
+            and not any(
+                prior.confidence is not None
+                and prior.confidence >= 0.55
+                and box.top - 40 <= prior.box.top <= box.top - 12
+                and abs(prior.box.left - current.box.left) <= 35
+                for current in aligned_time_spans
+                for prior in observation.result.spans
+            )
+        )
         if not aligned_right and not time_fallback:
             missing_time += 1
-        if not preview_below:
+        if not preview_below and not preview_fallback:
             missing_preview += 1
         if time_fallback:
             fallback_time += 1
-        if (aligned_right or time_fallback) and preview_below:
+        if preview_fallback:
+            fallback_preview += 1
+        if (aligned_right or time_fallback) and (preview_below or preview_fallback):
             titles.append(match)
     if low_confidence or missing_time or missing_preview:
         if (missing_time or missing_preview) and any(
@@ -204,9 +228,9 @@ def assess_visible_chat_choices(
             global_section_verified=True,
             source="visible",
         ),
-        f"classified_local_{len(titles)}_time_fallback_{fallback_time}"
-        if fallback_time
-        else f"classified_local_{len(titles)}",
+        f"classified_local_{len(titles)}"
+        + (f"_time_fallback_{fallback_time}" if fallback_time else "")
+        + (f"_preview_fallback_{fallback_preview}" if fallback_preview else ""),
     )
 
 
