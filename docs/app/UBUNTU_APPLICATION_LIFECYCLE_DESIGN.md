@@ -281,15 +281,31 @@ environment install succeeded.
 The control window now has separate Dashboard, Audio Input, Speech Recognition,
 Desktop Actions, and Preferences pages. The owner selected the fifth dark cosmic concept as the
 Dashboard artwork. After a real-time 3D prototype was reviewed, the owner
-chose a static dashboard to avoid its graphics and package cost. The selected
-PNG is included in the Python package; it is aspect-filled without stretching
-and is not continuously rendered. `PySide6_Addons` and the experimental QML
-scene are not required. Audio and command execution still use the same
-independent controller and worker-thread event bridge.
-The owner later asked for the welcome copy to sit on the image rather than in
-a separate side panel. The artwork now fills the dashboard content area, with
-the title and supporting lines over its darker right side. A subtle gradient
-and text shadow maintain contrast at the normal and minimum window sizes.
+chose a static dashboard to avoid its graphics and package cost at that time.
+The owner later replaced that PNG with a looping particle scene based on their
+selected black-hole K artwork. About 60,000 colored emblem points are packaged
+as JSON; CPU renders the original 30,000 and GPU renders all 60,000. The
+original dashboard PNG is no longer
+loaded or packaged. Translated welcome text is also drawn as points and remains
+point-based while assembled. Text sampling was also made denser for the
+current 2D design. The scene forms,
+pauses, disperses, and repeats
+while the dashboard is visible; its timer pauses when the page is hidden.
+UI preferences save whether this cycle runs and which 2D renderer is selected:
+CPU or GPU. The owner tried several interactive 3D prototypes and chose to
+remove that feature for the current version. A previously saved 3D renderer
+choice loads as the 2D GPU choice. Disabling the cycle holds the completed
+point artwork and
+stops its timer. The GPU path uses the OpenGL widgets included with the
+existing `PySide6_Essentials` dependency: its vertex shader moves the points
+and its fragment shader paints their colors, while a separate fragment shader
+draws the blue and purple background halos. If OpenGL cannot initialize,
+the dashboard falls back to CPU and reports that choice in the UI. The GPU
+path was rendered on the owner's Wayland machine; performance across other
+drivers remains unmeasured.
+`PySide6_Addons` and the experimental QML scene are not required. Audio and
+command execution still use the same independent controller and worker-thread
+event bridge.
 
 All built-in control-window labels are English. The interface locale is
 independent of the selected STT language. Preferences can import a complete

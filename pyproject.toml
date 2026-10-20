@@ -68,7 +68,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "kyrin.audio.activity.models" = ["*.onnx", "LICENSE.silero", "README.md"]
-"kyrin.app.qt" = ["assets/*.png"]
+"kyrin.app.qt" = ["assets/*.png", "assets/*.json"]
 
 
 # ---------------------------------------------------------------------------

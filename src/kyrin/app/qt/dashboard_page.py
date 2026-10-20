@@ -1,11 +1,9 @@
-"""Welcome page with the cosmic artwork and translated copy."""
+"""Welcome page with the particle emblem and translated copy."""
 
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
@@ -37,11 +35,6 @@ class DashboardPage(QWidget):
         self.welcome_label.setObjectName("Welcome")
         self.welcome_label.setWordWrap(True)
         self.welcome_label.setAlignment(Qt.AlignmentFlag.AlignLeading)
-        shadow = QGraphicsDropShadowEffect(self.welcome_label)
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 3)
-        shadow.setColor(QColor(1, 3, 13, 230))
-        self.welcome_label.setGraphicsEffect(shadow)
         hero_copy_layout.addWidget(self.welcome_label)
         self.welcome_caption_label = label("welcome_caption")
         self.welcome_caption_label.setObjectName("WelcomeCaption")
@@ -54,4 +47,7 @@ class DashboardPage(QWidget):
         hero_copy_layout.addWidget(self.scene_hint_label)
         hero_copy_layout.addStretch()
         hero_layout.addWidget(hero_copy, 5)
+        self.cosmic_dashboard.set_text_source(
+            (self.welcome_label, self.welcome_caption_label, self.scene_hint_label)
+        )
         layout.addWidget(self.cosmic_dashboard, 1)

@@ -1140,6 +1140,36 @@ def test_builtin_persian_changes_layout_without_changing_speech_language(
         application.processEvents()
 
 
+def test_dashboard_animation_setting_stops_timer_and_persists(
+    application: QApplication, tmp_path: Path
+) -> None:
+    translations = UiTranslations(tmp_path / "ui")
+    window = ControlWindow(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=translations,
+    )
+    try:
+        window.show()
+        application.processEvents()
+        assert window.cosmic_dashboard._timer.isActive()
+        window.dashboard_animation_checkbox.setChecked(False)
+        window.save_ui_button.click()
+        assert not window.cosmic_dashboard._timer.isActive()
+        assert UiTranslations(tmp_path / "ui").preferences == UiPreferences(
+            "en", False, "cpu"
+        )
+    finally:
+        window._timer.stop()
+        window.close()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_login_startup_toggle_updates_registration_and_saved_choice(
     application: QApplication, tmp_path: Path
 ) -> None:

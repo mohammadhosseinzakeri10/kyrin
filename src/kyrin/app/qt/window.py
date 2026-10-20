@@ -276,6 +276,13 @@ class ControlWindow(QWidget):
 
         self.dashboard_page = DashboardPage(self._label)
         self.cosmic_dashboard = self.dashboard_page.cosmic_dashboard
+        self.cosmic_dashboard.gpu_fallback.connect(self._on_dashboard_gpu_fallback)
+        self.cosmic_dashboard.set_animation_enabled(
+            self._translations.preferences.dashboard_animation_enabled
+        )
+        self.cosmic_dashboard.set_renderer(
+            self._translations.preferences.dashboard_renderer
+        )
         self.welcome_label = self.dashboard_page.welcome_label
         self.welcome_caption_label = self.dashboard_page.welcome_caption_label
         self.scene_hint_label = self.dashboard_page.scene_hint_label
@@ -360,6 +367,18 @@ class ControlWindow(QWidget):
         self.preferences_page = PreferencesPage(self._label)
         self.ui_language_combo = self.preferences_page.ui_language_combo
         self._fill_languages()
+        self.dashboard_animation_checkbox = (
+            self.preferences_page.dashboard_animation_checkbox
+        )
+        self.dashboard_animation_checkbox.setChecked(
+            self._translations.preferences.dashboard_animation_enabled
+        )
+        self.dashboard_renderer_combo = self.preferences_page.dashboard_renderer_combo
+        self.dashboard_renderer_combo.setCurrentIndex(
+            self.dashboard_renderer_combo.findData(
+                self._translations.preferences.dashboard_renderer
+            )
+        )
         self.import_language_button = self.preferences_page.import_language_button
         self.import_language_button.clicked.connect(self._import_language)
         self.save_ui_button = self.preferences_page.save_ui_button
@@ -450,6 +469,7 @@ class ControlWindow(QWidget):
             button.setText(t(key))
         for key, label in self._labels.items():
             label.setText(t(key))
+        self.cosmic_dashboard.refresh_scene()
         self.feedback_label.setText(t("feedback_default"))
         self.browse_button.setText(t("browse"))
         self.apply_button.setText(t("save"))
@@ -513,16 +533,29 @@ class ControlWindow(QWidget):
         self.feedback_label.setText(self._translations.text("language_added"))
 
     def _save_ui_preferences(self) -> None:
-        preferences = UiPreferences(locale=self.ui_language_combo.currentData())
+        preferences = UiPreferences(
+            locale=self.ui_language_combo.currentData(),
+            dashboard_animation_enabled=self.dashboard_animation_checkbox.isChecked(),
+            dashboard_renderer=self.dashboard_renderer_combo.currentData(),
+        )
         try:
             self._translations.save(preferences)
         except TranslationError as error:
             self.feedback_label.setText(str(error))
             return
         self._translate_ui()
+        self.cosmic_dashboard.set_animation_enabled(
+            preferences.dashboard_animation_enabled
+        )
+        self.cosmic_dashboard.set_renderer(preferences.dashboard_renderer)
         self._fill_languages()
         self._refresh()
         self.feedback_label.setText(self._translations.text("ui_saved"))
+
+    def _on_dashboard_gpu_fallback(self) -> None:
+        self.feedback_label.setText(
+            self._translations.text("dashboard_gpu_fallback")
+        )
 
     def _save_startup(self) -> None:
         registration = self._startup_registration

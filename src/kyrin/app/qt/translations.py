@@ -64,7 +64,7 @@ ENGLISH: dict[str, str] = {
     "preferences": "Preferences",
     "welcome": "Welcome to KYRIN",
     "welcome_caption": "Your workspace, one voice away.",
-    "scene_hint": "A quiet window into the cosmos",
+    "scene_hint": "Created by KAILARIN",
     "status": "System status",
     "feedback_default": "Responses and errors will appear here.",
     "audio_heading": "Audio input",
@@ -263,6 +263,9 @@ ENGLISH: dict[str, str] = {
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",
+    "dashboard_animation": "Animate dashboard particles",
+    "dashboard_renderer": "Dashboard renderer",
+    "dashboard_gpu_fallback": "GPU rendering is unavailable; using CPU rendering.",
     "system_language": "System language",
     "power_off_button": "Power off…",
     "restart_button": "Restart…",
@@ -353,6 +356,8 @@ class TranslationError(ValueError):
 @dataclass(frozen=True, slots=True)
 class UiPreferences:
     locale: str = "en"
+    dashboard_animation_enabled: bool = True
+    dashboard_renderer: str = "cpu"
 
 
 class UiTranslations:
@@ -388,14 +393,32 @@ class UiTranslations:
             return UiPreferences()
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise TranslationError("UI preferences could not be read") from exc
-        if not isinstance(data, dict) or set(data) != {"locale"}:
+        valid_fields = {
+            "locale", "dashboard_animation_enabled", "dashboard_renderer"
+        }
+        if (
+            not isinstance(data, dict)
+            or "locale" not in data
+            or not set(data) <= valid_fields
+        ):
             raise TranslationError("UI preferences have invalid fields")
         locale = data["locale"]
         if not isinstance(locale, str) or (
             locale != "system" and not _LOCALE.fullmatch(locale)
         ):
             raise TranslationError("Invalid UI locale")
-        return UiPreferences(locale)
+        animation = data.get("dashboard_animation_enabled", True)
+        renderer = data.get("dashboard_renderer", "cpu")
+        # Preserve existing preferences when an older 3D selection is loaded.
+        if renderer == "gpu3d":
+            renderer = "gpu"
+        if (
+            not isinstance(animation, bool)
+            or not isinstance(renderer, str)
+            or renderer not in {"cpu", "gpu"}
+        ):
+            raise TranslationError("Invalid dashboard preferences")
+        return UiPreferences(locale, animation, renderer)
 
     def _resolve_locale(self, choice: str) -> str:
         if choice != "system":
@@ -519,11 +542,21 @@ class UiTranslations:
         return locale
 
     def save(self, preferences: UiPreferences) -> None:
+        if (
+            not isinstance(preferences.dashboard_animation_enabled, bool)
+            or not isinstance(preferences.dashboard_renderer, str)
+            or preferences.dashboard_renderer not in {"cpu", "gpu"}
+        ):
+            raise TranslationError("Invalid dashboard preferences")
         active_locale = self._resolve_locale(preferences.locale)
         _, strings = self._catalog(active_locale)
         self._atomic_json(
             self.directory / "ui.json",
-            {"locale": preferences.locale},
+            {
+                "locale": preferences.locale,
+                "dashboard_animation_enabled": preferences.dashboard_animation_enabled,
+                "dashboard_renderer": preferences.dashboard_renderer,
+            },
         )
         self.preferences = preferences
         self._strings = strings

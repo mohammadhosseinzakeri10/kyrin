@@ -30,9 +30,9 @@ QLabel#Brand { color: #d7c9ff; font-size: 26px; font-weight: 800; letter-spacing
 QLabel#Subtitle { color: #8194bb; font-size: 10px; letter-spacing: 2px; }
 QLabel#Welcome { color: #f6f2ff; font-family: 'Lato'; font-size: 47px;
                  font-weight: 900; letter-spacing: 2px; }
-QLabel#WelcomeCaption { color: #e4e9ff; font-family: 'Lato'; font-size: 19px;
+QLabel#WelcomeCaption { color: #e4e9ff; font-family: 'Lato'; font-size: 21px;
                         font-weight: 500; letter-spacing: 1px; }
-QLabel#SceneHint { color: #a9bcef; font-family: 'Lato'; font-size: 13px;
+QLabel#SceneHint { color: #a9bcef; font-family: 'Lato'; font-size: 16px;
                    font-weight: 600; letter-spacing: 2px; }
 QLabel#PageTitle { color: #eff1ff; font-size: 28px; font-weight: 700; }
 QLabel#Status { color: #89e8d4; padding: 8px 12px; background: #132437;
@@ -40,7 +40,7 @@ QLabel#Status { color: #89e8d4; padding: 8px 12px; background: #132437;
 QLabel#Feedback { color: #d7dbfa; padding: 12px 15px; background: #161c35;
                   border: 1px solid #29345a; border-radius: 10px; }
 QLabel#Info { color: #aebae0; margin-top: 18px; }
-QLabel#CosmicDashboard { background: #080c1b; border: 1px solid #283050; }
+QLabel#CosmicDashboard { background: #050818; border: 1px solid #283050; }
 QWidget#HeroCopy { background: transparent; }
 QPushButton { background: #27305a; color: #f2f4ff; border: 1px solid #435389;
               border-radius: 9px; padding: 10px 15px; font-weight: 600; }

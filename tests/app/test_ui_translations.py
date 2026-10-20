@@ -32,6 +32,25 @@ def test_import_and_select_complete_language_pack(tmp_path: Path) -> None:
     assert ("fr", "Français") in restored.languages()
 
 
+def test_dashboard_preferences_round_trip_and_legacy_file(tmp_path: Path) -> None:
+    store = UiTranslations(tmp_path / "ui")
+    store.save(UiPreferences("fa", False, "gpu"))
+    assert UiTranslations(tmp_path / "ui").preferences == UiPreferences(
+        "fa", False, "gpu"
+    )
+    (tmp_path / "ui" / "ui.json").write_text(
+        json.dumps({"locale": "fa", "dashboard_renderer": "gpu3d"}),
+        encoding="utf-8",
+    )
+    migrated = UiTranslations(tmp_path / "ui")
+    assert migrated.preferences == UiPreferences("fa", True, "gpu")
+    assert migrated.load_error is None
+    (tmp_path / "ui" / "ui.json").write_text(
+        json.dumps({"locale": "en"}), encoding="utf-8"
+    )
+    assert UiTranslations(tmp_path / "ui").preferences == UiPreferences("en")
+
+
 def test_partial_pack_falls_back_to_english_per_string(tmp_path: Path) -> None:
     store = UiTranslations(tmp_path / "ui")
     source = tmp_path / "translation.json"
