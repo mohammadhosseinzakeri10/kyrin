@@ -138,9 +138,7 @@ PERSIAN: dict[str, str] = {
     ),
     "enable_actions": "فعال‌کردن اقدام‌های انتخاب‌شدهٔ دسکتاپ",
     "allow_telegram_chats": "اجازهٔ بازکردن چت در Telegram (بدون ارسال پیام)",
-    "remember_telegram_pointer": (
-        "ذخیرهٔ دسترسی کیبورد و ماوس برای چت‌های Telegram"
-    ),
+    "remember_telegram_pointer": ("ذخیرهٔ دسترسی کیبورد و ماوس برای چت‌های Telegram"),
     "telegram_pointer_grant_now": "تنظیم دسترسی کنترل Telegram…",
     "telegram_pointer_not_ready": (
         "مجوز کنترل ذخیره نشده است. تنظیمات را ذخیره کنید، سپس اینجا دسترسی بدهید."
@@ -224,28 +222,39 @@ PERSIAN: dict[str, str] = {
     "screen_document_heading": "خواندن آزمایشی سند",
     "screen_document_hint": (
         "متن پنجرهٔ فعال را با یک مدل آفلاینِ جدا بخوانید. انتخاب «مدل محلی OCR» "
-        "و دکمهٔ ذخیره بر این مدل اثری ندارند. اگر پنجرهٔ KYRIN جلو باشد، "
+        "از این بخش جداست. دکمهٔ ذخیره، مدل سند و دستگاه پردازش آن را نگه می‌دارد. "
+        "اگر پنجرهٔ KYRIN جلو باشد، "
         "تصویر همان پنجره خوانده می‌شود. اجرای CPU ممکن است چند دقیقه طول بکشد. "
         "نتیجه فقط متن است و برای کلیک یا اجرای فرمان به کار نمی‌رود."
+    ),
+    "screen_document_device": "دستگاه پردازش مدل سند",
+    "screen_document_device_auto": "خودکار (GPU در صورت دسترسی)",
+    "screen_document_device_cpu": "پردازندهٔ مرکزی (CPU)",
+    "screen_document_device_gpu": "پردازندهٔ گرافیکی (GPU؛ نیازمند CUDA)",
+    "screen_document_gpu_unavailable": (
+        "GPU با CUDA برای این مدل سند در دسترس نیست. CPU را انتخاب کنید "
+        "یا محیط CUDA آن را نصب کنید."
     ),
     "screen_document_read": "خواندن با مدل سندِ انتخاب‌شده",
     "screen_document_clear": "پاک‌کردن متن خوانده‌شده با مدل سند",
     "screen_document_ready": "برای مقایسهٔ متن خروجی، مدلی انتخاب کنید.",
     "screen_document_reading": "در حال خواندن با مدل سند…",
     "screen_document_progress": (
-        "مدل {backend} در حال خواندن است… {seconds} ثانیه گذشته "
-        "(روی CPU تا ۴ دقیقه زمان دارد)."
+        "مدل {backend} روی {device} در حال خواندن است… {seconds} ثانیه گذشته "
+        "(حداکثر ۴ دقیقه)."
     ),
     "screen_document_timeout": (
         "خواندن با مدل سند در این دستگاه طی ۴ دقیقه تمام نشد. "
         "مدل دیگری یا یک محیط اجرای سریع‌تر را امتحان کنید."
     ),
     "screen_document_no_text": (
-        "مدل {backend} از پنجرهٔ ثبت‌شدهٔ {app_id} متن خوانایی برنگرداند. "
+        "مدل {backend} روی {device} از پنجرهٔ ثبت‌شدهٔ {app_id} متن خوانایی برنگرداند. "
         "برای بررسی متن‌دار بودن همین پنجره، خواندن متن صفحه در بخش بالا را "
         "نیز بیازمایید."
     ),
-    "screen_document_result": "مدل {backend} پنجرهٔ فعال {app_id} را خواند.",
+    "screen_document_result": (
+        "مدل {backend} پنجرهٔ فعال {app_id} را روی {device} خواند."
+    ),
     "preferences_heading": "تنظیمات",
     "preferences_caption": "زبان مرکز کنترل را انتخاب کنید.",
     "interface_language": "زبان رابط برنامه",

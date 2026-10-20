@@ -1,4 +1,4 @@
-"""Isolated CPU inference for optional document models; reads a PNG from stdin."""
+"""Isolated CPU/CUDA inference for optional document models; reads PNG from stdin."""
 
 from __future__ import annotations
 
@@ -34,10 +34,22 @@ def _memory_limit() -> None:
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
 
-def _surya(model_path: Path, image: Image.Image) -> str:
+def _resolve_device(preference: str) -> str:
+    if preference == "cpu":
+        return "cpu"
+    import torch  # type: ignore[import-not-found]
+
+    if torch.cuda.is_available():
+        return "cuda:0"
+    if preference == "gpu":
+        raise RuntimeError("CUDA GPU unavailable")
+    return "cpu"
+
+
+def _surya(model_path: Path, image: Image.Image, device: str) -> str:
     from transformers import pipeline  # type: ignore[import-not-found]
 
-    reader = pipeline("image-text-to-text", model=str(model_path), device="cpu")
+    reader = pipeline("image-text-to-text", model=str(model_path), device=device)
 
     def recognize(frame: Image.Image) -> str:
         messages = [
@@ -64,14 +76,14 @@ def _surya(model_path: Path, image: Image.Image) -> str:
     return recognize(main_panel)
 
 
-def _glm(model_path: Path, image: Image.Image) -> str:
+def _glm(model_path: Path, image: Image.Image, device: str) -> str:
     from transformers import AutoModelForMultimodalLM, AutoProcessor
 
     processor = AutoProcessor.from_pretrained(
         model_path, local_files_only=True, use_fast=False
     )
     model = AutoModelForMultimodalLM.from_pretrained(
-        model_path, device_map="cpu", local_files_only=True
+        model_path, device_map=device, local_files_only=True
     )
     messages = [
         {
@@ -89,6 +101,7 @@ def _glm(model_path: Path, image: Image.Image) -> str:
         return_dict=True,
         return_tensors="pt",
     )
+    inputs = inputs.to(device)
     output = model.generate(**inputs, max_new_tokens=1024)
     return str(
         processor.decode(
@@ -97,14 +110,14 @@ def _glm(model_path: Path, image: Image.Image) -> str:
     )
 
 
-def _dots(model_path: Path, image: Image.Image) -> str:
+def _dots(model_path: Path, image: Image.Image, device: str) -> str:
     # The checkpoint imports flash_attn even when its CPU eager path is selected.
     # The shim fails closed if flash attention is ever actually called.
     flash_attn = types.ModuleType("flash_attn")
     flash_attn.__spec__ = importlib.machinery.ModuleSpec("flash_attn", loader=None)
 
     def unavailable(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("Unexpected flash attention call in CPU mode")
+        raise RuntimeError("Unexpected flash attention call in eager mode")
 
     flash_attn.flash_attn_varlen_func = unavailable  # type: ignore[attr-defined]
     sys.modules["flash_attn"] = flash_attn
@@ -121,7 +134,7 @@ def _dots(model_path: Path, image: Image.Image) -> str:
         config=config,
         attn_implementation="eager",
         torch_dtype="auto",
-        device_map="cpu",
+        device_map=device,
         trust_remote_code=True,
         local_files_only=True,
     )
@@ -149,7 +162,7 @@ def _dots(model_path: Path, image: Image.Image) -> str:
     images, videos = process_vision_info(messages)
     inputs = processor(
         text=[prompt], images=images, videos=videos, padding=True, return_tensors="pt"
-    )
+    ).to(device)
     output = model.generate(**inputs, max_new_tokens=1024)
     return str(
         processor.batch_decode(
@@ -163,16 +176,35 @@ def _dots(model_path: Path, image: Image.Image) -> str:
 def main() -> None:
     from PIL import Image
 
-    if len(sys.argv) != 3 or sys.argv[1] not in {"surya", "glm", "dots"}:
+    if (
+        len(sys.argv) != 4
+        or sys.argv[1] not in {"surya", "glm", "dots"}
+        or sys.argv[3] not in {"auto", "cpu", "gpu"}
+    ):
         raise SystemExit(2)
-    _memory_limit()
+    try:
+        device = _resolve_device(sys.argv[3])
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(20) from error
+    if device == "cpu":
+        _memory_limit()
     Image.MAX_IMAGE_PIXELS = 20_000_000
     image = Image.open(io.BytesIO(sys.stdin.buffer.read(32 * 1024 * 1024 + 1)))
     image.load()
     image = image.convert("RGB")
     model_path = Path(sys.argv[2])
-    text = {"surya": _surya, "glm": _glm, "dots": _dots}[sys.argv[1]](model_path, image)
-    print(_RESULT_PREFIX + json.dumps(text, ensure_ascii=False), flush=True)
+    text = {"surya": _surya, "glm": _glm, "dots": _dots}[sys.argv[1]](
+        model_path, image, device
+    )
+    print(
+        _RESULT_PREFIX
+        + json.dumps(
+            {"text": text, "device": "gpu" if device.startswith("cuda") else "cpu"},
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

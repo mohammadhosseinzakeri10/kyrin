@@ -12,6 +12,7 @@ from kyrin.app.settings import (
     AppSettings,
     AppSpokenAliases,
     CommandModelSelection,
+    DocumentOcrSelection,
     OcrSelection,
     SttSelection,
     TtsLanguageRoute,
@@ -23,6 +24,7 @@ from kyrin.app.settings_store import (
     linux_settings_path,
 )
 from kyrin.stt.device import DevicePreference
+from kyrin.vision.ocr.contracts import OcrDevicePreference
 
 
 def test_missing_settings_start_in_safe_setup_state(tmp_path: Path) -> None:
@@ -64,8 +66,22 @@ def test_selected_gpu_is_saved_without_claiming_it_is_available(tmp_path: Path) 
     store.save(settings)
 
     assert store.load() == settings
-    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 13
+    assert json.loads(store.path.read_text(encoding="utf-8"))["schema_version"] == 14
     assert store.path.stat().st_mode & 0o077 == 0
+
+
+def test_document_model_and_device_round_trip_and_old_default(tmp_path: Path) -> None:
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    settings = AppSettings(
+        document_ocr=DocumentOcrSelection("dots", OcrDevicePreference.GPU)
+    )
+    store.save(settings)
+    assert store.load().document_ocr == settings.document_ocr
+    document = json.loads(store.path.read_text(encoding="utf-8"))
+    document["schema_version"] = 13
+    del document["document_ocr"]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+    assert store.load().document_ocr is None
 
 
 def test_remembered_telegram_pointer_round_trip_and_v11_defaults_off(
@@ -82,6 +98,7 @@ def test_remembered_telegram_pointer_round_trip_and_v11_defaults_off(
 
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 11
+    document.pop("document_ocr", None)
     del document["remember_telegram_pointer"]
     del document["allow_desktop_scroll"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
@@ -101,6 +118,7 @@ def test_desktop_scroll_permission_round_trip_and_v12_defaults_off(
 
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 12
+    document.pop("document_ocr", None)
     del document["allow_desktop_scroll"]
     store.path.write_text(json.dumps(document), encoding="utf-8")
     assert not store.load().allow_desktop_scroll
@@ -117,6 +135,7 @@ def test_registered_app_aliases_round_trip_and_v9_starts_empty(tmp_path: Path) -
 
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 9
+    document.pop("document_ocr", None)
     del document["app_spoken_aliases"]
     del document["tts_enabled"]
     del document["remember_telegram_pointer"]
@@ -164,6 +183,7 @@ def test_ocr_package_selection_round_trips_and_v8_uses_default(tmp_path: Path) -
 
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 8
+    document.pop("document_ocr", None)
     del document["ocr"]
     del document["app_spoken_aliases"]
     del document["tts_enabled"]
@@ -183,6 +203,7 @@ def test_local_tts_selection_round_trips_and_legacy_settings_use_system_voice(
 
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 6
+    document.pop("document_ocr", None)
     del document["tts"]
     del document["tts_languages"]
     del document["ocr"]
@@ -200,6 +221,7 @@ def test_voice_output_switch_round_trips_and_v10_defaults_to_on(tmp_path: Path) 
     assert not store.load().tts_enabled
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 10
+    document.pop("document_ocr", None)
     del document["tts_enabled"]
     del document["remember_telegram_pointer"]
     del document["allow_desktop_scroll"]
@@ -243,6 +265,7 @@ def test_persian_tts_route_round_trips_and_v7_migrates(tmp_path: Path) -> None:
     assert store.load().tts_languages == (persian,)
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 7
+    document.pop("document_ocr", None)
     del document["tts_languages"]
     del document["ocr"]
     del document["app_spoken_aliases"]
@@ -264,6 +287,7 @@ def test_command_model_selection_round_trips_and_old_schema_stays_off(
     assert store.load().command_model == selection
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 5
+    document.pop("document_ocr", None)
     del document["command_model"]
     del document["tts"]
     del document["tts_languages"]
@@ -293,12 +317,13 @@ def test_unsupported_version_and_wrong_types_are_rejected(tmp_path: Path) -> Non
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(AppSettings())
     document = json.loads(store.path.read_text(encoding="utf-8"))
-    document["schema_version"] = 14
+    document["schema_version"] = 15
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="schema version"):
         store.load()
 
     document["schema_version"] = 13
+    document.pop("document_ocr", None)
     document["listening_enabled"] = 1
     store.path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(SettingsError, match="boolean"):
@@ -362,6 +387,7 @@ def test_version_one_settings_migrate_with_chat_permission_off(tmp_path: Path) -
     store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 1
+    document.pop("document_ocr", None)
     del document["command_model"]
     del document["tts"]
     del document["tts_languages"]
@@ -391,6 +417,7 @@ def test_version_two_settings_migrate_with_no_custom_wake_aliases(
     store.save(AppSettings(wake_aliases=("kayrin",)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 2
+    document.pop("document_ocr", None)
     del document["command_model"]
     del document["tts"]
     del document["tts_languages"]
@@ -415,6 +442,7 @@ def test_legacy_settings_do_not_enable_window_or_close_permissions(
     store.save(AppSettings(allowed_apps=(AllowedApp("telegram", "telegram.desktop"),)))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 3
+    document.pop("document_ocr", None)
     del document["command_model"]
     del document["tts"]
     del document["tts_languages"]
@@ -439,6 +467,7 @@ def test_version_four_never_enables_power_permission(tmp_path: Path) -> None:
     store.save(AppSettings(system_power_enabled=True))
     document = json.loads(store.path.read_text(encoding="utf-8"))
     document["schema_version"] = 4
+    document.pop("document_ocr", None)
     del document["command_model"]
     del document["tts"]
     del document["tts_languages"]

@@ -225,28 +225,37 @@ ENGLISH: dict[str, str] = {
     ),
     "screen_document_heading": "Experimental document OCR",
     "screen_document_hint": (
-        "Read the active window with a separate offline model. The Local OCR model "
-        "and Save Changes do not affect this choice. Clicking Read captures the "
+        "Read the active window with a separate offline model. Save Changes remembers "
+        "the document model and CPU/GPU choice. Clicking Read captures the "
         "KYRIN window if it is in front. This can take minutes on CPU. Results "
         "are text only and never used to click or run commands."
+    ),
+    "screen_document_device": "Document model compute device",
+    "screen_document_device_auto": "Auto (GPU if available)",
+    "screen_document_device_cpu": "CPU",
+    "screen_document_device_gpu": "GPU (CUDA required)",
+    "screen_document_gpu_unavailable": (
+        "CUDA GPU is unavailable for this document model. "
+        "Choose CPU or install its CUDA runtime."
     ),
     "screen_document_read": "Read with selected document model",
     "screen_document_clear": "Clear document text",
     "screen_document_ready": "Choose a model to compare its text output.",
     "screen_document_reading": "Reading with the document model…",
     "screen_document_progress": (
-        "{backend} is reading… {seconds} seconds elapsed (up to 4 minutes on CPU)."
+        "{backend} is reading on {device}… {seconds} seconds elapsed (up to 4 minutes)."
     ),
     "screen_document_timeout": (
         "The document model did not finish within 4 minutes on this device. "
         "Try another model or a faster runtime."
     ),
     "screen_document_no_text": (
-        "{backend} returned no readable text from the captured {app_id} window. "
+        "{backend} ({device}) returned no readable text from the "
+        "captured {app_id} window. "
         "Try the screen text reader above to check whether that window has "
         "readable text."
     ),
-    "screen_document_result": "{backend} read the active {app_id} window.",
+    "screen_document_result": "{backend} read the active {app_id} window on {device}.",
     "preferences_heading": "Preferences",
     "preferences_caption": "Choose the language of the control center.",
     "interface_language": "Interface language",

@@ -19,10 +19,13 @@ from kyrin.app.qt.document_text_reader import (  # noqa: E402
 from kyrin.app.qt.screen_access import ScreenAccess  # noqa: E402
 from kyrin.app.qt.screen_access_page import ScreenAccessPage  # noqa: E402
 from kyrin.app.qt.translations import UiTranslations  # noqa: E402
+from kyrin.app.settings import DocumentOcrSelection  # noqa: E402
 from kyrin.vision.ocr.backends.document import (  # noqa: E402
     DocumentOcrEngine,
+    DocumentOcrResult,
     DocumentOcrTimeoutError,
 )
+from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference  # noqa: E402
 from kyrin.vision.screen_capture import IdentifiedWindowImage  # noqa: E402
 
 
@@ -44,17 +47,23 @@ class FakeEngine:
 
     def __init__(self, gate: Event) -> None:
         self.gate = gate
+        self.requested_device: OcrDevicePreference | None = None
 
-    def read_text(self, image: bytes) -> str:
+    def read_text(
+        self, image: bytes, device: OcrDevicePreference = OcrDevicePreference.AUTO
+    ) -> DocumentOcrResult:
         assert image == b"\x89PNG\r\n\x1a\npng"
+        self.requested_device = device
         assert self.gate.wait(2)
-        return "Open Telegram"
+        return DocumentOcrResult("Open Telegram", OcrDevice.CPU)
 
 
 class TimeoutEngine:
     backend = "dots"
 
-    def read_text(self, image: bytes) -> str:
+    def read_text(
+        self, image: bytes, device: OcrDevicePreference = OcrDevicePreference.AUTO
+    ) -> DocumentOcrResult:
         raise DocumentOcrTimeoutError("Document OCR process exceeded four minutes")
 
 
@@ -136,9 +145,32 @@ def test_document_reader_emits_text_only_for_the_same_window(
     gate.set()
     _until(app, lambda: bool(completed))
     assert completed == [
-        DocumentObservation("telegram.desktop", 123, "surya", "Open Telegram")
+        DocumentObservation(
+            "telegram.desktop", 123, "surya", "Open Telegram", OcrDevice.CPU
+        )
     ]
     assert not reader.busy
+    reader.close()
+
+
+def test_document_reader_passes_gpu_choice_to_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    gate = Event()
+    engine = FakeEngine(gate)
+    reader = DocumentTextReader(
+        cast(ScreenAccess, FakeAccess()),
+        lambda _backend: cast(DocumentOcrEngine, engine),
+        lambda: ("telegram.desktop", 123),
+    )
+    completed: list[DocumentObservation] = []
+    reader.completed.connect(completed.append)
+    assert reader.read("surya", OcrDevicePreference.GPU)
+    gate.set()
+    _until(app, lambda: bool(completed))
+    assert engine.requested_device == OcrDevicePreference.GPU
     reader.close()
 
 
@@ -204,6 +236,11 @@ def test_page_lists_complete_document_models_separately(
         "glm",
         "dots",
     ]
+    page.document_backend.setCurrentIndex(page.document_backend.findData("dots"))
+    page.document_device.setCurrentIndex(page.document_device.findData("gpu"))
+    assert page.document_selection() == DocumentOcrSelection(
+        "dots", OcrDevicePreference.GPU
+    )
     assert not page.document_button.isEnabled()
     page.close()
 
@@ -225,9 +262,7 @@ def test_screen_page_clears_each_read_result_independently(
         assert page.read_status.text() == translations.text("screen_read_hint")
         page.clear_document_button.click()
         assert not page.document_output.toPlainText()
-        assert page.document_status.text() == translations.text(
-            "screen_document_ready"
-        )
+        assert page.document_status.text() == translations.text("screen_document_ready")
         page._read_busy_changed(True)
         page._document_busy_changed(True)
         assert not page.clear_read_button.isEnabled()
@@ -249,7 +284,7 @@ def test_document_empty_result_identifies_model_and_captured_window(
     page = ScreenAccessPage(None, UiTranslations(tmp_path))
     try:
         page._document_completed(
-            DocumentObservation("kyrin.desktop", 123, "surya", "")
+            DocumentObservation("kyrin.desktop", 123, "surya", "", OcrDevice.CPU)
         )
         assert "surya" in page.document_status.text()
         assert "kyrin.desktop" in page.document_status.text()

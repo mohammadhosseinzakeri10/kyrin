@@ -11,6 +11,8 @@ from kyrin.vision.ocr.backends.document import (
     DocumentOcrEngine,
     DocumentOcrTimeoutError,
 )
+from kyrin.vision.ocr.backends.tesseract import OcrUnavailableError
+from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference
 from kyrin.vision.screen_capture import IdentifiedWindowImage
 
 DocumentEngineFactory = Callable[[str], DocumentOcrEngine | None]
@@ -23,6 +25,7 @@ class DocumentObservation:
     process_id: int
     backend: str
     text: str
+    device: OcrDevice
 
 
 class _WorkerEvents(QObject):
@@ -60,7 +63,9 @@ class DocumentTextReader(QObject):
     def busy(self) -> bool:
         return self._busy
 
-    def read(self, backend: str) -> bool:
+    def read(
+        self, backend: str, device: OcrDevicePreference = OcrDevicePreference.AUTO
+    ) -> bool:
         if self._closed or self._busy:
             return False
         if not self._access.granted:
@@ -73,7 +78,9 @@ class DocumentTextReader(QObject):
         self._busy = True
         self.busy_changed.emit(True)
         generation = self._generation
-        self._access.capture(lambda image: self._captured(generation, image, engine))
+        self._access.capture(
+            lambda image: self._captured(generation, image, engine, device)
+        )
         return True
 
     def _captured(
@@ -81,6 +88,7 @@ class DocumentTextReader(QObject):
         generation: int,
         image: IdentifiedWindowImage | None,
         engine: DocumentOcrEngine,
+        device: OcrDevicePreference,
     ) -> None:
         if self._closed or generation != self._generation:
             return
@@ -92,7 +100,7 @@ class DocumentTextReader(QObject):
 
         def work() -> None:
             try:
-                text = engine.read_text(image.image)
+                result = engine.read_text(image.image, device)
                 if self._identity_reader() != (
                     image.platform_app_id,
                     image.process_id,
@@ -105,11 +113,14 @@ class DocumentTextReader(QObject):
                         image.platform_app_id,
                         image.process_id,
                         engine.backend,
-                        text,
+                        result.text,
+                        result.device,
                     ),
                 )
             except DocumentOcrTimeoutError:
                 events.failed.emit(generation, "ocr_timeout")
+            except OcrUnavailableError:
+                events.failed.emit(generation, "gpu_unavailable")
             except Exception:
                 # Contain failures from the optional model and identity providers.
                 events.failed.emit(generation, "ocr_failed")

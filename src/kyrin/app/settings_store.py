@@ -11,14 +11,16 @@ from kyrin.app.settings import (
     AppSettings,
     AppSpokenAliases,
     CommandModelSelection,
+    DocumentOcrSelection,
     OcrSelection,
     SttSelection,
     TtsLanguageRoute,
     TtsSelection,
 )
 from kyrin.stt.device import DevicePreference
+from kyrin.vision.ocr.contracts import OcrDevicePreference
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 class SettingsError(ValueError):
@@ -138,6 +140,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("remember_telegram_pointer")
     if version >= 13:
         fields.add("allow_desktop_scroll")
+    if version >= 14:
+        fields.add("document_ocr")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -194,6 +198,22 @@ def _parse_settings(document: object) -> AppSettings:
             backend=_string(selected_ocr["backend"], "ocr.backend"),
             model_path=Path(_string(selected_ocr["model_path"], "ocr.model_path")),
         )
+
+    document_ocr: DocumentOcrSelection | None = None
+    raw_document_ocr = root["document_ocr"] if version >= 14 else None
+    if raw_document_ocr is not None:
+        selected_document = _object(
+            raw_document_ocr, {"backend", "device"}, "document_ocr"
+        )
+        try:
+            document_ocr = DocumentOcrSelection(
+                backend=_string(selected_document["backend"], "document_ocr.backend"),
+                device=OcrDevicePreference(
+                    _string(selected_document["device"], "document_ocr.device")
+                ),
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
 
     tts = TtsSelection()
     if version >= 7:
@@ -292,6 +312,7 @@ def _parse_settings(document: object) -> AppSettings:
             stt=stt,
             command_model=command_model,
             ocr=ocr,
+            document_ocr=document_ocr,
             tts=tts,
             tts_languages=tts_languages,
             tts_enabled=(
@@ -309,11 +330,13 @@ def _parse_settings(document: object) -> AppSettings:
             allowed_chat_apps=chat_apps,
             remember_telegram_pointer=(
                 _boolean(root["remember_telegram_pointer"], "remember_telegram_pointer")
-                if version >= 12 else False
+                if version >= 12
+                else False
             ),
             allow_desktop_scroll=(
                 _boolean(root["allow_desktop_scroll"], "allow_desktop_scroll")
-                if version >= 13 else False
+                if version >= 13
+                else False
             ),
             allowed_window_apps=window_apps,
             allowed_close_apps=close_apps,
@@ -357,6 +380,14 @@ def _document(settings: AppSettings) -> dict[str, object]:
             else {
                 "backend": settings.ocr.backend,
                 "model_path": str(settings.ocr.model_path),
+            }
+        ),
+        "document_ocr": (
+            None
+            if settings.document_ocr is None
+            else {
+                "backend": settings.document_ocr.backend,
+                "device": settings.document_ocr.device.value,
             }
         ),
         "tts": _tts_document(settings.tts),

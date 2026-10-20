@@ -12,6 +12,7 @@ from kyrin.tts.models import (
 from kyrin.tts.models import (
     TtsSelection as TtsSelection,
 )
+from kyrin.vision.ocr.contracts import OcrDevicePreference
 
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
@@ -81,6 +82,20 @@ class OcrSelection:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentOcrSelection:
+    """Saved text-only document model and requested compute device."""
+
+    backend: str
+    device: OcrDevicePreference = OcrDevicePreference.AUTO
+
+    def __post_init__(self) -> None:
+        if self.backend not in {"surya", "glm", "dots"}:
+            raise ValueError("document OCR backend is not installed")
+        if not isinstance(self.device, OcrDevicePreference):
+            raise ValueError("document OCR device must be auto, cpu, or gpu")
+
+
+@dataclass(frozen=True, slots=True)
 class AllowedApp:
     """An explicit Ubuntu desktop-entry binding, not arbitrary shell text."""
 
@@ -145,6 +160,7 @@ class AppSettings:
     stt: SttSelection | None = None
     command_model: CommandModelSelection | None = None
     ocr: OcrSelection | None = None
+    document_ocr: DocumentOcrSelection | None = None
     tts: TtsSelection = TtsSelection()
     tts_languages: tuple[TtsLanguageRoute, ...] = ()
     tts_enabled: bool = True
@@ -177,6 +193,10 @@ class AppSettings:
             raise ValueError("command_model must be a model selection or null")
         if self.ocr is not None and not isinstance(self.ocr, OcrSelection):
             raise ValueError("ocr must be a model selection or null")
+        if self.document_ocr is not None and not isinstance(
+            self.document_ocr, DocumentOcrSelection
+        ):
+            raise ValueError("document_ocr must be a document model selection or null")
         if not isinstance(self.tts, TtsSelection):
             raise ValueError("tts must be a voice selection")
         if type(self.tts_enabled) is not bool:

@@ -3,9 +3,11 @@
 import json
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from kyrin.vision.ocr.backends.tesseract import OcrInferenceError, OcrUnavailableError
+from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference
 
 _RESULT_PREFIX = "KYRIN_DOCUMENT_OCR_RESULT:"
 _MAX_IMAGE_BYTES = 32 * 1024 * 1024
@@ -18,6 +20,12 @@ _MODELS = {
 
 class DocumentOcrTimeoutError(OcrInferenceError):
     """The isolated document model exceeded its bounded read time."""
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentOcrResult:
+    text: str
+    device: OcrDevice
 
 
 def document_model_ready(
@@ -60,9 +68,13 @@ class DocumentOcrEngine:
         self._python = runtimes_root / runtime_folder / "bin/python"
         self._cache = runtimes_root / runtime_folder / "cache"
 
-    def read_text(self, image: bytes) -> str:
+    def read_text(
+        self, image: bytes, device: OcrDevicePreference = OcrDevicePreference.AUTO
+    ) -> DocumentOcrResult:
         if not image or len(image) > _MAX_IMAGE_BYTES:
             raise ValueError("Document OCR image is empty or exceeds the size limit")
+        if not isinstance(device, OcrDevicePreference):
+            raise ValueError("Document OCR device must be auto, cpu, or gpu")
         environment = os.environ.copy()
         environment.update(
             HF_HOME=str(self._cache / "huggingface"),
@@ -71,10 +83,21 @@ class DocumentOcrEngine:
             TRANSFORMERS_OFFLINE="1",
             OMP_NUM_THREADS="4",
         )
+        if device is OcrDevicePreference.CPU:
+            # CUDA libraries otherwise reserve virtual address space even for
+            # CPU inference and can trip the worker's 18 GB address-space cap.
+            environment["CUDA_VISIBLE_DEVICES"] = ""
         worker = Path(__file__).with_name("document_worker.py")
         try:
             process = subprocess.run(
-                [str(self._python), "-I", str(worker), self.backend, str(self._model)],
+                [
+                    str(self._python),
+                    "-I",
+                    str(worker),
+                    self.backend,
+                    str(self._model),
+                    device.value,
+                ],
                 input=image,
                 capture_output=True,
                 timeout=240,
@@ -87,6 +110,10 @@ class DocumentOcrEngine:
             ) from error
         except OSError as error:
             raise OcrInferenceError("Document OCR process did not finish") from error
+        if process.returncode == 20:
+            raise OcrUnavailableError(
+                "CUDA GPU is unavailable in this document OCR runtime"
+            )
         if process.returncode != 0:
             raise OcrInferenceError("Document OCR inference failed")
         try:
@@ -96,8 +123,12 @@ class DocumentOcrEngine:
                 if line.startswith(_RESULT_PREFIX)
             )
             result = json.loads(payload)
-            if not isinstance(result, str):
+            if not isinstance(result, dict) or not isinstance(result.get("text"), str):
                 raise ValueError("Document OCR did not return text")
+            raw_device = result.get("device")
+            if not isinstance(raw_device, str):
+                raise ValueError("Document OCR did not report its device")
+            actual_device = OcrDevice(raw_device)
         except (StopIteration, UnicodeError, ValueError, TypeError) as error:
             raise OcrInferenceError("Document OCR returned invalid text") from error
-        return result[:16000]
+        return DocumentOcrResult(result["text"][:16000], actual_device)

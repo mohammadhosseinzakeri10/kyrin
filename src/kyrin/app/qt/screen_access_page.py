@@ -22,9 +22,10 @@ from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.app.qt.translations import UiTranslations
-from kyrin.app.settings import OcrSelection
+from kyrin.app.settings import DocumentOcrSelection, OcrSelection
 from kyrin.vision.ocr.backends.document import document_model_ready
 from kyrin.vision.ocr.backends.paddle import paddle_model_ready
+from kyrin.vision.ocr.contracts import OcrDevicePreference
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 
@@ -42,6 +43,7 @@ class ScreenAccessPage(QWidget):
         document_reader: DocumentTextReader | None = None,
         document_runtimes_root: Path | None = None,
         ocr_selection: OcrSelection | None = None,
+        document_selection: DocumentOcrSelection | None = None,
     ) -> None:
         super().__init__()
         self._access = access
@@ -172,7 +174,22 @@ class ScreenAccessPage(QWidget):
                     backend, ocr_candidates_root, document_runtimes_root
                 ):
                     self.document_backend.addItem(label, backend)
+        if document_selection is not None:
+            index = self.document_backend.findData(document_selection.backend)
+            if index >= 0:
+                self.document_backend.setCurrentIndex(index)
         layout.addWidget(self.document_backend)
+        self.document_device_label = QLabel()
+        layout.addWidget(self.document_device_label)
+        self.document_device = QComboBox()
+        self.document_device.setAccessibleName("Document OCR device")
+        for choice in OcrDevicePreference:
+            self.document_device.addItem(choice.value.upper(), choice.value)
+        if document_selection is not None:
+            self.document_device.setCurrentIndex(
+                self.document_device.findData(document_selection.device.value)
+            )
+        layout.addWidget(self.document_device)
         self.document_button = QPushButton()
         self.document_button.clicked.connect(self._read_document)
         layout.addWidget(self.document_button)
@@ -221,6 +238,11 @@ class ScreenAccessPage(QWidget):
         self.clear_read_button.setText(text("screen_read_clear"))
         self.document_heading.setText(text("screen_document_heading"))
         self.document_hint.setText(text("screen_document_hint"))
+        self.document_device_label.setText(text("screen_document_device"))
+        for index, choice in enumerate(OcrDevicePreference):
+            self.document_device.setItemText(
+                index, text(f"screen_document_device_{choice.value}")
+            )
         self.document_button.setText(text("screen_document_read"))
         self.clear_document_button.setText(text("screen_document_clear"))
         if not self.document_output.toPlainText():
@@ -263,6 +285,19 @@ class ScreenAccessPage(QWidget):
 
     def has_unsaved_changes(self, current: OcrSelection | None) -> bool:
         return self.selection() != current
+
+    def document_selection(self) -> DocumentOcrSelection | None:
+        backend = self.document_backend.currentData()
+        if not isinstance(backend, str):
+            return None
+        return DocumentOcrSelection(
+            backend, OcrDevicePreference(self.document_device.currentData())
+        )
+
+    def has_unsaved_document_changes(
+        self, current: DocumentOcrSelection | None
+    ) -> bool:
+        return self.document_selection() != current
 
     def _toggled(self, enabled: bool) -> None:
         access = self._access
@@ -355,7 +390,7 @@ class ScreenAccessPage(QWidget):
             return
         self.document_output.clear()
         self.document_status.setText(self._translations.text("screen_document_reading"))
-        reader.read(backend)
+        reader.read(backend, OcrDevicePreference(self.document_device.currentData()))
 
     def _document_completed(self, observation: object) -> None:
         if not isinstance(observation, DocumentObservation):
@@ -366,6 +401,7 @@ class ScreenAccessPage(QWidget):
                 self._translations.text("screen_document_no_text").format(
                     backend=observation.backend,
                     app_id=observation.app_id,
+                    device=observation.device.value.upper(),
                 )
             )
             return
@@ -374,6 +410,7 @@ class ScreenAccessPage(QWidget):
             self._translations.text("screen_document_result").format(
                 backend=observation.backend,
                 app_id=observation.app_id,
+                device=observation.device.value.upper(),
             )
         )
 
@@ -385,12 +422,14 @@ class ScreenAccessPage(QWidget):
             "capture_unavailable": "screen_capture_unavailable",
             "window_changed": "screen_window_changed",
             "ocr_timeout": "screen_document_timeout",
+            "gpu_unavailable": "screen_document_gpu_unavailable",
         }.get(reason, "screen_ocr_failed")
         self.document_status.setText(self._translations.text(key))
 
     def _document_busy_changed(self, busy: bool) -> None:
         self._update_document_button()
         self.document_backend.setEnabled(not busy)
+        self.document_device.setEnabled(not busy)
         self.clear_document_button.setEnabled(not busy)
         if busy:
             self._document_started_at = monotonic()
@@ -407,6 +446,7 @@ class ScreenAccessPage(QWidget):
         self.document_status.setText(
             self._translations.text("screen_document_progress").format(
                 backend=backend if isinstance(backend, str) else "OCR",
+                device=self.document_device.currentData().upper(),
                 seconds=int(monotonic() - self._document_started_at),
             )
         )

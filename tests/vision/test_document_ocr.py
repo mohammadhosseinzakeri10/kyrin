@@ -8,10 +8,12 @@ import pytest
 
 from kyrin.vision.ocr.backends.document import (
     DocumentOcrEngine,
+    DocumentOcrResult,
     DocumentOcrTimeoutError,
     document_model_ready,
 )
-from kyrin.vision.ocr.backends.tesseract import OcrInferenceError
+from kyrin.vision.ocr.backends.tesseract import OcrInferenceError, OcrUnavailableError
+from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference
 
 
 def _catalog(tmp_path: Path) -> tuple[Path, Path]:
@@ -34,14 +36,32 @@ def test_document_adapter_returns_only_text_and_forces_offline(tmp_path: Path) -
     with patch(
         "kyrin.vision.ocr.backends.document.subprocess.run",
         return_value=CompletedProcess(
-            [], 0, b'KYRIN_DOCUMENT_OCR_RESULT:"Open Telegram"\n', b""
+            [],
+            0,
+            b'KYRIN_DOCUMENT_OCR_RESULT:{"text":"Open Telegram","device":"cpu"}\n',
+            b"",
         ),
     ) as run:
-        assert engine.read_text(b"png") == "Open Telegram"
+        assert engine.read_text(b"png", OcrDevicePreference.CPU) == DocumentOcrResult(
+            "Open Telegram", OcrDevice.CPU
+        )
     assert run.call_args.kwargs["input"] == b"png"
     assert run.call_args.kwargs["env"]["HF_HUB_OFFLINE"] == "1"
     assert run.call_args.kwargs["env"]["TRANSFORMERS_OFFLINE"] == "1"
+    assert run.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == ""
     assert run.call_args.args[0][1] == "-I"
+    assert run.call_args.args[0][-1] == "cpu"
+
+
+def test_explicit_gpu_unavailable_does_not_fall_back(tmp_path: Path) -> None:
+    models, runtimes = _catalog(tmp_path)
+    engine = DocumentOcrEngine("surya", models, runtimes)
+    with patch(
+        "kyrin.vision.ocr.backends.document.subprocess.run",
+        return_value=CompletedProcess([], 20, b"", b""),
+    ):
+        with pytest.raises(OcrUnavailableError, match="CUDA GPU"):
+            engine.read_text(b"png", OcrDevicePreference.GPU)
 
 
 def test_document_adapter_rejects_incomplete_or_invalid_result(tmp_path: Path) -> None:

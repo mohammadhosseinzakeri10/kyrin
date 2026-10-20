@@ -85,24 +85,35 @@ accuracy or responsiveness on full desktop windows.
 Surya OCR 2, GLM-OCR, and dots.mocr are available in a **separate read-only
 document comparison** section of Screen Access when their complete local
 checkpoint and isolated runtime are present. This section captures the active
-window only after the existing screen grant, runs offline CPU inference in a
+window only after the existing screen grant, runs offline inference in a
 bounded subprocess, and displays text without coordinates. It never feeds
 Telegram verification or clicking. Surya and GLM share the local
 `document-vlm5` runtime; dots.mocr uses `document-dots` because its compatible
 Transformers version differs. The dots vision configuration must explicitly
-select eager attention on CPU; a process-local import shim makes the checkpoint's
+select eager attention; a process-local import shim makes the checkpoint's
 unconditional flash-attention import safe and raises if that code path is used.
-The subprocess has an address-space limit and a four-minute timeout. Results
+The CPU subprocess has an address-space limit; GPU runs omit that virtual
+address-space limit because CUDA reserves large address ranges. Both paths have
+a four-minute timeout. Results
 are discarded if screen access is revoked or the active window changes. No
 captured image is saved. All three read `Open Telegram` in separate offline
 synthetic-image smoke tests. This is not an accuracy or full-screen latency
 benchmark, and the document models have no verified click coordinates.
-On the owner's 2026-10-19 KYRIN screenshot, dots.mocr in the installed CPU-only
+On the owner's 2026-10-19 KYRIN screenshot, dots.mocr in the CPU
 PyTorch runtime returned 682 characters after 80.1 seconds. The UI now shows
 elapsed time during a document read and reports a distinct four-minute timeout.
 This documents CPU latency rather than treating a long run as a frozen UI.
-The project has no working document-model GPU runtime yet; a CPU/GPU choice
-must verify runtime and hardware support before it can be offered as functional.
+The model and Auto/CPU/GPU device selection are saved separately from action
+OCR. Auto uses CUDA when the isolated runtime reports it available, otherwise
+CPU. An explicit GPU request fails clearly if CUDA is unavailable and never
+silently falls back. The text result reports the device actually used. GPU
+support requires a CUDA-enabled PyTorch installation in each model's isolated
+runtime; selecting GPU alone does not install one.
+The owner's RTX 5060 Ti completed synthetic GPU reads with dots.mocr (4.5
+seconds), Surya (16.1 seconds), and GLM-OCR (4.2 seconds); all reported
+`device=gpu`. Auto selected GPU on this machine. Explicit CPU hides CUDA from
+its subprocess to avoid CUDA library mappings exhausting the CPU worker's
+virtual address-space limit; a GLM CPU read then completed in 9.9 seconds.
 The document model selector is independent of the saved Local OCR model above
 it. Clicking its read button captures the window that is active at that moment;
 when the control center is in front, that is KYRIN itself. Each read-only text

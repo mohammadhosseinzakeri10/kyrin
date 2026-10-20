@@ -39,7 +39,7 @@ def test_surya_retries_wide_ui_on_empty_full_window(
     monkeypatch.setitem(sys.modules, "transformers", transformers)
     image = FakeImage(1200, 820)
 
-    assert document_worker._surya(Path("/fake"), image) == "Main panel text"
+    assert document_worker._surya(Path("/fake"), image, "cpu") == "Main panel text"
     assert image.crops == [(180, 0, 1200, 820)]
     assert len(frames) == 2
 
@@ -56,5 +56,5 @@ def test_surya_skips_retry_when_full_window_has_text(
     monkeypatch.setitem(sys.modules, "transformers", transformers)
     image = FakeImage(1200, 820)
 
-    assert document_worker._surya(Path("/fake"), image) == "Already read"
+    assert document_worker._surya(Path("/fake"), image, "cpu") == "Already read"
     assert not image.crops

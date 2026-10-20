@@ -353,6 +353,7 @@ class ControlWindow(QWidget):
             document_reader=document_reader,
             document_runtimes_root=document_runtimes_root,
             ocr_selection=settings.ocr if settings is not None else None,
+            document_selection=settings.document_ocr if settings is not None else None,
         )
         self.pages.addWidget(self.screen_access_page)
 
@@ -737,6 +738,7 @@ class ControlWindow(QWidget):
             stt=stt,
             command_model=self.command_model_page.selection(),
             ocr=ocr,
+            document_ocr=self.screen_access_page.document_selection(),
             tts=self.tts_page.selection(),
             tts_languages=self.tts_page.language_routes(),
             tts_enabled=self.tts_page.voice_enabled(),
@@ -778,6 +780,9 @@ class ControlWindow(QWidget):
             or self.actions_page.has_unsaved_changes(self._settings)
             or self.command_model_page.has_unsaved_changes(self._settings.command_model)
             or self.screen_access_page.has_unsaved_changes(self._settings.ocr)
+            or self.screen_access_page.has_unsaved_document_changes(
+                self._settings.document_ocr
+            )
             or self.tts_page.has_unsaved_changes(
                 self._settings.tts,
                 self._settings.tts_languages,

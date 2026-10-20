@@ -7,6 +7,22 @@
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
 
+> **Experimental document OCR device selection (2026-10-19):** The owner
+> requested CPU/GPU/Auto for the separate text-only document models. Screen
+> Access now saves the document model and device choice independently of the
+> action OCR engine. The worker resolves Auto against CUDA availability,
+> rejects explicit GPU when unavailable, moves model inputs to the selected
+> device, and reports the actual device with its text. CPU alone retains its
+> process address-space limit; both paths retain the four-minute timeout.
+> Both isolated runtimes now have PyTorch 2.10 CUDA 13.0. On the owner's RTX
+> 5060 Ti, a synthetic local image returned `device=gpu` with dots.mocr in
+> 4.5 seconds, Surya in 16.1 seconds, and GLM-OCR in 4.2 seconds. Auto also
+> selected GPU in a real dots.mocr read. Explicit CPU initially failed with
+> `MemoryError` under the 18 GB address-space limit when CUDA remained visible;
+> hiding CUDA in CPU-only workers fixed it, and a GLM CPU read completed in
+> 9.9 seconds. These observations do not establish model accuracy or latency
+> on arbitrary real desktop windows.
+
 > **OCR choice in Screen Access (2026-10-19):** Installed Tesseract, Fast,
 > Best, PaddleOCR v5 Persian, v6 Small, v6 Medium, and PaddleOCR-VL 1.6 are
 > selectable when their local runtimes and weights are present. The three
