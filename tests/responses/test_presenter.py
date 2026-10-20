@@ -72,6 +72,22 @@ def test_uncertain_chat_search_shows_the_name_kyrin_actually_searched() -> None:
     assert "call your email" in ResponsePresenter("en").present(feedback).text
 
 
+def test_visible_chat_diagnostic_code_keeps_user_message_readable() -> None:
+    feedback = ActionFeedback(
+        KEY,
+        CommandIntent(
+            CommandKind.OPEN_CHAT, "My Mother", "telegram", chat_scope="visible"
+        ),
+        ActionOutcome.FAILED,
+        ResponseChannel.TEXT_AND_VOICE,
+        "visible_chat_uncertain:unclassified_matches_1",
+        "en",
+    )
+    message = ResponsePresenter("en").present(feedback).text
+    assert "My Mother" in message
+    assert "unclassified" not in message
+
+
 def test_scroll_dispatch_does_not_claim_visible_movement() -> None:
     feedback = ActionFeedback(
         KEY,

@@ -93,3 +93,8 @@ permission. The built-in preview is covered by automated backend-routing
 tests. On 2026-10-14, the owner restarted the installed control center and
 confirmed the `SAFE PREVIEW` window, both spoken stages, and the final
 `No operating-system request was sent` message while responding by voice.
+
+On 2026-10-20 the owner additionally reported that the real spoken Power Off
+and Restart flows completed successfully on their machine. Diagnostic logs
+for these runs were not provided. This live report covers those two actions;
+it does not establish live results for Logout or Suspend.

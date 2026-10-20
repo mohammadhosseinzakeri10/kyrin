@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from difflib import SequenceMatcher
 
 from kyrin.commands.app_names import AppNameResolver, SpokenAppCandidate
+from kyrin.commands.chat_command_catalog import match_english_chat_command
 from kyrin.commands.choice_numbers import choice_index
 from kyrin.commands.context_resolver import (
     AppClarification,
@@ -88,8 +89,6 @@ _OPEN_CHAT_CLAUSE_EN = re.compile(
 _OPEN_CHAT_WITH_APP_FA = re.compile(r"^چت (.+?) را در (تلگرام|واتساپ) باز کن$")
 _OPEN_CHAT_FA = re.compile(r"^(?:چت|گفتگوی) (.+?) را باز کن$")
 _GO_CHAT_FA = re.compile(r"^به (?:چت|گفتگوی) (.+?) برو$")
-_OPEN_CHAT_EN = re.compile(r"^(?:open|go to) chat (.+)$")
-_OPEN_CHAT_SUFFIX_EN = re.compile(r"^(?:open|go to) (?:the )?(.+?)(?:'s)? chat$")
 _TELEGRAM_VIEW_EN = re.compile(
     r"^(?:(?:please )?(?:go to|open|show) (?:telegram(?:'s)? )?"
     r"(?:the )?(archive|archived chats|contact|contacts|setting|settings|"
@@ -729,23 +728,29 @@ class DemoCommandInterpreter:
         if " and " in phrase and phrase.startswith(("open ", "go to ")):
             return self._interpret_english_plan(phrase, source=text)
 
+        english_chat = match_english_chat_command(phrase)
         if self._app_name_resolver is not None:
             app_match = _OPEN_NAMED_APP_FA.fullmatch(
                 phrase
             ) or _OPEN_NAMED_APP_EN.fullmatch(phrase)
             explicit_chat_match = _OPEN_CHAT_WITH_APP_FA.fullmatch(phrase)
-            chat_match = (
+            local_chat_match = (
                 explicit_chat_match
                 or _OPEN_CHAT_FA.fullmatch(phrase)
                 or _GO_CHAT_FA.fullmatch(phrase)
-                or _OPEN_CHAT_EN.fullmatch(phrase)
-                or _OPEN_CHAT_SUFFIX_EN.fullmatch(phrase)
             )
-            if app_match is not None and chat_match is not None:
+            if app_match is not None and (
+                local_chat_match is not None or english_chat is not None
+            ):
                 app_result = self._app_name_resolver.resolve(app_match[1])
                 if len(app_result.candidates) > 1:
                     return UnrecognizedCommand()
                 if len(app_result.candidates) == 1:
+                    if local_chat_match is not None:
+                        spoken_chat_target = local_chat_match[1].strip()
+                    else:
+                        assert english_chat is not None
+                        spoken_chat_target = english_chat.spoken_target
                     chat_app = (
                         _APPS[explicit_chat_match[2]]
                         if explicit_chat_match is not None
@@ -754,23 +759,32 @@ class DemoCommandInterpreter:
                     return NeedsClarification(
                         PendingIntentClarification(
                             app_result.candidates[0],
-                            source_spelling(text, chat_match[1].strip()),
+                            source_spelling(text, spoken_chat_target),
                             chat_app,
                         )
                     )
+
+        if english_chat is not None and english_chat.scope == "visible":
+            return ReadyCommand(
+                CommandIntent(
+                    CommandKind.OPEN_CHAT,
+                    source_spelling(text, english_chat.spoken_target),
+                    "telegram",
+                    chat_scope="visible",
+                )
+            )
 
         match = _OPEN_CHAT_WITH_APP_FA.fullmatch(phrase)
         if match is not None:
             return self._chat_command(match[1], context, _APPS[match[2]])
 
-        match = (
-            _OPEN_CHAT_FA.fullmatch(phrase)
-            or _GO_CHAT_FA.fullmatch(phrase)
-            or _OPEN_CHAT_EN.fullmatch(phrase)
-            or _OPEN_CHAT_SUFFIX_EN.fullmatch(phrase)
-        )
+        match = _OPEN_CHAT_FA.fullmatch(phrase) or _GO_CHAT_FA.fullmatch(phrase)
         if match is not None:
             return self._chat_command(source_spelling(text, match[1].strip()), context)
+        if english_chat is not None:
+            return self._chat_command(
+                source_spelling(text, english_chat.spoken_target), context
+            )
 
         if self._app_name_resolver is not None:
             match = _OPEN_NAMED_APP_FA.fullmatch(

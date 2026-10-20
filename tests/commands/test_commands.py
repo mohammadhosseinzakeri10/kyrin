@@ -440,6 +440,43 @@ def test_english_chat_name_preserves_spoken_case_for_search(
 
 @pytest.mark.parametrize(
     "phrase",
+    (
+        "Open visible chat My Mother",
+        "OPEN VISIBLE CHAT My Mother",
+        "open visibly chat My Mother",
+        "openvisibly chat My Mother",
+    ),
+)
+def test_visible_chat_command_keeps_a_separate_scope(phrase: str) -> None:
+    coordinator = CommandCoordinator(DemoCommandInterpreter())
+    assert coordinator.observe(
+        update(0, phrase, TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    ) == (
+        CommandResolution(
+            0,
+            CommandIntent(
+                CommandKind.OPEN_CHAT, "My Mother", "telegram", chat_scope="visible"
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "phrase", ("open invisible chat My Mother", "do not open visibly chat My Mother")
+)
+def test_visible_chat_repair_does_not_accept_other_commands(phrase: str) -> None:
+    interpretation = DemoCommandInterpreter().interpret(
+        phrase,
+        language="en",
+        context=CommandContext(observed_active_app="telegram"),
+        pending=None,
+    )
+    assert not isinstance(interpretation, ReadyCommand)
+
+
+@pytest.mark.parametrize(
+    "phrase",
     ("Open My Mother chat", "Open My Mother's chat", "Go to my mother chat"),
 )
 def test_english_chat_suffix_form_uses_spoken_name(

@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QObject, QTimer, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from kyrin.actions.telegram_verification import ChatSearchMatch
@@ -33,6 +33,12 @@ class Access(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.granted = True
+        self.available = True
+        self.remembered = False
+        self.request_count = 0
+
+    def request_session(self) -> None:
+        self.request_count += 1
 
 
 class Reader(QObject):
@@ -110,6 +116,28 @@ def test_verifier_uses_ui_thread_and_requires_current_grant(
     assert not _call_from_worker(app, lambda: verifier.verify("telegram.desktop", 123))
 
 
+def test_ready_restores_remembered_screen_session_before_chat_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    access = Access()
+    access.granted = False
+    access.remembered = True
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, access), cast(ScreenTextReader, Reader(_observation()))
+    )
+
+    def grant() -> None:
+        access.granted = True
+        access.changed.emit(True)
+
+    QTimer.singleShot(25, grant)
+    assert _call_from_worker(app, verifier.ready)
+    assert access.request_count == 1
+
+
 def test_search_result_is_only_returned_for_unique_left_pane_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -149,6 +177,43 @@ def test_search_result_is_only_returned_for_unique_left_pane_match(
         app,
         lambda: verifier.find_search_result("telegram.desktop", 123, "Bob") is None,
     )
+
+
+def test_visible_chat_choice_uses_current_list_without_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(
+        IdentifiedWindowText(
+            "telegram.desktop",
+            123,
+            OcrResult(
+                (
+                    RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
+                    RecognizedText("My", TextBox(70, 200, 25, 18), 0.92),
+                    RecognizedText("Mother", TextBox(100, 200, 65, 18), 0.91),
+                    RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
+                    RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.88),
+                ),
+                "eng", OcrDevice.CPU, "fake",
+            ),
+            (1600, 900),
+        )
+    )
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    assert _call_from_worker(
+        app,
+        lambda: (
+            choices := verifier.find_visible_chat_choices(
+                "telegram.desktop", 123, "My Mother"
+            )
+        ) is not None and choices.source == "visible",
+    )
+    assert reader.read_on_ui_thread
 
 
 def test_menu_verification_requests_left_region(

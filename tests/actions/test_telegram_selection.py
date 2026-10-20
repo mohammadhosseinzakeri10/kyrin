@@ -41,6 +41,8 @@ def test_invalid_answer_repeats_prompt_without_clicking() -> None:
     assert calls == []
     assert flow.on_final_speech("cancel")
     assert not flow.on_final_speech("one")
+    assert not flow.on_final_speech("non-bear too")
+    assert not flow.on_final_speech("nombertoo")
     assert calls == []
 
 
@@ -70,6 +72,8 @@ def test_duplicate_chat_choice_requires_a_valid_number() -> None:
     [
         ("one", 1), ("Number 1.", 1), ("the first", 1), ("first one", 1),
         ("two", 2), ("number two", 2), ("the second", 2),
+        ("non-bear too", 2), ("nombertoo", 2),
+        ("nomber two", 2), ("nomber 2", 2),
         ("THE SECOND ONE!", 2), ("second option", 2), ("the 2nd", 2),
         ("option number two", 2), ("choose the second", 2),
         ("select option 2", 2), ("pick the second chat", 2),
@@ -109,6 +113,7 @@ def test_choice_forms_select_the_same_number(answer: str, expected: int) -> None
         "one or two", "the first and second", "not the second", "don't pick two",
         "second, no first", "two chats", "2st", "0", "the third", "eleventh",
         "گزینه اول یا دوم", "", "the", "number",
+        "not non-bear too", "nombertoo or one", "nomber two or one",
     ],
 )
 def test_ambiguous_or_unavailable_choice_never_completes(answer: str) -> None:

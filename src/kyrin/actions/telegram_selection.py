@@ -71,8 +71,15 @@ _ORDINAL_DIGITS = {
         *((number, "th") for number in range(4, 11)),
     )
 }
+# Observed STT spellings of "number two". Apply them only while a Telegram
+# chat-choice prompt is pending; other numbered menus keep their strict parser.
+_OBSERVED_CHAT_CHOICE_ALIASES = {
+    "non-bear too": 2,
+    "nombertoo": 2,
+}
 _CHOICE_PREFIXES = {
     "number",
+    "nomber",
     "option",
     "choice",
     "result",
@@ -224,7 +231,11 @@ class TelegramChatSelection:
             "بعدی",
             "نتایج بعدی",
         }:
-            if self._page_navigation is None or pending.page >= 5:
+            if (
+                pending.choices.source == "visible"
+                or self._page_navigation is None
+                or pending.page >= 5
+            ):
                 self._prompt(pending)
             else:
                 self._navigate(pending)
@@ -277,6 +288,8 @@ class TelegramChatSelection:
 
     @staticmethod
     def _number(answer: str) -> int | None:
+        if answer in _OBSERVED_CHAT_CHOICE_ALIASES:
+            return _OBSERVED_CHAT_CHOICE_ALIASES[answer]
         words = answer.split()
         if words and words[0] in {"choose", "select", "pick"}:
             words = words[1:]
@@ -412,7 +425,10 @@ class TelegramChatSelection:
 
     def _prompt(self, pending: _Pending) -> None:
         count = len(pending.choices.selectable_results)
-        if pending.choices.local_results:
+        if pending.choices.source == "visible":
+            english = f"I found {count} visible chats with that name. "
+            persian = f"{count} چت قابل‌دیدن با این نام پیدا شد. "
+        elif pending.choices.local_results:
             place = " on this page" if pending.page > 1 else ""
             english = f"I found {count} personal chats with that name{place}. "
             persian = f"{count} چت شخصی با این نام در این صفحه پیدا شد. "
@@ -435,7 +451,11 @@ class TelegramChatSelection:
                 f"از بالا شمارهٔ ۱ تا {count} را انتخاب کنید؛ "
                 "مثلاً «شمارهٔ دو»، «دو» یا «دوم» را بگویید."
             )
-        if self._page_navigation is not None and pending.page < 5:
+        if (
+            pending.choices.source == "search"
+            and self._page_navigation is not None
+            and pending.page < 5
+        ):
             english += " Say next for more visible results."
             persian += " برای دیدن نتیجه‌های بعدی «بعدی» را بگویید."
         self._say(pending.request, english, persian)

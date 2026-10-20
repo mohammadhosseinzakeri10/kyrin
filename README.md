@@ -34,11 +34,13 @@ and GPU views and stores compatible Whisper weights only once. See
 
 The current Ubuntu action path can open or activate explicitly allowed apps,
 control supported windows, and show a numbered open-window overview. Telegram
-Saved Messages has passed a live speech-to-action check. Other Telegram chat
-names have a guarded OCR/search path but still need live validation, especially
-for Persian titles. Screen and keyboard permissions can be remembered and
+Saved Messages and named-chat selection have passed live speech-to-action
+checks, including the owner's choice of a second visible same-name chat.
+Other layouts and Persian titles still need live validation. Screen and
+keyboard permissions can be remembered and
 revoked in the app. System power actions require separate permission and two
-confirmations; only the inert safe preview has been validated end to end.
+confirmations; the owner has also reported successful real Power Off and
+Restart voice flows, while Logout and Suspend remain unverified live.
 Finalized speech text can be retained in a bounded local conversation history;
 audio is not stored by that feature.
 

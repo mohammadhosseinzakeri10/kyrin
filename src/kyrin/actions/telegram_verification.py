@@ -2,9 +2,14 @@
 
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Literal
 
 from kyrin.vision.text_reader import IdentifiedWindowText
-from kyrin.vision.text_targets import VisiblePhrase, find_exact_phrases
+from kyrin.vision.text_targets import (
+    VisiblePhrase,
+    find_exact_phrases,
+    find_literal_phrases,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +33,7 @@ class ChatSearchChoices:
     other_local_results: tuple[ChatSearchMatch, ...] = ()
     global_section_verified: bool = False
     view_signature: str = ""
+    source: Literal["search", "visible"] = "search"
 
     @property
     def local_results(self) -> tuple[ChatSearchMatch, ...]:
@@ -40,6 +46,164 @@ class ChatSearchChoices:
     @property
     def selectable_results(self) -> tuple[ChatSearchMatch, ...]:
         return self.local_results or self.global_results
+
+
+@dataclass(frozen=True, slots=True)
+class VisibleChatAssessment:
+    """Content-free explanation of a visible-list OCR decision."""
+
+    choices: ChatSearchChoices | None
+    status: str
+
+
+def visible_chat_choices(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    target: str,
+) -> ChatSearchChoices | None:
+    return assess_visible_chat_choices(
+        observation, expected_app_id, expected_pid, target
+    ).choices
+
+
+def assess_visible_chat_choices(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    target: str,
+) -> VisibleChatAssessment:
+    """Find exact titles in the current chat list, never preview text.
+
+    A candidate needs both a same-row right-column label (Telegram's time)
+    and a second line below it (the chat preview). Uncertain layouts stop.
+    """
+    if not _same_window(observation, expected_app_id, expected_pid):
+        return VisibleChatAssessment(None, "window_changed")
+    assert observation.image_size is not None
+    width, height = observation.image_size
+    title_matches = find_literal_phrases(
+        observation.result, target, allow_joined_words=True
+    )
+    if any(
+        match.box.left < width * 0.3
+        and match.box.top < height * 0.075
+        for match in title_matches
+    ):
+        # The spoken name in Telegram's search field is direct evidence that
+        # these are search results. Other upper-left OCR may be UI chrome.
+        return VisibleChatAssessment(None, "search_field_active")
+    if any(
+        match.lowest_confidence is not None
+        and match.lowest_confidence >= 0.65
+        and match.box.left < width * 0.15
+        and height * 0.08 < match.box.top < height * 0.75
+        for label in ("Global Search Results", "Search Results")
+        for match in find_literal_phrases(
+            observation.result, label, allow_joined_words=True
+        )
+    ):
+        # A verified results heading is another search-only surface.
+        return VisibleChatAssessment(None, "search_field_active")
+    # Keep both exact and joined-word observations: two same-name rows may
+    # have different OCR spacing and must remain a numbered ambiguity.
+    candidates = [
+        match
+        for match in title_matches
+        if width * 0.025 <= match.box.left < width * 0.15
+        and height * 0.085 < match.box.top < height * 0.92
+    ]
+    if not candidates:
+        return VisibleChatAssessment(
+            None,
+            "title_not_in_list" if title_matches else "title_not_read",
+        )
+    titles = []
+    low_confidence = 0
+    missing_time = 0
+    missing_preview = 0
+    fallback_time = 0
+    strict_time_rows = sum(
+        any(
+            span.confidence is not None
+            and span.confidence >= 0.55
+            and width * 0.24 < span.box.left < width * 0.36
+            and abs(span.box.top - match.box.top)
+            <= max(10, match.box.height // 2)
+            for span in observation.result.spans
+        )
+        for match in candidates
+    )
+    for match in candidates:
+        box = match.box
+        if match.lowest_confidence is None or match.lowest_confidence < 0.8:
+            low_confidence += 1
+            continue
+        aligned_right = any(
+            span.confidence is not None
+            and span.confidence >= 0.55
+            and width * 0.24 < span.box.left < width * 0.36
+            and abs(span.box.top - box.top) <= max(10, box.height // 2)
+            for span in observation.result.spans
+        )
+        preview_below = any(
+            span.confidence is not None
+            and span.confidence >= 0.55
+            and box.top + box.height < span.box.top <= box.top + box.height + 38
+            and box.left - 12 <= span.box.left <= box.left + 130
+            for span in observation.result.spans
+        )
+        time_above = any(
+            span.confidence is not None
+            and span.confidence >= 0.55
+            and width * 0.24 < span.box.left < width * 0.36
+            and box.top - 40 <= span.box.top <= box.top - 12
+            for span in observation.result.spans
+        )
+        time_fallback = (
+            not aligned_right
+            and strict_time_rows > 0
+            and match.lowest_confidence >= 0.90
+            and preview_below
+            and not time_above
+        )
+        if not aligned_right and not time_fallback:
+            missing_time += 1
+        if not preview_below:
+            missing_preview += 1
+        if time_fallback:
+            fallback_time += 1
+        if (aligned_right or time_fallback) and preview_below:
+            titles.append(match)
+    if low_confidence or missing_time or missing_preview:
+        return VisibleChatAssessment(
+            None,
+            f"rows_{len(candidates)}_low_{low_confidence}_"
+            f"time_{missing_time}_preview_{missing_preview}",
+        )
+    titles.sort(key=lambda match: match.box.top)
+    if not titles or any(
+        second.box.top - first.box.top < height * 0.03
+        for first, second in zip(titles, titles[1:], strict=False)
+    ):
+        return VisibleChatAssessment(None, "row_positions_uncertain")
+
+    def as_box(match: VisiblePhrase) -> ChatSearchMatch:
+        box = match.box
+        return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+
+    return VisibleChatAssessment(
+        ChatSearchChoices(
+            as_box(titles[0]),
+            (),
+            tuple(as_box(match) for match in titles[1:]),
+            global_section_verified=True,
+            source="visible",
+        ),
+        f"classified_local_{len(titles)}_time_fallback_{fallback_time}"
+        if fallback_time
+        else f"classified_local_{len(titles)}",
+    )
 
 
 def _same_window(
@@ -217,14 +381,16 @@ def chat_header_visible(
     expected_pid: int,
     target: str,
 ) -> bool:
-    """Confirm one exact title in the upper right chat pane."""
+    """Confirm one title in the upper right pane, allowing lost word spaces."""
     if not _same_window(observation, expected_app_id, expected_pid):
         return False
     assert observation.image_size is not None
     width, height = observation.image_size
     matches = [
         match
-        for match in find_exact_phrases(observation.result, target)
+        for match in find_literal_phrases(
+            observation.result, target, allow_joined_words=True
+        )
         if match.lowest_confidence is not None
         and match.lowest_confidence >= 0.65
         and match.box.left >= width * 0.3
@@ -326,7 +492,9 @@ def telegram_settings_item(
     if len(headings) != 1:
         return None
     matches = [
-        item for item in find_exact_phrases(observation.result, label)
+        item for item in find_literal_phrases(
+            observation.result, label, allow_joined_words=True
+        )
         if item.lowest_confidence is not None
         and item.lowest_confidence >= 0.70
         and width * 0.25 <= item.box.left

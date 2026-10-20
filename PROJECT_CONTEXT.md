@@ -1,11 +1,83 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-19.
+> Updated: 2026-10-20.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **Visible-chat speech and OCR grounding (2026-10-20):** The owner reported
+> `openvisibly chat my mother` and `open visibly chat my mother` being rejected
+> as `repeat_command`. The visible-chat grammar now accepts these two bounded
+> STT variants. Existing Unicode case-folding already ignores letter case.
+> For this visible-list action, OCR can also match an exact title when word
+> spaces were lost in speech or OCR; all exact and compact rows are retained,
+> so duplicate titles still require numbered selection. Chat-row anchors,
+> stable rereads, identity checks and click verification remain required.
+> This does not infer different names or enable general screen-wide clicking.
+> Focused deterministic tests pass; later live validation is recorded below.
+
+> **Visible-chat live failure and next foundation (2026-10-20):** The owner
+> repeated `open visibly chat my mother` twice. Both transcripts became
+> `open_chat: my mother`, then failed as `visible_chat_uncertain` in about
+> 3.3 seconds after final speech. The command name and letter case were
+> already understood; the failure is in OCR row classification or stability,
+> not proven to be a spelling error. English chat forms now have one bounded
+> command catalog, and literal OCR label matching is a shared function with
+> opt-in joined-word handling. The visible-chat failure now carries a
+> content-free classification status in `Action result`; the spoken message
+> remains simple. The shared OCR matcher is also used for Telegram Settings
+> navigation under its existing Settings-heading and uniqueness checks. No
+> screen content is sent to the command model, and no
+> broader app-control action is enabled by this foundation. The owner chose
+> to defer another live visible-list test while this base is built.
+
+> **Visible-list OCR diagnostic (2026-10-20):** The next owner run still
+> returned `visible_chat_uncertain:unclassified_matches_3_size_1853x1048_`
+> `at_89-251-92_350-275-74_69-747-96`. Thus OCR did see the spoken title
+> in the left pane; one occurrence at x=350,y=275 is plausibly preview text,
+> while x=89,y=251 and x=69,y=747 are plausible chat titles. The image alone
+> does not prove which row anchor failed. The visible-list classifier now
+> reports content-free reasons for missing title, active search field, low
+> title confidence, missing same-row time label, missing preview line, and
+> unstable rows. It keeps rejecting an uncertain row. Subsequent restarted
+> live runs identified the failing anchors, as recorded below.
+
+> **Visible-list false search detection (2026-10-20):** A restarted owner run
+> reported `visible_chat_uncertain:search_field_active_matches_3_size_`
+> `1853x1048_at_89-251-92_350-275-74_69-747-96`. No target-name OCR
+> occurrence was in the search bar; the earlier rule had treated *any*
+> confident upper-left text other than exact `Search` as an active query.
+> It now requires the spoken target in the top search area or a recognized
+> Search Results heading before refusing the visible-list route. Unrelated
+> UI text near the top no longer blocks row classification. A synthetic test
+> covers unrelated top text, a real query, and a results heading.
+
+> **Visible-list duplicate selection validated (2026-10-20):** The next two
+> live diagnostics showed three title-text matches but only two actual rows.
+> The middle match at x=350 was preview text, so the title-column limit was
+> narrowed. One of the two actual rows lacked an OCR time label; a bounded
+> fallback now accepts a high-confidence title with its own preview only when
+> another matching row has a same-line time anchor and the candidate is not
+> positioned like the previous row's preview. Synthetic tests cover both the
+> accepted row and rejected preview. After restarting, the owner reported
+> that selecting the second visible `My Mother` chat now works. This is live
+> user confirmation of the duplicate selection path, not proof of every
+> Telegram layout or speech variant.
+
+> **Owner status corrections (2026-10-20):** The owner confirmed that the
+> current dashboard behaves as intended; its particle renderer and preferences
+> were committed locally as `953e4ed`, with no GitHub action. The owner also
+> reported successful real Power Off and Restart voice flows, beyond the earlier
+> inert preview. The exact diagnostic logs and behavior of Logout and Suspend
+> were not supplied, so these reports should not be generalized to all power
+> operations. Misrecognition of unusual chat names with the selected
+> English-only Whisper model is considered a model/language limitation, not an
+> outstanding parser defect. Users choose and install their OCR engine; KYRIN
+> is not responsible for selecting the universally best model. Safe action
+> targeting still depends on the selected engine returning adequate text,
+> geometry, and confidence for the requested action.
 
 > **Experimental document OCR device selection (2026-10-19):** The owner
 > requested CPU/GPU/Auto for the separate text-only document models. Screen
@@ -4971,9 +5043,13 @@ actually available. The pipeline now emits `AudioCaptureReady` after its first
 captured chunk, and the UI displays a microphone-starting state until that
 event, resetting the indication after a speech-session restart. The GUI Start
 button is disabled until capture is ready. Unit tests and the full suite pass;
-the owner still needs to retry the first spoken wake after the UI shows
-standby. If it still fails, inspect the first STT transcript/segmentation
-without assuming readiness was the sole cause.
+at that point, the first spoken wake still needed a retest after the UI showed
+standby. If it failed again, the next step would have been to inspect the first
+STT transcript/segmentation without assuming readiness was the sole cause.
+
+On 2026-10-20, the owner reported a successful live test of the first spoken
+`Start listening` after launching KYRIN. The earlier first-wake issue is no
+longer considered open. No diagnostic transcript was supplied for this retest.
 
 The owner later found that saying `Turn microphone off` after `Stop listening`
 did not shut down capture, while resuming first and using the full phrase did.
@@ -4983,3 +5059,52 @@ shorter spoken wording was absent from its bounded phrase set. It now accepts
 and standby modes. A focused runtime test covers `Start listening` → `Stop
 listening` → `Turn microphone off` without a second start. Live microphone
 validation of the new wording remains pending.
+
+## 3D dashboard experiments and 2D decision
+
+On 2026-10-20, the owner chose to keep the existing 2D point animation as an
+option for lower-powered systems and add an interactive 3D option for the same
+logo and point-based text. The first 3D attempt merely layered copies of the
+2D artwork. The owner explicitly rejected that as superficial and requested
+an actual model with visible sides and back and unrestricted mouse rotation.
+The next procedural scene generated a sphere, torus, and curved round arms,
+but the owner found that its frontal silhouette was a different logo. A
+later prototype mapped the same color samples used by the approved 2D
+scene onto curved front and back surfaces, with point-sampled side walls and
+a spherical dark core. It preserved the frontal silhouette but still looked
+like joined sheets to the owner. A final procedural solid-blade experiment
+also failed to match the desired logo. A single image could not determine
+the hidden shape to the required standard.
+After evaluating multiple prototypes, the owner decided to omit 3D from the
+current version and keep only the approved 2D particle scene. The production
+choices are now `cpu` and `gpu`, both 2D. All 3D rendering, geometry,
+interaction, and preference UI code was removed. A saved `gpu3d` preference
+is read as `gpu`, preserving the selected locale and animation setting. The
+2D GPU path remains supported by the existing `PySide6_Essentials` package.
+Performance on other drivers and weaker systems remains unmeasured.
+
+On 2026-10-20, the owner asked to increase the 2D particle count by about
+one half. The packaged emblem samples grew from 29,999 to 44,999 by adding
+color-matched positions between nearby existing samples. Point-sampled text
+also gained intermediate glyph samples. A 1000×600 GPU preview had 46,755
+total points, about 1.5 times its prior count of 31,287. The 2D CPU and GPU
+renderers still share the same particle data and animation cycle. On this
+machine, five 1000×600 offscreen CPU grabs averaged about 41 ms with the old
+emblem sample count and 61 ms with the new one; these are rendering snapshots,
+not a measured animation frame rate or a cross-device benchmark.
+
+The owner then chose renderer-specific density: CPU keeps the first 29,999
+approved emblem samples, while GPU uses 59,999. The additional 30,000 samples
+are derived from color-matched nearby points in the same artwork. After the
+owner reported little visible change, measurements showed that about 80% of
+the earlier additional samples were within 2/1000 of a base point (roughly
+1 pixel at a 500-pixel emblem size), while GPU dots were 3 pixels wide.
+The additional samples were redistributed toward gaps between similar colors;
+the median distance to a base point is now 3.5/1000, and the GPU emblem dot
+size is 2.5 pixels. This makes density more visible while retaining the
+approved silhouette. The CPU
+path loads only its base particle objects; selecting GPU loads the full set,
+and returning to CPU releases the extra objects. GPU initialization failure
+also restores the CPU count. The denser text point sampling remains in both
+renderers. The earlier 44,999-sample state was an intermediate experiment,
+not a separate user-selectable mode.

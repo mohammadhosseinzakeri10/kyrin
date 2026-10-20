@@ -3,11 +3,12 @@
 from dataclasses import dataclass, field
 from threading import Event
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from kyrin.actions.telegram_verification import (
     ChatSearchChoices,
     ChatSearchMatch,
+    assess_visible_chat_choices,
     chat_header_visible,
     search_choices,
     telegram_left_label,
@@ -22,7 +23,7 @@ from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
 from kyrin.vision.text_reader import IdentifiedWindowText
-from kyrin.vision.text_targets import find_exact_phrases
+from kyrin.vision.text_targets import find_exact_phrases, find_literal_phrases
 
 
 @dataclass(slots=True)
@@ -32,6 +33,7 @@ class _Request:
     target: str | None = None
     search: bool = False
     choices: bool = False
+    visible_choices: bool = False
     left_label: bool = False
     menu: bool = False
     settings_item: bool = False
@@ -57,6 +59,7 @@ class QtChatVerifier(QObject):
         self._access = access
         self._reader = reader
         self._pending: _Request | None = None
+        self._pending_ready: _Request | None = None
         self._last_choice_status = "not_requested"
         self.requested.connect(self._start)
         reader.completed.connect(self._completed)
@@ -65,7 +68,7 @@ class QtChatVerifier(QObject):
 
     def ready(self) -> bool:
         """Require current screen permission before requesting keyboard input."""
-        return self._ask(_Request(None, None), timeout_s=2) is True
+        return self._ask(_Request(None, None), timeout_s=6) is True
 
     def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
         """Return false for an uncertain, stale, or missing chat header."""
@@ -84,6 +87,18 @@ class QtChatVerifier(QObject):
         """Read local and numbered global rows without granting a click."""
         self._last_choice_status = "pending"
         result = self._ask(_Request(app_id, pid, target, choices=True), timeout_s=18)
+        if self._last_choice_status == "pending":
+            self._last_choice_status = "timeout"
+        return result if isinstance(result, ChatSearchChoices) else None
+
+    def find_visible_chat_choices(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchChoices | None:
+        self._last_choice_status = "pending"
+        result = self._ask(
+            _Request(app_id, pid, target, choices=True, visible_choices=True),
+            timeout_s=18,
+        )
         if self._last_choice_status == "pending":
             self._last_choice_status = "timeout"
         return result if isinstance(result, ChatSearchChoices) else None
@@ -147,8 +162,21 @@ class QtChatVerifier(QObject):
             and self._pending is None
         )
         if request.app_id is None:
-            request.result = available
-            request.finished.set()
+            if available:
+                request.result = True
+                request.finished.set()
+            elif (
+                not self._access.granted
+                and self._access.available
+                and self._access.remembered
+                and self._pending_ready is None
+            ):
+                self._pending_ready = request
+                QTimer.singleShot(5000, lambda: self._finish_ready(request, False))
+                self._access.request_session()
+            else:
+                request.result = False
+                request.finished.set()
             return
         if not available or request.pid is None:
             if request.choices:
@@ -228,10 +256,26 @@ class QtChatVerifier(QObject):
                 )
             elif pending.choices:
                 assert pending.target is not None
-                result = search_choices(
-                    observation, pending.app_id, pending.pid, pending.target
+                visible_status: str | None = None
+                if pending.visible_choices:
+                    assessment = assess_visible_chat_choices(
+                        observation, pending.app_id, pending.pid, pending.target
+                    )
+                    result = assessment.choices
+                    visible_status = assessment.status
+                else:
+                    result = search_choices(
+                        observation, pending.app_id, pending.pid, pending.target
+                    )
+                matches = (
+                    find_literal_phrases(
+                        observation.result,
+                        pending.target,
+                        allow_joined_words=True,
+                    )
+                    if pending.visible_choices
+                    else find_exact_phrases(observation.result, pending.target)
                 )
-                matches = find_exact_phrases(observation.result, pending.target)
                 size = observation.image_size or (0, 0)
                 positions = (
                     "_".join(
@@ -245,10 +289,14 @@ class QtChatVerifier(QObject):
                     f"matches_{len(matches)}_size_{size[0]}x{size[1]}_at_{positions}"
                 )
                 self._last_choice_status = (
-                    f"classified_local_{len(result.local_results)}_"
-                    f"global_{len(result.global_results)}_{detail}"
-                    if isinstance(result, ChatSearchChoices)
-                    else f"unclassified_{detail}"
+                    f"{visible_status}_{detail}"
+                    if visible_status is not None
+                    else (
+                        f"classified_local_{len(result.local_results)}_"
+                        f"global_{len(result.global_results)}_{detail}"
+                        if isinstance(result, ChatSearchChoices)
+                        else f"unclassified_{detail}"
+                    )
                 )
             elif pending.search:
                 assert pending.target is not None
@@ -273,8 +321,22 @@ class QtChatVerifier(QObject):
         self._finish(False)
 
     def _access_changed(self, granted: bool) -> None:
+        pending_ready = self._pending_ready
+        if pending_ready is not None:
+            self._finish_ready(
+                pending_ready,
+                granted and self._reader.available and not self._reader.busy,
+            )
         if not granted:
             self._finish(False)
+
+    def _finish_ready(self, request: _Request, ready: bool) -> None:
+        if self._pending_ready is not request:
+            return
+        self._pending_ready = None
+        if not request.finished.is_set():
+            request.result = ready
+            request.finished.set()
 
     def _finish(
         self, result: bool | str | ChatSearchMatch | ChatSearchChoices | None

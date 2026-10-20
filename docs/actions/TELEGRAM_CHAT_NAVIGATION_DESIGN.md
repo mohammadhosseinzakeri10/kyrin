@@ -315,7 +315,66 @@ reply forms are covered by deterministic tests; microphone recognition is a
 separate live check. Use clearly pronounced English names for the current
 navigation test; custom-name STT accuracy remains a separate work item.
 
+In a later owner trial, the chat-choice question was reached, but spoken
+`Number Two` was transcribed as `non-bear too` and `nombertoo`. A later owner
+trial produced `nomber two` with a space; saying `two` alone did reach the
+selection, although the opened header was not verified afterward. The exact
+joined spellings and the observed `nomber` prefix now work only while the
+Telegram chat choice is pending. Other numbered menus retain their own strict
+grammar, and longer or negated phrases remain invalid. The owner still needs
+to retest the spoken prefixed selection after restarting KYRIN.
+
 ### Search scope and alternate English phrasing
+
+`Open visible chat <name>` is a separate local-list route. It does not focus
+or type in Telegram search. Its fresh full-window OCR read accepts an exact
+left-list title only when a same-row right-column label and a preview line
+below establish that it is a chat row rather than message-preview text. A
+case-folded comparison matches the spoken name against the observed title
+without changing the title's displayed spelling. The observed STT forms
+`open visibly chat <name>` and `openvisibly chat <name>` map to this same
+command; this bounded repair changes only the command words, not the chat
+name. The visible-list comparison also tolerates a missing word space in the
+name when the OCR spans form one adjacent line; the post-click header uses the
+same spacing-insensitive comparison. It still requires the chat-row anchors
+and stable reread. A name that differs in actual letters remains
+unresolved. A nonempty
+search field or uncertain layout stops without clicking. Two stable
+reads must agree before a single visible row is clicked. Multiple visible
+rows use the existing numbered choice dialogue, with another stable list read
+before the selected click. This dialogue does not offer search-result paging.
+The Telegram focus, saved pointer grant, geometry and post-click header checks
+still apply. A matching header alone cannot prove identity among same-name
+chats, so a successful visible-row click reports accepted input rather than
+confirmed identity. Hidden and archived chats remain the responsibility of
+the existing `Open chat <name>` search route. Two owner trials of
+`open visibly chat my mother` correctly reached `open_chat: my mother` but
+failed as `visible_chat_uncertain` during OCR row classification or stability.
+The next failure now includes a content-free classification status in the
+diagnostic Action result. The English spoken structures for chat opening are
+listed in `kyrin.commands.chat_command_catalog`; the shared literal OCR
+matcher combines exact and optional joined-word observations without deciding
+whether a visible control is safe to click.
+
+The first instrumented owner run reported three text matches at `(89,251)`,
+`(350,275)`, and `(69,747)` in a 1853×1048 image but no classified rows.
+The middle match was excluded as a message preview by narrowing the title
+column; the two left matches are the title candidates.
+The classifier now distinguishes missing title, active search, confidence,
+time anchor, preview anchor, and unstable row geometry without exposing OCR
+text.
+That live diagnostic reported `search_field_active` despite all three name
+matches being below the search bar. The former rule interpreted any upper-left
+OCR text besides the exact word `Search` as a query. Search mode now requires
+the spoken name in the top query box or a visible search-results heading;
+ordinary upper-left UI text no longer masks the chat list. The later live
+diagnostic found two candidate rows, with one missing its OCR time label.
+That row may pass a bounded fallback when its title has at least 90% OCR
+confidence, it has a preview below, another matching row has a same-line
+time label, and a time above does not identify it as the previous row's
+preview. Focused tests cover the fallback and the preview rejection. After
+restarting KYRIN, the owner reported that numbered selection opened the
+second visible chat with the same name.
 
 The single-command interpreter now accepts both `Open chat My Mother` and
 `Open My Mother chat` (including `Open My Mother's chat`). Source grounding
@@ -533,6 +592,16 @@ checks. It should capture only on a relevant command and read the smallest
 useful region to keep latency bounded. This broader layer remains a proposal.
 
 ## Explicit Telegram search (2026-10-18)
+
+The owner later reported `screen_access_required` immediately after a correctly
+interpreted `Open chat My Mother`, despite having enabled screen access. The
+local screen token and GNOME remembered-grant hash matched, and the selected
+Tesseract package was present. The action readiness check previously rejected
+the command immediately when the current screen session had not yet been
+restored. It now requests restoration using the existing remembered grant and
+waits up to five seconds for the grant signal before allowing the chat action.
+It never requests a new grant when none was saved. Focused tests cover the
+delayed restoration path; the owner's live command still needs retesting.
 
 `Go to search` and `Open Telegram search` focus Telegram's global search box.
 `Search for <name>`, `Search Telegram for <name>` and

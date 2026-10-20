@@ -57,6 +57,8 @@ def _same_selectable_choices(
     first: ChatSearchChoices, second: ChatSearchChoices
 ) -> bool:
     """Compare only the rows that the pending question can select."""
+    if first.source != second.source:
+        return False
     if first.local_results:
         return _same_local_choices(first, second)
     if (
@@ -100,6 +102,10 @@ class ChatVerifier(Protocol):
     ) -> ChatSearchMatch | None: ...
 
     def find_search_choices(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchChoices | None: ...
+
+    def find_visible_chat_choices(
         self, app_id: str, pid: int, target: str
     ) -> ChatSearchChoices | None: ...
 
@@ -191,7 +197,10 @@ class TelegramSavedMessagesExecutor:
         }:
             return self._telegram_search(request, identity)
         target = " ".join(intent.target.split())
-        if fold_case(target) in _SAVED_MESSAGES_TARGETS:
+        if (
+            intent.chat_scope == "search"
+            and fold_case(target) in _SAVED_MESSAGES_TARGETS
+        ):
             return self._open_saved_messages(request, identity)
         if not 1 <= len(target) <= 64 or any(
             not (char.isalnum() or char in " -_.'@") for char in target
@@ -199,7 +208,36 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="unsupported_chat"
             )
+        if intent.chat_scope == "visible":
+            return self._open_visible_chat(request, identity, target)
         return self._open_searched_chat(request, identity, target)
+
+    def _open_visible_chat(
+        self, request: ActionRequest, identity: tuple[str, int], target: str
+    ) -> ActionResult:
+        choices = self._settled_visible_choices(identity, target)
+        if choices is None:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code=f"visible_chat_uncertain:{self._choice_status}",
+            )
+        if len(choices.local_results) > 1 and self._selection is not None:
+            if self._selection.begin(request, identity, target, choices):
+                return ActionResult(
+                    request.key,
+                    ActionOutcome.UNKNOWN,
+                    error_code="chat_selection_pending",
+                )
+        if len(choices.local_results) != 1:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code=f"visible_chat_uncertain:{self._choice_status}",
+            )
+        return self._click_result(
+            request, identity, target, choices.local_results[0], unique_identity=False
+        )
 
     def _telegram_search(
         self, request: ActionRequest, identity: tuple[str, int]
@@ -599,6 +637,8 @@ class TelegramSavedMessagesExecutor:
         cancellation: Event,
     ) -> ChatSearchChoices | None:
         """Advance the visible result list only while the same search is active."""
+        if shown.source != "search":
+            return None
         with self._lock:
             if cancellation.is_set() or self._identity_reader() != identity:
                 return None
@@ -732,8 +772,12 @@ class TelegramSavedMessagesExecutor:
                     ActionOutcome.FAILED,
                     error_code="telegram_focus_changed",
                 )
-            fresh = self._settled_search_choices(identity, target)
-            if fresh is not None:
+            fresh = (
+                self._settled_visible_choices(identity, target)
+                if shown.source == "visible"
+                else self._settled_search_choices(identity, target)
+            )
+            if fresh is not None and shown.source == "search":
                 fresh = _keep_global_scope(shown, fresh)
             if fresh is None:
                 return ActionResult(
@@ -791,6 +835,27 @@ class TelegramSavedMessagesExecutor:
                 if _same_selectable_choices(previous, current):
                     return current
             previous = current if has_rows else None
+            remaining = deadline - monotonic()
+            if remaining > 0:
+                sleep(min(_SEARCH_POLL_SECONDS, remaining))
+        if saw_choices:
+            self._choice_status = f"unstable_{self._choice_status}"
+        return None
+
+    def _settled_visible_choices(
+        self, identity: tuple[str, int], target: str
+    ) -> ChatSearchChoices | None:
+        deadline = monotonic() + _SEARCH_SETTLE_SECONDS
+        previous: ChatSearchChoices | None = None
+        saw_choices = False
+        while monotonic() < deadline:
+            current = self._verifier.find_visible_chat_choices(*identity, target)
+            self._choice_status = self._verifier.choice_status()
+            saw_choices = saw_choices or current is not None
+            if current is not None and previous is not None:
+                if _same_selectable_choices(previous, current):
+                    return current
+            previous = current
             remaining = deadline - monotonic()
             if remaining > 0:
                 sleep(min(_SEARCH_POLL_SECONDS, remaining))

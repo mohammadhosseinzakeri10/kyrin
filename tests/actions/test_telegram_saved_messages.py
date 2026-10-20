@@ -62,6 +62,11 @@ class Verifier:
     ) -> ChatSearchChoices | None:
         return self.choices
 
+    def find_visible_chat_choices(
+        self, app_id: str, pid: int, target: str
+    ) -> ChatSearchChoices | None:
+        return self.choices
+
     def choice_status(self) -> str:
         return "classified" if self.choices is not None else "unclassified"
 
@@ -408,6 +413,103 @@ def test_telegram_shortcut_with_unverified_heading_is_accepted_not_confirmed(
 
 def _request(kind: CommandKind, target: str, app: str | None = None) -> ActionRequest:
     return ActionRequest(KEY, CommandIntent(kind, target, app), "en")
+
+
+def _visible_request(target: str = "My Mother") -> ActionRequest:
+    return ActionRequest(
+        KEY,
+        CommandIntent(CommandKind.OPEN_CHAT, target, "telegram", chat_scope="visible"),
+        "en",
+    )
+
+
+def test_visible_chat_clicks_one_stable_row_without_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 220, 90, 18, 1600, 900),
+        (),
+        global_section_verified=True,
+        source="visible",
+    )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "CHAT_RESULT_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    result = _executor(
+        Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12)
+    ).execute(_visible_request())
+    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert [args[4] for args in calls] == ["click"]
+    assert calls[0][5:7] == ["70", "220"]
+
+
+def test_visible_chat_never_falls_back_to_search_on_uncertain_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda *args, **kwargs: pytest.fail("no input should be sent"),
+    )
+    result = _executor(Delegate(), Verifier(), (DESKTOP_ID, 12)).execute(
+        _visible_request()
+    )
+    assert result.error_code == "visible_chat_uncertain:unclassified"
+
+
+def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    prompts: list[ResponseRequest] = []
+    feedback = []
+    done = Event()
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 220, 90, 18, 1600, 900),
+        (),
+        (ChatSearchMatch(70, 280, 90, 18, 1600, 900),),
+        global_section_verified=True,
+        source="visible",
+    )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "CHAT_RESULT_CLICKED", "")
+
+    def on_feedback(item: object) -> None:
+        feedback.append(item)
+        done.set()
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    selection = TelegramChatSelection(prompts.append, on_feedback)
+    verifier = Verifier(choices=choices)
+    verifier.find_search_choices = (  # type: ignore[method-assign]
+        lambda *_: pytest.fail("visible selection must not read search results")
+    )
+    executor = telegram.TelegramSavedMessagesExecutor(
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
+    )
+    selection.set_completion(executor.complete_selection)
+    result = executor.execute(_visible_request())
+    try:
+        assert result.error_code == "chat_selection_pending"
+        assert "2 visible chats" in prompts[0].message
+        assert "next" not in prompts[0].message.casefold()
+        assert calls == []
+        assert selection.on_final_speech("number two")
+        assert done.wait(2)
+        assert [args[4] for args in calls] == ["click"]
+        assert calls[0][6] == "280"
+    finally:
+        selection.cancel()
 
 
 def _executor(

@@ -1,4 +1,7 @@
+import pytest
+
 from kyrin.actions.telegram_verification import (
+    assess_visible_chat_choices,
     chat_header_visible,
     saved_messages_header_visible,
     search_choices,
@@ -9,6 +12,7 @@ from kyrin.actions.telegram_verification import (
     telegram_settings_item,
     telegram_view_title_visible,
     unique_search_result,
+    visible_chat_choices,
 )
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
@@ -57,7 +61,215 @@ def test_header_requires_right_window_and_unique_header_title() -> None:
 def test_generic_header_requires_exact_target() -> None:
     observation = _observation()
     assert chat_header_visible(observation, "telegram.desktop", 123, "Saved Messages")
+    assert chat_header_visible(observation, "telegram.desktop", 123, "savedmessages")
     assert not chat_header_visible(observation, "telegram.desktop", 123, "Alice")
+    assert not chat_header_visible(
+        observation, "telegram.desktop", 123, "Saved Message"
+    )
+
+
+def test_visible_chat_titles_require_time_and_preview_anchors() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("Chats", TextBox(20, 35, 60, 16), 0.90),
+                RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
+                RecognizedText("My", TextBox(70, 200, 25, 18), 0.92),
+                RecognizedText("Mother", TextBox(100, 200, 65, 18), 0.91),
+                RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
+                RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.88),
+                RecognizedText("My", TextBox(70, 280, 25, 18), 0.91),
+                RecognizedText("Mother", TextBox(100, 280, 65, 18), 0.90),
+                RecognizedText("7:30", TextBox(455, 280, 42, 16), 0.84),
+                RecognizedText("Yesterday", TextBox(70, 307, 80, 15), 0.85),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    choices = visible_chat_choices(observation, "telegram.desktop", 123, "My Mother")
+    assert choices is not None
+    assert choices.source == "visible"
+    assert tuple(item.top for item in choices.local_results) == (200, 280)
+    lower_case_choices = visible_chat_choices(
+        observation, "telegram.desktop", 123, "my mother"
+    )
+    assert lower_case_choices == choices
+    joined_name_choices = visible_chat_choices(
+        observation, "telegram.desktop", 123, "MyMother"
+    )
+    assert joined_name_choices == choices
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "my mother"
+    )
+    assert assessment.choices == choices
+    assert assessment.status == "classified_local_2"
+    assert visible_chat_choices(observation, "other.desktop", 123, "My Mother") is None
+
+
+def test_visible_chat_rejects_preview_and_active_search_field() -> None:
+    spans = (
+        RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
+        RecognizedText("Alice", TextBox(70, 200, 55, 18), 0.90),
+        RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
+        RecognizedText("My", TextBox(70, 227, 25, 15), 0.92),
+        RecognizedText("Mother", TextBox(100, 227, 65, 15), 0.91),
+        RecognizedText("second", TextBox(70, 247, 60, 15), 0.88),
+    )
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123, OcrResult(spans, "eng", OcrDevice.CPU, "fake"),
+        (1600, 900),
+    )
+    assert (
+        visible_chat_choices(observation, "telegram.desktop", 123, "My Mother")
+        is None
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "My Mother"
+    )
+    assert assessment.status == "rows_1_low_0_time_1_preview_0"
+    searched = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (RecognizedText("Alice", TextBox(180, 45, 50, 16), 0.90), *spans),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    assert visible_chat_choices(searched, "telegram.desktop", 123, "Alice") is None
+    results_heading = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                *spans,
+                RecognizedText(
+                    "Global Search Results", TextBox(30, 170, 200, 18), 0.88
+                ),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    assert (
+        assess_visible_chat_choices(
+            results_heading, "telegram.desktop", 123, "Alice"
+        ).status
+        == "search_field_active"
+    )
+
+
+def test_visible_chat_keeps_ocr_spacing_variants_as_two_choices() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
+                RecognizedText("My", TextBox(70, 200, 25, 18), 0.92),
+                RecognizedText("Mother", TextBox(100, 200, 65, 18), 0.91),
+                RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
+                RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.88),
+                RecognizedText("MyMother", TextBox(70, 280, 95, 18), 0.91),
+                RecognizedText("7:30", TextBox(455, 280, 42, 16), 0.84),
+                RecognizedText("Yesterday", TextBox(70, 307, 80, 15), 0.85),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    choices = visible_chat_choices(observation, "telegram.desktop", 123, "My Mother")
+    assert choices is not None
+    assert tuple(item.top for item in choices.local_results) == (200, 280)
+
+
+@pytest.mark.parametrize(
+    ("second_time_visible", "status"),
+    (
+        (True, "classified_local_2"),
+        (False, "classified_local_2_time_fallback_1"),
+    ),
+)
+def test_visible_chat_ignores_same_name_in_preview_title_column_boundary(
+    second_time_visible: bool, status: str
+) -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("Chats", TextBox(20, 35, 60, 16), 0.90),
+                RecognizedText("My Mother", TextBox(89, 251, 110, 18), 0.92),
+                RecognizedText("8:12", TextBox(600, 251, 42, 16), 0.82),
+                RecognizedText("Hello", TextBox(89, 278, 60, 15), 0.88),
+                RecognizedText("My Mother", TextBox(350, 275, 110, 16), 0.74),
+                RecognizedText("My Mother", TextBox(69, 747, 110, 18), 0.96),
+                *(
+                    (RecognizedText("7:30", TextBox(600, 747, 42, 16), 0.84),)
+                    if second_time_visible
+                    else ()
+                ),
+                RecognizedText("Yesterday", TextBox(69, 775, 80, 15), 0.85),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "my mother"
+    )
+    assert assessment.status == status
+    assert assessment.choices is not None
+    assert tuple(item.top for item in assessment.choices.local_results) == (251, 747)
+
+
+def test_missing_time_fallback_never_promotes_previous_rows_preview() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (
+                RecognizedText("My Mother", TextBox(69, 200, 110, 18), 0.95),
+                RecognizedText("8:12", TextBox(600, 200, 42, 16), 0.82),
+                RecognizedText("My Mother", TextBox(69, 227, 110, 18), 0.95),
+                RecognizedText("second", TextBox(69, 254, 60, 15), 0.88),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "my mother"
+    )
+    assert assessment.choices is None
+    assert assessment.status == "rows_2_low_0_time_1_preview_0"
+
+
+def test_visible_chat_does_not_ignore_a_second_unclassified_name() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
+                RecognizedText("My", TextBox(70, 200, 25, 18), 0.92),
+                RecognizedText("Mother", TextBox(100, 200, 65, 18), 0.91),
+                RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
+                RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.88),
+                RecognizedText("Alice", TextBox(70, 280, 55, 18), 0.90),
+                RecognizedText("7:30", TextBox(455, 280, 42, 16), 0.84),
+                RecognizedText("My", TextBox(70, 307, 25, 15), 0.92),
+                RecognizedText("Mother", TextBox(100, 307, 65, 15), 0.91),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    assert (
+        visible_chat_choices(observation, "telegram.desktop", 123, "My Mother")
+        is None
+    )
 
 
 def test_left_label_requires_unique_title_in_expected_telegram_window() -> None:
@@ -139,6 +351,9 @@ def test_settings_item_requires_heading_unique_row_and_same_window() -> None:
     )
     assert telegram_settings_item(
         observation, "telegram.desktop", 123, "Privacy and Security"
+    ) is not None
+    assert telegram_settings_item(
+        observation, "telegram.desktop", 123, "privacyandsecurity"
     ) is not None
     assert telegram_view_title_visible(observation, "telegram.desktop", 123, "Settings")
     assert telegram_settings_item(

@@ -62,3 +62,59 @@ def find_exact_phrases(result: OcrResult, phrase: str) -> tuple[VisiblePhrase, .
             )
         )
     return tuple(matches)
+
+
+def find_compact_phrases(result: OcrResult, phrase: str) -> tuple[VisiblePhrase, ...]:
+    """Match a whole visible phrase when STT or OCR omitted word spaces.
+
+    This returns observations only. Callers must still classify the row and
+    verify the window before an action; no spelling differences are repaired.
+    """
+    query = "".join(_word(part).replace(" ", "") for part in phrase.split())
+    if not query or len(query) > 64:
+        return ()
+    matches: list[VisiblePhrase] = []
+    spans = result.spans
+    for start in range(len(spans)):
+        joined = ""
+        group: list[RecognizedText] = []
+        for span in spans[start : start + 8]:
+            if group and not _same_line(group[-1], span):
+                break
+            part = _word(span.text).replace(" ", "")
+            if not part:
+                break
+            joined += part
+            if not query.startswith(joined):
+                break
+            group.append(span)
+            if joined == query:
+                left = min(item.box.left for item in group)
+                top = min(item.box.top for item in group)
+                right = max(item.box.left + item.box.width for item in group)
+                bottom = max(item.box.top + item.box.height for item in group)
+                scores = [item.confidence for item in group]
+                matches.append(
+                    VisiblePhrase(
+                        TextBox(left, top, right - left, bottom - top),
+                        min(score for score in scores if score is not None)
+                        if all(score is not None for score in scores)
+                        else None,
+                    )
+                )
+                break
+    return tuple(matches)
+
+
+def find_literal_phrases(
+    result: OcrResult, phrase: str, *, allow_joined_words: bool = False
+) -> tuple[VisiblePhrase, ...]:
+    """Return deduplicated OCR observations for a literal spoken label.
+
+    Joined-word matching is opt-in because some surfaces need exact spacing.
+    The caller still decides whether a match is a safe actionable control.
+    """
+    matches = list(find_exact_phrases(result, phrase))
+    if allow_joined_words:
+        matches.extend(find_compact_phrases(result, phrase))
+    return tuple({match.box: match for match in matches}.values())

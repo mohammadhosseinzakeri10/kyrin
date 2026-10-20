@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 from kyrin.commands.app_names import SpokenAppCandidate
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
@@ -42,6 +43,7 @@ class CommandIntent:
     window_index: int | None = None
     scroll_steps: int | None = None
     scroll_area: str | None = None
+    chat_scope: Literal["search", "visible"] = "search"
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -52,6 +54,12 @@ class CommandIntent:
             self.app is None or not self.app.strip()
         ):
             raise ValueError("open_chat requires a verified or explicit app")
+        if self.kind is not CommandKind.OPEN_CHAT and self.chat_scope != "search":
+            raise ValueError("only open_chat may limit chat scope")
+        if self.kind is CommandKind.OPEN_CHAT and self.chat_scope not in (
+            "search", "visible"
+        ):
+            raise ValueError("unsupported chat scope")
         if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
             "archive",
             "contacts",

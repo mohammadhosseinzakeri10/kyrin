@@ -61,6 +61,10 @@ _TEXT: dict[str, dict[str, str]] = {
             "برای نام «{target}» نتیجهٔ یکتا و دقیق پیدا نکردم؛ "
             "لطفاً نام چت را دوباره بگویید."
         ),
+        "visible_chat_uncertain": (
+            "چتِ قابل‌دیدن با نام «{target}» را با اطمینان پیدا نکردم. "
+            "برای جست‌وجوی همهٔ چت‌ها، «Open chat» را بگویید."
+        ),
         "chat_selection_expired": (
             "زمان انتخاب چت تمام شد؛ لطفاً فرمان را دوباره بگویید."
         ),
@@ -199,6 +203,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "chat_search_uncertain": (
             "I couldn't find one exact chat result for “{target}”. "
             "Please repeat the chat name."
+        ),
+        "visible_chat_uncertain": (
+            "I couldn't confidently find “{target}” in the visible chat list. "
+            "Say Open chat to search all chats."
         ),
         "chat_selection_expired": "Chat selection expired. Please repeat the command.",
         "chat_selection_cancelled": "Chat selection was cancelled.",
@@ -395,6 +403,7 @@ class ResponsePresenter:
                 "telegram_settings_navigation_uncertain",
                 "telegram_input_unknown",
                 "chat_search_uncertain",
+                "visible_chat_uncertain",
                 "chat_selection_expired",
                 "chat_selection_cancelled",
                 "telegram_control_setup_required",
@@ -409,13 +418,16 @@ class ResponsePresenter:
             }:
                 text = (
                     messages[event.error_code].format(target=event.intent.target)
-                    if event.error_code == "chat_search_uncertain"
+                    if event.error_code in {
+                        "chat_search_uncertain", "visible_chat_uncertain"
+                    }
                     else messages[event.error_code]
                 )
             elif event.error_code is not None and event.error_code.startswith(
-                "chat_search_uncertain:"
+                ("chat_search_uncertain:", "visible_chat_uncertain:")
             ):
-                text = messages["chat_search_uncertain"].format(
+                code = event.error_code.split(":", 1)[0]
+                text = messages[code].format(
                     target=event.intent.target
                 )
             else:
