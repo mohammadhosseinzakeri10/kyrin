@@ -22,6 +22,10 @@ class DocumentOcrTimeoutError(OcrInferenceError):
     """The isolated document model exceeded its bounded read time."""
 
 
+class DocumentOcrGpuMemoryError(OcrInferenceError):
+    """The selected GPU lacks memory for this image and model."""
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentOcrResult:
     text: str
@@ -115,6 +119,11 @@ class DocumentOcrEngine:
                 "CUDA GPU is unavailable in this document OCR runtime"
             )
         if process.returncode != 0:
+            if (
+                device is not OcrDevicePreference.CPU
+                and b"CUDA out of memory" in process.stderr
+            ):
+                raise DocumentOcrGpuMemoryError("Document OCR exhausted GPU memory")
             raise OcrInferenceError("Document OCR inference failed")
         try:
             payload = next(

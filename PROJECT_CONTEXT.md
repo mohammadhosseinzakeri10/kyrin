@@ -23,6 +23,23 @@
 > 9.9 seconds. These observations do not establish model accuracy or latency
 > on arbitrary real desktop windows.
 
+> **dots.mocr live GPU failure and correction (2026-10-20):** The owner tested
+> all three document models in Screen Access. Surya first returned no text
+> and then succeeded, GLM returned text, and dots.mocr failed with a generic
+> screen-read error. Replaying the supplied 1222×820 control-center screenshot
+> exposed a CUDA out-of-memory error in the dots vision tower's eager attention
+> softmax. Switching GPU inference to the checkpoint's built-in SDPA attention
+> read that image successfully at original resolution. A larger 1853×1048
+> synthetic desktop image still exhausted GPU memory, so dots reads large
+> images in overlapping horizontal bands at their original pixel scale; the
+> same large image and the owner's screenshot then both returned text on GPU.
+> Remaining GPU memory errors have a distinct UI message. Results are text
+> only and do not change action OCR or desktop clicking. Live owner retest
+> after the correction remains pending. The first screenshot in which Surya
+> had reported no text returned 622 characters when replayed locally on GPU;
+> that earlier empty output was not reproduced and should not be attributed to
+> the dots CUDA memory error.
+
 > **OCR choice in Screen Access (2026-10-19):** Installed Tesseract, Fast,
 > Best, PaddleOCR v5 Persian, v6 Small, v6 Medium, and PaddleOCR-VL 1.6 are
 > selectable when their local runtimes and weights are present. The three

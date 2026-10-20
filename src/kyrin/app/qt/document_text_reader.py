@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.vision.ocr.backends.document import (
     DocumentOcrEngine,
+    DocumentOcrGpuMemoryError,
     DocumentOcrTimeoutError,
 )
 from kyrin.vision.ocr.backends.tesseract import OcrUnavailableError
@@ -119,6 +120,8 @@ class DocumentTextReader(QObject):
                 )
             except DocumentOcrTimeoutError:
                 events.failed.emit(generation, "ocr_timeout")
+            except DocumentOcrGpuMemoryError:
+                events.failed.emit(generation, "gpu_memory")
             except OcrUnavailableError:
                 events.failed.emit(generation, "gpu_unavailable")
             except Exception:

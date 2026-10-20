@@ -114,6 +114,14 @@ seconds), Surya (16.1 seconds), and GLM-OCR (4.2 seconds); all reported
 `device=gpu`. Auto selected GPU on this machine. Explicit CPU hides CUDA from
 its subprocess to avoid CUDA library mappings exhausting the CPU worker's
 virtual address-space limit; a GLM CPU read then completed in 9.9 seconds.
+On a real Screen Access screenshot, dots.mocr's eager vision attention ran out
+of CUDA memory because it materialized a large attention matrix. GPU inference
+now uses the checkpoint's SDPA attention path. Larger desktop images are read
+as overlapping horizontal bands at native pixel scale to bound peak vision
+memory without shrinking text. The owner's 1222×820 screenshot and a synthetic
+1853×1048 desktop frame both returned text after these changes. If other GPU
+work still exhausts memory, Screen Access reports that condition separately
+from generic OCR failure and suggests CPU or freeing GPU memory.
 The document model selector is independent of the saved Local OCR model above
 it. Clicking its read button captures the window that is active at that moment;
 when the control center is in front, that is KYRIN itself. Each read-only text

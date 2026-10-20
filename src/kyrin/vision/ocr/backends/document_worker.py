@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import io
 import json
+import math
 import resource
 import sys
 import types
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from PIL import Image  # type: ignore[import-not-found]
 
 _RESULT_PREFIX = "KYRIN_DOCUMENT_OCR_RESULT:"
+_DOTS_MAX_FRAME_PIXELS = 800_000
+_DOTS_BAND_OVERLAP = 32
 
 
 class _PlainText(HTMLParser):
@@ -110,8 +113,23 @@ def _glm(model_path: Path, image: Image.Image, device: str) -> str:
     )
 
 
+def _dots_frames(image: Image.Image) -> list[Image.Image]:
+    """Keep desktop text at its original scale while bounding vision memory."""
+    if image.width * image.height <= _DOTS_MAX_FRAME_PIXELS:
+        return [image]
+    max_height = max(64, _DOTS_MAX_FRAME_PIXELS // image.width)
+    band_count = math.ceil(image.height / max(1, max_height - _DOTS_BAND_OVERLAP))
+    core_height = math.ceil(image.height / band_count)
+    frames = []
+    for index in range(band_count):
+        top = max(0, index * core_height - _DOTS_BAND_OVERLAP // 2)
+        bottom = min(image.height, (index + 1) * core_height + _DOTS_BAND_OVERLAP // 2)
+        frames.append(image.crop((0, top, image.width, bottom)))
+    return frames
+
+
 def _dots(model_path: Path, image: Image.Image, device: str) -> str:
-    # The checkpoint imports flash_attn even when its CPU eager path is selected.
+    # The checkpoint imports flash_attn even when a different path is selected.
     # The shim fails closed if flash attention is ever actually called.
     flash_attn = types.ModuleType("flash_attn")
     flash_attn.__spec__ = importlib.machinery.ModuleSpec("flash_attn", loader=None)
@@ -127,12 +145,16 @@ def _dots(model_path: Path, image: Image.Image, device: str) -> str:
     config = AutoConfig.from_pretrained(
         model_path, trust_remote_code=True, local_files_only=True
     )
-    config.vision_config.attn_implementation = "eager"
+    # Eager vision attention materializes an image-token square matrix and
+    # exhausts 16 GB GPUs on ordinary desktop screenshots. The checkpoint's
+    # SDPA implementation avoids that large floating-point attention matrix.
+    attention = "sdpa" if device.startswith("cuda") else "eager"
+    config.vision_config.attn_implementation = attention
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         config=config,
-        attn_implementation="eager",
+        attn_implementation=attention,
         torch_dtype="auto",
         device_map=device,
         trust_remote_code=True,
@@ -141,36 +163,45 @@ def _dots(model_path: Path, image: Image.Image, device: str) -> str:
     processor = AutoProcessor.from_pretrained(
         model_path, trust_remote_code=True, local_files_only=True
     )
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image},
-                {
-                    "type": "text",
-                    "text": (
-                        "Extract all visible text from this image. "
-                        "Return only the text."
-                    ),
-                },
-            ],
-        }
-    ]
-    prompt = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    images, videos = process_vision_info(messages)
-    inputs = processor(
-        text=[prompt], images=images, videos=videos, padding=True, return_tensors="pt"
-    ).to(device)
-    output = model.generate(**inputs, max_new_tokens=1024)
-    return str(
-        processor.batch_decode(
-            [output[0][len(inputs.input_ids[0]) :]],
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )[0]
-    )
+
+    def recognize(frame: Image.Image) -> str:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": frame},
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract all visible text from this image. "
+                            "Return only the text."
+                        ),
+                    },
+                ],
+            }
+        ]
+        prompt = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        images, videos = process_vision_info(messages)
+        inputs = processor(
+            text=[prompt],
+            images=images,
+            videos=videos,
+            padding=True,
+            return_tensors="pt",
+        ).to(device)
+        output = model.generate(**inputs, max_new_tokens=1024)
+        return str(
+            processor.batch_decode(
+                [output[0][len(inputs.input_ids[0]) :]],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )[0]
+        )
+
+    frames = _dots_frames(image) if device.startswith("cuda") else [image]
+    return "\n".join(text for frame in frames if (text := recognize(frame)).strip())
 
 
 def main() -> None:

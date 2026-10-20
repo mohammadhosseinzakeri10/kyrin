@@ -312,5 +312,7 @@ def test_document_page_shows_elapsed_time_and_timeout(
         assert page.document_backend.isEnabled()
         page._document_failed("ocr_timeout")
         assert "4 minutes" in page.document_status.text()
+        page._document_failed("gpu_memory")
+        assert "GPU ran out of memory" in page.document_status.text()
     finally:
         page.close()

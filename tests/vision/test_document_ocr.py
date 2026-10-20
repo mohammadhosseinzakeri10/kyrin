@@ -8,6 +8,7 @@ import pytest
 
 from kyrin.vision.ocr.backends.document import (
     DocumentOcrEngine,
+    DocumentOcrGpuMemoryError,
     DocumentOcrResult,
     DocumentOcrTimeoutError,
     document_model_ready,
@@ -61,6 +62,21 @@ def test_explicit_gpu_unavailable_does_not_fall_back(tmp_path: Path) -> None:
         return_value=CompletedProcess([], 20, b"", b""),
     ):
         with pytest.raises(OcrUnavailableError, match="CUDA GPU"):
+            engine.read_text(b"png", OcrDevicePreference.GPU)
+
+
+def test_gpu_memory_error_is_distinct_from_generic_inference_failure(
+    tmp_path: Path,
+) -> None:
+    models, runtimes = _catalog(tmp_path)
+    engine = DocumentOcrEngine("surya", models, runtimes)
+    with patch(
+        "kyrin.vision.ocr.backends.document.subprocess.run",
+        return_value=CompletedProcess(
+            [], 1, b"", b"torch.OutOfMemoryError: CUDA out of memory"
+        ),
+    ):
+        with pytest.raises(DocumentOcrGpuMemoryError):
             engine.read_text(b"png", OcrDevicePreference.GPU)
 
 

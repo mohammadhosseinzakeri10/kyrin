@@ -238,6 +238,10 @@ ENGLISH: dict[str, str] = {
         "CUDA GPU is unavailable for this document model. "
         "Choose CPU or install its CUDA runtime."
     ),
+    "screen_document_gpu_memory": (
+        "The GPU ran out of memory while reading this window. "
+        "Close other GPU programs or choose CPU."
+    ),
     "screen_document_read": "Read with selected document model",
     "screen_document_clear": "Clear document text",
     "screen_document_ready": "Choose a model to compare its text output.",

@@ -423,6 +423,7 @@ class ScreenAccessPage(QWidget):
             "window_changed": "screen_window_changed",
             "ocr_timeout": "screen_document_timeout",
             "gpu_unavailable": "screen_document_gpu_unavailable",
+            "gpu_memory": "screen_document_gpu_memory",
         }.get(reason, "screen_ocr_failed")
         self.document_status.setText(self._translations.text(key))
 
