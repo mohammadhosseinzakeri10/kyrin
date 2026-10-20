@@ -20,7 +20,9 @@ from kyrin.vision.screen_capture import IdentifiedWindowImage
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
-ReadRegion = Literal["left_menu", "settings_pane", "settings_header"] | None
+ReadRegion = Literal[
+    "left_menu", "left_chat_list", "settings_pane", "settings_header"
+] | None
 
 
 def _png_size(image: bytes) -> tuple[int, int] | None:
@@ -62,24 +64,45 @@ def _crop_png(image: bytes, region: ReadRegion) -> tuple[bytes, int] | None:
         buffer.close()
 
 
+def _chat_list_png(image: bytes) -> bytes | None:
+    """Magnify Telegram's narrow chat column for short and low rows."""
+    source = QImage.fromData(image)
+    if source.isNull() or source.width() < 300 or source.height() < 300:
+        return None
+    width = min(source.width(), int(source.width() * 0.36))
+    cropped = source.copy(0, 0, width, source.height()).scaled(
+        width * 2, source.height() * 2
+    ).convertToFormat(QImage.Format.Format_RGB888)
+    output = QByteArray()
+    buffer = QBuffer(output)
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        return None
+    try:
+        if not cropped.save(buffer, "PNG"):  # type: ignore[call-overload]
+            return None
+        return bytes(output.data())
+    finally:
+        buffer.close()
+
+
 def _left_menu_png(image: bytes) -> bytes | None:
     """Keep the existing menu-only image helper for its callers."""
     cropped = _crop_png(image, "left_menu")
     return cropped[0] if cropped is not None else None
 
 
-def _window_coordinates(result: OcrResult, left: int) -> OcrResult:
-    if left == 0:
+def _window_coordinates(result: OcrResult, left: int, scale: int = 1) -> OcrResult:
+    if left == 0 and scale == 1:
         return result
     return OcrResult(
         tuple(
             RecognizedText(
                 span.text,
                 TextBox(
-                    span.box.left + left,
-                    span.box.top,
-                    span.box.width,
-                    span.box.height,
+                    span.box.left // scale + left,
+                    span.box.top // scale,
+                    max(1, span.box.width // scale),
+                    max(1, span.box.height // scale),
                 ),
                 span.confidence,
             )
@@ -187,7 +210,12 @@ class ScreenTextReader(QObject):
         assert engine is not None
         events = self._events
         original_size = _png_size(image.image)
-        cropped = _crop_png(image.image, region) if region is not None else None
+        scale = 2 if region == "left_chat_list" else 1
+        if region == "left_chat_list":
+            focused = _chat_list_png(image.image)
+            cropped = (focused, 0) if focused is not None else None
+        else:
+            cropped = _crop_png(image.image, region) if region is not None else None
         if region is not None and cropped is None:
             self._finish()
             self.failed.emit("capture_unavailable")
@@ -197,7 +225,7 @@ class ScreenTextReader(QObject):
         def work() -> None:
             try:
                 result = _window_coordinates(
-                    engine.recognize(ocr_image, selected_options), left_offset
+                    engine.recognize(ocr_image, selected_options), left_offset, scale
                 )
                 identity = self._identity_reader()
                 if identity != (image.platform_app_id, image.process_id):

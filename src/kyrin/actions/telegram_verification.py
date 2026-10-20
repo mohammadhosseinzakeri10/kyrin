@@ -111,7 +111,7 @@ def assess_visible_chat_choices(
         match
         for match in title_matches
         if width * 0.025 <= match.box.left < width * 0.15
-        and height * 0.085 < match.box.top < height * 0.92
+        and height * 0.085 < match.box.top < height * 0.98
     ]
     if not candidates:
         return VisibleChatAssessment(
@@ -176,6 +176,10 @@ def assess_visible_chat_choices(
         if (aligned_right or time_fallback) and preview_below:
             titles.append(match)
     if low_confidence or missing_time or missing_preview:
+        if (missing_time or missing_preview) and any(
+            match.box.top > height * 0.92 for match in candidates
+        ):
+            return VisibleChatAssessment(None, "partial_bottom_row")
         return VisibleChatAssessment(
             None,
             f"rows_{len(candidates)}_low_{low_confidence}_"

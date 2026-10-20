@@ -66,6 +66,21 @@
 > user confirmation of the duplicate selection path, not proof of every
 > Telegram layout or speech variant.
 
+> **Low visible-list rows (2026-10-20):** The owner supplied a Telegram
+> screenshot after `Open visible chat H` and also reported a failed
+> `Spotify Downloader` visible-list command. Both rows were near the bottom
+> of the window. Replaying the screenshot with the owner's selected Tesseract
+> Best engine showed that its usual sparse-text pass missed `H` and read
+> `Spotify` below the confidence gate. A magnified left-column pass with
+> block segmentation identified both titles; `Spotify Downloader` also had
+> a valid time and preview anchor, while `H` was clipped against the bottom
+> and lacked trustworthy row anchors. The verifier retains the existing
+> full-window pass and uses the focused pass only after uncertainty. A
+> recognized clipped bottom row triggers at most one identity-bound scroll
+> and a fresh stable reread before any click. Focused tests pass and the
+> supplied screenshot reproduces the expected classifier statuses; live
+> owner retest of these two commands remains pending.
+
 > **Owner status corrections (2026-10-20):** The owner confirmed that the
 > current dashboard behaves as intended; its particle renderer and preferences
 > were committed locally as `953e4ed`, with no GitHub action. The owner also

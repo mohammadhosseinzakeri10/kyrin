@@ -214,6 +214,49 @@ def test_visible_chat_choice_uses_current_list_without_search(
         ) is not None and choices.source == "visible",
     )
     assert reader.read_on_ui_thread
+    assert reader.last_region is None
+
+
+def test_visible_chat_retries_focused_ocr_only_after_uncertain_full_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    class TwoReads(Reader):
+        def __init__(self) -> None:
+            super().__init__(_observation())
+            self.regions: list[str | None] = []
+
+        def read(
+            self, options: OcrOptions | None = None, *, region: str | None = None
+        ) -> bool:
+            self.regions.append(region)
+            if region == "left_chat_list":
+                self.observation = IdentifiedWindowText(
+                    "telegram.desktop", 123,
+                    OcrResult((
+                        RecognizedText("Spotify", TextBox(88, 935, 44, 13), 0.86),
+                        RecognizedText("Downloader", TextBox(136, 935, 76, 10), 0.96),
+                        RecognizedText("10/6/26", TextBox(606, 936, 45, 9), 0.96),
+                        RecognizedText("Preview", TextBox(92, 959, 60, 10), 0.96),
+                    ), "eng", OcrDevice.CPU, "fake"),
+                    (1853, 1048),
+                )
+            return super().read(options, region=region)
+
+    reader = TwoReads()
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_visible_chat_choices(
+            "telegram.desktop", 123, "Spotify Downloader"
+        ) is not None,
+    )
+    assert reader.regions == [None, "left_chat_list"]
+    assert reader.last_options == OcrOptions("eng", layout="block")
 
 
 def test_menu_verification_requests_left_region(

@@ -216,6 +216,12 @@ class TelegramSavedMessagesExecutor:
         self, request: ActionRequest, identity: tuple[str, int], target: str
     ) -> ActionResult:
         choices = self._settled_visible_choices(identity, target)
+        if (
+            choices is None
+            and self._choice_status.startswith("partial_bottom_row")
+            and self._scroll_visible_list(identity)
+        ):
+            choices = self._settled_visible_choices(identity, target)
         if choices is None:
             return ActionResult(
                 request.key,
@@ -699,6 +705,32 @@ class TelegramSavedMessagesExecutor:
             sleep(0.25)
         return dispatched
 
+    def _scroll_visible_list(self, identity: tuple[str, int]) -> bool:
+        """Expose one already recognized, clipped bottom row before rereading."""
+        try:
+            result = subprocess.run(
+                [
+                    self._system_python,
+                    str(SCROLL_HELPER),
+                    identity[0],
+                    str(identity[1]),
+                    "down",
+                    "1",
+                    "left",
+                    "telegram-control",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        dispatched = result.returncode == 0 and "SCROLL_DISPATCHED" in result.stdout
+        if dispatched:
+            sleep(0.25)
+        return dispatched
+
     def _click_result(
         self,
         request: ActionRequest,
@@ -845,7 +877,9 @@ class TelegramSavedMessagesExecutor:
     def _settled_visible_choices(
         self, identity: tuple[str, int], target: str
     ) -> ChatSearchChoices | None:
-        deadline = monotonic() + _SEARCH_SETTLE_SECONDS
+        # An uncertain full-window read may need a second, magnified left-pane
+        # OCR pass. Leave time for two independent reads before a click.
+        deadline = monotonic() + 10.0
         previous: ChatSearchChoices | None = None
         saw_choices = False
         while monotonic() < deadline:

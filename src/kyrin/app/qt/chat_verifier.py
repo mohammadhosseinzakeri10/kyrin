@@ -34,6 +34,7 @@ class _Request:
     search: bool = False
     choices: bool = False
     visible_choices: bool = False
+    visible_focused: bool = False
     left_label: bool = False
     menu: bool = False
     settings_item: bool = False
@@ -298,6 +299,23 @@ class QtChatVerifier(QObject):
                         else f"unclassified_{detail}"
                     )
                 )
+                if (
+                    pending.visible_choices
+                    and not pending.visible_focused
+                    and result is None
+                    and visible_status != "search_field_active"
+                ):
+                    pending.visible_focused = True
+                    language = (
+                        "fas+eng"
+                        if any("\u0600" <= char <= "\u06ff" for char in pending.target)
+                        else "eng"
+                    )
+                    if self._reader.read(
+                        OcrOptions(language, layout="block"),
+                        region="left_chat_list",
+                    ):
+                        return
             elif pending.search:
                 assert pending.target is not None
                 result = unique_search_result(

@@ -78,6 +78,18 @@ def test_tesseract_passes_installed_language_pair_to_cli(tmp_path: Path) -> None
     assert args[args.index("--psm") + 1] == "3"
 
 
+def test_tesseract_uses_block_layout_only_when_requested(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    output = b"level\tleft\ttop\twidth\theight\tconf\ttext\n"
+    with patch(
+        "kyrin.vision.ocr.backends.tesseract.subprocess.run",
+        return_value=CompletedProcess([], 0, output, b""),
+    ) as run:
+        engine.recognize(b"image", OcrOptions("eng", layout="block"))
+    args = run.call_args.args[0]
+    assert args[args.index("--psm") + 1] == "6"
+
+
 def test_tesseract_rejects_malformed_output(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     with patch(

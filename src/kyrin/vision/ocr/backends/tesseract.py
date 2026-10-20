@@ -110,7 +110,9 @@ class TesseractOcrEngine:
                     "-l",
                     options.language,
                     "--psm",
-                    "3" if "fas" in options.language.split("+") else "11",
+                    "6" if options.layout == "block" else (
+                        "3" if "fas" in options.language.split("+") else "11"
+                    ),
                     "-c",
                     "tessedit_create_tsv=1",
                 ],

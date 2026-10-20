@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 _LANGUAGE_CODE = re.compile(r"[a-z][a-z0-9_]*(?:\+[a-z][a-z0-9_]*)*\Z")
 
@@ -33,6 +33,7 @@ class OcrCapabilities:
 class OcrOptions:
     language: str
     device: OcrDevicePreference = OcrDevicePreference.AUTO
+    layout: Literal["sparse", "block"] = "sparse"
 
     def __post_init__(self) -> None:
         if (
@@ -43,6 +44,8 @@ class OcrOptions:
             raise ValueError("OCR language must be a valid language code")
         if not isinstance(self.device, OcrDevicePreference):
             raise ValueError("OCR device must be auto, cpu, or gpu")
+        if self.layout not in {"sparse", "block"}:
+            raise ValueError("OCR layout must be sparse or block")
 
 
 @dataclass(frozen=True, slots=True)

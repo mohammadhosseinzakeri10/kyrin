@@ -18,7 +18,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from kyrin.app.qt.ocr_setup import installed_ocr_engine, selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
-from kyrin.app.qt.screen_text_reader import ScreenTextReader, _crop_png, _left_menu_png
+from kyrin.app.qt.screen_text_reader import (
+    ScreenTextReader,
+    _chat_list_png,
+    _crop_png,
+    _left_menu_png,
+)
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import OcrSelection
 from kyrin.vision.ocr.contracts import (
@@ -247,6 +252,37 @@ def test_settings_region_ocr_restores_window_coordinates(
         _until(app, lambda: bool(results))
         assert results[0].image_size == (1000, 800)
         assert results[0].result.spans[0].box.left == left + 1
+    finally:
+        reader.close()
+
+
+def test_visible_list_region_magnifies_and_restores_window_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    image = _valid_png()
+    focused = _chat_list_png(image)
+    assert focused is not None
+    magnified = QImage.fromData(focused)
+    assert (magnified.width(), magnified.height()) == (720, 1600)
+    access = FakeAccess()
+    access.image = IdentifiedWindowImage(
+        _IMAGE.platform_app_id, _IMAGE.process_id, image
+    )
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access),
+        FakeOcr(expected_image=focused),
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+        OcrOptions("eng"),
+    )
+    results: list[IdentifiedWindowText] = []
+    reader.completed.connect(results.append)
+    try:
+        assert reader.read(OcrOptions("eng", layout="block"), region="left_chat_list")
+        _until(app, lambda: bool(results))
+        assert results[0].image_size == (1000, 800)
+        assert results[0].result.spans[0].box.top == 1
+        assert results[0].result.spans[0].box.width == 15
     finally:
         reader.close()
 

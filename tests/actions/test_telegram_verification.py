@@ -185,6 +185,23 @@ def test_visible_chat_keeps_ocr_spacing_variants_as_two_choices() -> None:
     assert tuple(item.top for item in choices.local_results) == (200, 280)
 
 
+def test_visible_chat_marks_clipped_bottom_row_for_one_scroll() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop",
+        123,
+        OcrResult(
+            (RecognizedText("H", TextBox(69, 998, 8, 9), 0.93),),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "h"
+    )
+    assert assessment.choices is None
+    assert assessment.status == "partial_bottom_row"
+
+
 @pytest.mark.parametrize(
     ("second_time_visible", "status"),
     (

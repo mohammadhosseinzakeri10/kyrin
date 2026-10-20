@@ -460,6 +460,40 @@ def test_visible_chat_never_falls_back_to_search_on_uncertain_list(
     assert result.error_code == "visible_chat_uncertain:unclassified"
 
 
+def test_visible_chat_scrolls_once_only_for_recognized_clipped_bottom_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choices = ChatSearchChoices(
+        ChatSearchMatch(69, 900, 8, 9, 1853, 1048),
+        (),
+        global_section_verified=True,
+        source="visible",
+    )
+    executor = _executor(Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12))
+    reads = iter((None, choices))
+    scrolls: list[tuple[str, int]] = []
+
+    def read(*_args: object) -> ChatSearchChoices | None:
+        executor._choice_status = "partial_bottom_row_matches_1"  # noqa: SLF001
+        return next(reads)
+
+    monkeypatch.setattr(executor, "_settled_visible_choices", read)
+    def scroll(identity: tuple[str, int]) -> bool:
+        scrolls.append(identity)
+        return True
+
+    monkeypatch.setattr(executor, "_scroll_visible_list", scroll)
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 0, "CHAT_RESULT_CLICKED", ""
+        ),
+    )
+    result = executor.execute(_visible_request("H"))
+    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert scrolls == [(DESKTOP_ID, 12)]
+
+
 def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
