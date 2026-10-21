@@ -162,7 +162,9 @@ class TelegramChatSelection:
         # Without a visible global-section boundary, another local chat may
         # be below the viewport. Keep the choice open for bounded paging.
         local_choice = bool(choices.local_results) and (
-            len(choices.local_results) >= 2 or not choices.global_section_verified
+            len(choices.local_results) >= 2
+            or not choices.global_section_verified
+            or bool(choices.grounded_titles)
         )
         global_choice = (
             not choices.local_results
@@ -425,7 +427,16 @@ class TelegramChatSelection:
 
     def _prompt(self, pending: _Pending) -> None:
         count = len(pending.choices.selectable_results)
-        if pending.choices.source == "visible":
+        if pending.choices.grounded_titles:
+            labels = ", ".join(
+                f"{index}: {title}"
+                for index, title in enumerate(
+                    pending.choices.grounded_titles, start=1
+                )
+            )
+            english = f"Possible visible chats: {labels}. "
+            persian = f"چت‌های احتمالیِ روی صفحه: {labels}. "
+        elif pending.choices.source == "visible":
             english = f"I found {count} visible chats with that name. "
             persian = f"{count} چت قابل‌دیدن با این نام پیدا شد. "
         elif pending.choices.local_results:

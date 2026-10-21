@@ -546,6 +546,69 @@ def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
         selection.cancel()
 
 
+def test_grounded_visible_title_requires_number_and_verifies_ocr_title(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    prompts: list[ResponseRequest] = []
+    done = Event()
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 220, 90, 18, 1600, 900),
+        (),
+        global_section_verified=True,
+        source="visible",
+        grounded_titles=("matin",),
+    )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "CHAT_RESULT_CLICKED", "")
+
+    monkeypatch.setattr("kyrin.actions.platforms.telegram.subprocess.run", run)
+    selection = TelegramChatSelection(prompts.append, lambda _: done.set())
+    verifier = Verifier(choices=choices)
+    executor = telegram.TelegramSavedMessagesExecutor(
+        Delegate(),
+        telegram_desktop_id=DESKTOP_ID,
+        identity_reader=lambda: (DESKTOP_ID, 12),
+        verifier=verifier,
+        selection=selection,
+        remember_pointer=True,
+    )
+    selection.set_completion(executor.complete_selection)
+    try:
+        result = executor.execute(_visible_request("martin"))
+        assert result.error_code == "chat_selection_pending"
+        assert "matin" in prompts[0].message
+        assert calls == []
+        assert selection.on_final_speech("first")
+        assert done.wait(2)
+        assert [args[4] for args in calls] == ["click"]
+        assert verifier.calls[-1] == (DESKTOP_ID, 12, "matin")
+    finally:
+        selection.cancel()
+
+
+def test_grounded_visible_title_does_not_click_without_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda *args, **kwargs: pytest.fail("a corrected title needs confirmation"),
+    )
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 220, 90, 18, 1600, 900),
+        (),
+        global_section_verified=True,
+        source="visible",
+        grounded_titles=("matin",),
+    )
+    result = _executor(Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12)).execute(
+        _visible_request("martin")
+    )
+    assert result.error_code == "visible_chat_uncertain:selection_unavailable"
+
+
 def _executor(
     delegate: Delegate,
     verifier: Verifier,

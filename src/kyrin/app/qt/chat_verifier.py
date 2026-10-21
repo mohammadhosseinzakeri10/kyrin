@@ -19,6 +19,7 @@ from kyrin.actions.telegram_verification import (
     telegram_view_title_visible,
     unique_search_result,
 )
+from kyrin.actions.visible_chat_grounding import suggest_visible_chat_choices
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
@@ -35,6 +36,7 @@ class _Request:
     choices: bool = False
     visible_choices: bool = False
     visible_focused: bool = False
+    visible_bilingual: bool = False
     left_label: bool = False
     menu: bool = False
     settings_item: bool = False
@@ -264,6 +266,19 @@ class QtChatVerifier(QObject):
                     )
                     result = assessment.choices
                     visible_status = assessment.status
+                    if visible_status not in {
+                        "search_field_active", "window_changed"
+                    } and (pending.visible_focused or result is not None):
+                        suggestions = suggest_visible_chat_choices(
+                            observation, pending.app_id, pending.pid, pending.target
+                        )
+                        if suggestions is not None and (
+                            result is None or len(suggestions.local_results) > 1
+                        ):
+                            result = suggestions
+                            visible_status = (
+                                f"grounded_local_{len(result.local_results)}"
+                            )
                 else:
                     result = search_choices(
                         observation, pending.app_id, pending.pid, pending.target
@@ -301,17 +316,27 @@ class QtChatVerifier(QObject):
                 )
                 if (
                     pending.visible_choices
-                    and not pending.visible_focused
                     and result is None
-                    and visible_status != "search_field_active"
+                    and visible_status not in {"search_field_active", "window_changed"}
                 ):
-                    pending.visible_focused = True
-                    language = (
-                        "fas+eng"
-                        if any("\u0600" <= char <= "\u06ff" for char in pending.target)
-                        else "eng"
+                    target_is_persian = any(
+                        "\u0600" <= char <= "\u06ff" for char in pending.target
                     )
-                    if self._reader.read(
+                    if not pending.visible_focused:
+                        pending.visible_focused = True
+                        language = "fas+eng" if target_is_persian else "eng"
+                    elif (
+                        not pending.visible_bilingual
+                        and not target_is_persian
+                        and {"fas", "eng"}.issubset(
+                            self._reader.supported_languages
+                        )
+                    ):
+                        pending.visible_bilingual = True
+                        language = "fas+eng"
+                    else:
+                        language = None
+                    if language is not None and self._reader.read(
                         OcrOptions(language, layout="block"),
                         region="left_chat_list",
                     ):

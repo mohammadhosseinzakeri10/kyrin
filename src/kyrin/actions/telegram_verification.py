@@ -34,6 +34,7 @@ class ChatSearchChoices:
     global_section_verified: bool = False
     view_signature: str = ""
     source: Literal["search", "visible"] = "search"
+    grounded_titles: tuple[str, ...] = ()
 
     @property
     def local_results(self) -> tuple[ChatSearchMatch, ...]:

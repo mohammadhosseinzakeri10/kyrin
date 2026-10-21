@@ -45,7 +45,10 @@ def _same_search_box(first: ChatSearchMatch, second: ChatSearchMatch) -> bool:
 
 def _same_local_choices(first: ChatSearchChoices, second: ChatSearchChoices) -> bool:
     """Only local rows can be selected; global results may refresh independently."""
-    if len(first.local_results) != len(second.local_results):
+    if (
+        len(first.local_results) != len(second.local_results)
+        or first.grounded_titles != second.grounded_titles
+    ):
         return False
     return not any(
         not _same_search_box(left, right)
@@ -228,13 +231,23 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code=f"visible_chat_uncertain:{self._choice_status}",
             )
-        if len(choices.local_results) > 1 and self._selection is not None:
-            if self._selection.begin(request, identity, target, choices):
+        requires_selection = len(choices.local_results) > 1 or bool(
+            choices.grounded_titles
+        )
+        if requires_selection:
+            if self._selection is not None and self._selection.begin(
+                request, identity, target, choices
+            ):
                 return ActionResult(
                     request.key,
                     ActionOutcome.UNKNOWN,
                     error_code="chat_selection_pending",
                 )
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="visible_chat_uncertain:selection_unavailable",
+            )
         if len(choices.local_results) != 1:
             return ActionResult(
                 request.key,
@@ -846,8 +859,13 @@ class TelegramSavedMessagesExecutor:
                     ActionOutcome.FAILED,
                     error_code="chat_selection_cancelled",
                 )
+            verified_title = (
+                fresh.grounded_titles[number - 1]
+                if number is not None and fresh.grounded_titles
+                else target
+            )
             return self._click_result(
-                request, identity, target, match, unique_identity=False
+                request, identity, verified_title, match, unique_identity=False
             )
 
     def _settled_search_choices(

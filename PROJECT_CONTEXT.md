@@ -5248,3 +5248,19 @@ animated renderer becomes visible. GPU-to-CPU transitions explicitly destroy
 vertex buffers, vertex arrays, and shader programs while the OpenGL context
 is current; Qt's deferred widget deletion follows. GPU-to-GPU transitions
 reuse the widget and replace its point buffer with the selected mode's data.
+
+The owner reported that visible Telegram chat opening still fails when an
+English speech recognizer hears `martin` for the visible `matin` chat, renders
+a Persian name such as «ابوالفضل عبادی» in Latin phonetic words, or hears only
+the Latin portion of a mixed Latin/Persian title. The command interpreter
+continues to preserve the heard target; a separate, bounded OCR grounding
+step now proposes titles actually observed in the left chat list. It compares
+case-folded forms, close Latin spellings, and a conservative Persian-to-Latin
+phonetic approximation. Suggested rows must pass the existing title-row
+anchors, and the app asks for a numbered choice before clicking any corrected
+title. It re-reads the rows and verifies the opened header against the OCR
+title. A Latin request may trigger a focused `fas+eng` read if the English
+read cannot find a row. This is deterministic visual grounding rather than
+sending screenshots to the command-understanding model. Live Telegram tests
+for these new examples are still pending; OCR quality, transliteration, and
+the installed language data remain limiting factors.
