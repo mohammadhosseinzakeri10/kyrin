@@ -1,11 +1,26 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-20.
+> Updated: 2026-10-21.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **Visible-chat live retest and one-row behavior (2026-10-21):** The owner
+> confirmed that `matin` and `visionet` actually opened after the prior
+> correction. `visionet` was reported as `chat_unverified` because the
+> post-click header OCR did not verify it, even though the row click worked.
+> The owner moved the mouse during an `Abu lfazl` selection; the subsequent
+> `chat_target_changed` was therefore an expected pointer safety check.
+> A single stably observed matching row now opens directly, even when its
+> title was corrected from a phonetic OCR match; multiple rows still require
+> a numbered answer. The visible-row path reports `launch_accepted` after
+> the helper verifies focus, window geometry, and pointer, then dispatches
+> the click. It no longer performs a slow and sometimes misleading header
+> OCR. Search-result clicks retain their header verification. Content-free
+> warnings split slow visible OCR and Telegram control timings for the next
+> live performance check. This adjustment still awaits a restarted live test.
 
 > **Visible-chat OCR and click follow-up (2026-10-21, awaiting live retest):**
 > The owner confirmed that `matin` now opens, but reported a 12.3-second

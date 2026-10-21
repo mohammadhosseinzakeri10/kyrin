@@ -1,5 +1,6 @@
 """Permission-aware Telegram chat navigation with fresh visual verification."""
 
+import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import replace
@@ -25,6 +26,7 @@ _SEARCH_SETTLE_SECONDS = 3.0
 _SEARCH_POLL_SECONDS = 0.2
 _MAX_SEARCH_SCROLLS = 4
 _MAX_SEARCH_SCAN_SECONDS = 18.0
+_LOGGER = logging.getLogger(__name__)
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
 
 
@@ -231,9 +233,7 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code=f"visible_chat_uncertain:{self._choice_status}",
             )
-        requires_selection = len(choices.local_results) > 1 or bool(
-            choices.grounded_titles
-        )
+        requires_selection = len(choices.local_results) > 1
         if requires_selection:
             if self._selection is not None and self._selection.begin(
                 request, identity, target, choices
@@ -254,8 +254,11 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code=f"visible_chat_uncertain:{self._choice_status}",
             )
+        verified_title = (
+            choices.grounded_titles[0] if choices.grounded_titles else target
+        )
         return self._click_result(
-            request, identity, target, choices.local_results[0],
+            request, identity, verified_title, choices.local_results[0],
             unique_identity=False, visible_row=True,
         )
 
@@ -755,6 +758,7 @@ class TelegramSavedMessagesExecutor:
         unique_identity: bool = True,
         visible_row: bool = False,
     ) -> ActionResult:
+        control_started = monotonic()
         clicked = self._run_helper(
             identity,
             "visible-click" if visible_row else "click",
@@ -770,6 +774,11 @@ class TelegramSavedMessagesExecutor:
                 )
             ),
         )
+        control_seconds = monotonic() - control_started
+        if control_seconds >= 4:
+            _LOGGER.warning(
+                "Telegram chat control took %.1fs", control_seconds
+            )
         if clicked is not None and "CONTROL_SETUP_REQUIRED" in clicked.stdout:
             return ActionResult(
                 request.key,
@@ -799,7 +808,20 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
-        if not self._verifier.verify(*identity, target):
+        if visible_row:
+            # Two stable OCR reads identified the row, and the helper checked
+            # the focused window, geometry, and pointer before clicking. A
+            # header OCR can lag or render a different short title, so report
+            # dispatch honestly without waiting for that extra read.
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+        header_started = monotonic()
+        header_visible = self._verifier.verify(*identity, target)
+        header_seconds = monotonic() - header_started
+        if header_seconds >= 4:
+            _LOGGER.warning(
+                "Telegram chat header OCR took %.1fs", header_seconds
+            )
+        if not header_visible:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
             )
@@ -916,15 +938,24 @@ class TelegramSavedMessagesExecutor:
         # An uncertain full-window read may need a second, magnified left-pane
         # OCR pass. Leave time for two independent reads before a click.
         deadline = monotonic() + 10.0
+        started = monotonic()
         previous: ChatSearchChoices | None = None
         saw_choices = False
         needs_confirmation = False
+        reads = 0
         while monotonic() < deadline or needs_confirmation:
+            reads += 1
             current = self._verifier.find_visible_chat_choices(*identity, target)
             self._choice_status = self._verifier.choice_status()
             saw_choices = saw_choices or current is not None
             if current is not None and previous is not None:
                 if _same_selectable_choices(previous, current):
+                    elapsed = monotonic() - started
+                    if elapsed >= 4:
+                        _LOGGER.warning(
+                            "Telegram visible chat OCR took %.1fs across %d reads",
+                            elapsed, reads,
+                        )
                     return current
             # A slow bilingual fallback may find its first candidate just as
             # the deadline passes. Always allow one independent confirmation.
@@ -935,6 +966,12 @@ class TelegramSavedMessagesExecutor:
                 sleep(min(_SEARCH_POLL_SECONDS, remaining))
         if saw_choices:
             self._choice_status = f"unstable_{self._choice_status}"
+        elapsed = monotonic() - started
+        if elapsed >= 4:
+            _LOGGER.warning(
+                "Telegram visible chat OCR took %.1fs across %d reads",
+                elapsed, reads,
+            )
         return None
 
     def _settled_search_result(
