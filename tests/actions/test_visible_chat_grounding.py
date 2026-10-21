@@ -2,7 +2,10 @@
 
 import pytest
 
-from kyrin.actions.visible_chat_grounding import suggest_visible_chat_choices
+from kyrin.actions.visible_chat_grounding import (
+    assess_visible_chat_grounding,
+    suggest_visible_chat_choices,
+)
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
 
@@ -69,3 +72,11 @@ def test_grounding_keeps_two_similar_titles_in_screen_order() -> None:
     assert choices is not None
     assert choices.grounded_titles == ("matin", "martin")
     assert tuple(row.top for row in choices.local_results) == (200, 280)
+
+
+def test_grounding_diagnostic_reports_counts_without_chat_titles() -> None:
+    assessment = assess_visible_chat_grounding(
+        _window("Alice"), "telegram.desktop", 123, "martin"
+    )
+    assert assessment.choices is None
+    assert assessment.status == "similar_0_titles_2"

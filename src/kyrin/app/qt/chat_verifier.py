@@ -19,7 +19,7 @@ from kyrin.actions.telegram_verification import (
     telegram_view_title_visible,
     unique_search_result,
 )
-from kyrin.actions.visible_chat_grounding import suggest_visible_chat_choices
+from kyrin.actions.visible_chat_grounding import assess_visible_chat_grounding
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
@@ -268,17 +268,18 @@ class QtChatVerifier(QObject):
                     visible_status = assessment.status
                     if visible_status not in {
                         "search_field_active", "window_changed"
-                    } and (pending.visible_focused or result is not None):
-                        suggestions = suggest_visible_chat_choices(
+                    }:
+                        grounding = assess_visible_chat_grounding(
                             observation, pending.app_id, pending.pid, pending.target
                         )
+                        suggestions = grounding.choices
                         if suggestions is not None and (
                             result is None or len(suggestions.local_results) > 1
                         ):
                             result = suggestions
-                            visible_status = (
-                                f"grounded_local_{len(result.local_results)}"
-                            )
+                            visible_status = grounding.status
+                        elif result is None:
+                            visible_status = f"{visible_status}:{grounding.status}"
                 else:
                     result = search_choices(
                         observation, pending.app_id, pending.pid, pending.target

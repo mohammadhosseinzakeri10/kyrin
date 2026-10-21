@@ -259,6 +259,38 @@ def test_visible_chat_retries_focused_ocr_only_after_uncertain_full_read(
     assert reader.last_options == OcrOptions("eng", layout="block")
 
 
+def test_misheard_matin_uses_full_read_before_focused_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sparse pass can retain the row's date when the block pass loses it."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult((
+            RecognizedText("matin", TextBox(66, 872, 33, 22), 0.94),
+            RecognizedText("10/3/26", TextBox(606, 880, 45, 9), 0.96),
+            RecognizedText("fragment", TextBox(545, 842, 12, 9), 0.78),
+            RecognizedText("unreadable", TextBox(68, 904, 70, 9), 0.29),
+        ), "eng", OcrDevice.CPU, "fake"),
+        (1853, 1048),
+    )
+    reader = Reader(observation)
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    choices = _call_from_worker(
+        app,
+        lambda: verifier.find_visible_chat_choices(
+            "telegram.desktop", 123, "martin"
+        ),
+    )
+    assert choices is not None
+    assert choices.grounded_titles == ("matin",)
+    assert reader.last_region is None
+
+
 def test_visible_chat_retries_bilingual_ocr_for_romanized_persian_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -5,6 +5,7 @@ re-reads the same rows before using their coordinates.
 """
 
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from kyrin.actions.telegram_verification import (
@@ -57,6 +58,12 @@ _PERSIAN_LATIN = {
     "ئ": "y",
     "ة": "h",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class VisibleGroundingAssessment:
+    choices: ChatSearchChoices | None
+    status: str
 
 
 def _latin(value: str) -> str:
@@ -141,20 +148,37 @@ def suggest_visible_chat_choices(
     spoken_target: str,
 ) -> ChatSearchChoices | None:
     """Return at most five validated, numbered suggestions in screen order."""
+    return assess_visible_chat_grounding(
+        observation, expected_app_id, expected_pid, spoken_target
+    ).choices
+
+
+def assess_visible_chat_grounding(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    spoken_target: str,
+) -> VisibleGroundingAssessment:
+    """Diagnose candidate OCR rows without exposing titles in action logs."""
     if (
         observation.platform_app_id != expected_app_id
         or observation.process_id != expected_pid
         or observation.image_size is None
     ):
-        return None
+        return VisibleGroundingAssessment(None, "window_changed")
     candidates: list[tuple[float, str, ChatSearchMatch]] = []
-    for phrase in _title_phrases(observation):
+    phrases = _title_phrases(observation)
+    similar_count = 0
+    rejected_status: str | None = None
+    for phrase in phrases:
         if _score(spoken_target, phrase) < 0.86:
             continue
+        similar_count += 1
         assessed = assess_visible_chat_choices(
             observation, expected_app_id, expected_pid, phrase
         )
         if assessed.choices is None:
+            rejected_status = assessed.status
             continue
         for row in assessed.choices.local_results:
             score = _score(spoken_target, phrase)
@@ -172,18 +196,26 @@ def suggest_visible_chat_choices(
             elif score > candidates[same_row][0]:
                 candidates[same_row] = (score, phrase, row)
     if not candidates:
-        return None
+        status = (
+            f"similar_{similar_count}_row_{rejected_status}"
+            if rejected_status is not None
+            else f"similar_{similar_count}_titles_{len(phrases)}"
+        )
+        return VisibleGroundingAssessment(None, status)
     ranked = sorted(candidates, key=lambda item: item[0], reverse=True)
     strongest = ranked[0][0]
     ranked = [item for item in ranked if item[0] >= strongest - 0.1][:5]
     ranked.sort(key=lambda item: item[2].top)
     rows = tuple(item[2] for item in ranked)
     titles = tuple(item[1] for item in ranked)
-    return ChatSearchChoices(
-        rows[0],
-        (),
-        rows[1:],
-        global_section_verified=True,
-        source="visible",
-        grounded_titles=titles,
+    return VisibleGroundingAssessment(
+        ChatSearchChoices(
+            rows[0],
+            (),
+            rows[1:],
+            global_section_verified=True,
+            source="visible",
+            grounded_titles=titles,
+        ),
+        f"grounded_local_{len(rows)}",
     )

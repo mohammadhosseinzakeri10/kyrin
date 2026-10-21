@@ -5264,3 +5264,16 @@ read cannot find a row. This is deterministic visual grounding rather than
 sending screenshots to the command-understanding model. Live Telegram tests
 for these new examples are still pending; OCR quality, transliteration, and
 the installed language data remain limiting factors.
+
+The next live `openvisibly chat martin` still failed with
+`visible_chat_uncertain:title_not_read_matches_0`, despite the earlier
+`matin` screenshot having produced a high-confidence title and date in the
+full-window OCR pass. Inspection found that the new OCR-grounding step ran
+only after the focused retry unless the spoken title already matched exactly.
+It now evaluates validated OCR-title suggestions on the initial full-window
+read as well. A regression test replays the earlier stylized `matin` row,
+date, and unreadable Persian preview and confirms that `martin` yields a
+numbered `matin` suggestion without needing the focused pass. If future live
+reads still fail, the action diagnostic now includes content-free counts of
+candidate OCR titles and close matches or the row-anchor rejection reason.
+Owner validation of this latest correction remains pending.
