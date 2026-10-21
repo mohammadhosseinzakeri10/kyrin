@@ -31,6 +31,8 @@ def _window(title: str, *, preview_only: bool = False) -> IdentifiedWindowText:
         ("martin", "matin"),
         ("visionet", "Visonate فارسی"),
         ("visionet", "ربات فروشگاه VizoNet"),
+        ("visionate", "ربات فروشگاه VizoNet"),
+        ("visionnate", "ربات فروشگاه VizoNet"),
         ("a bullfazle a body", "ابوالفضل عبادی"),
         ("abolfazl ebadi", "ابوالفضل عبادی"),
     ],

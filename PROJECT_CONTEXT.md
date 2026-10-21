@@ -7,6 +7,28 @@
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
 
+> **Visible-chat OCR and click follow-up (2026-10-21, awaiting live retest):**
+> The owner confirmed that `matin` now opens, but reported a 12.3-second
+> speech-to-result delay. `visionnate`/`visionate` still failed with
+> `title_not_read:similar_0...best_0`; a later numbered `first` response for
+> another chat ended as `chat_input_unknown` after about 61 seconds. The
+> visible-chat reader now starts with a cropped left chat column using the
+> selected OCR engine's available text languages (one for a single-language
+> engine, multiple for a multilingual engine, up to the current four-language
+> OCR option limit). Magnified and full-window reads remain fallback paths.
+> Header verification reads the upper right header crop. Phonetic matching
+> can propose `VizoNet` for the observed STT forms, but still requires
+> numbered confirmation and a stable reread. A distinct visible-row input
+> mode permits lower chat-list rows while retaining app, geometry and pointer
+> checks; `TARGET_CHANGED` is reported distinctly. A selected Tesseract pack
+> no longer requires English to be installed. Focused synthetic tests pass.
+> A second explicit `Open visibly chat ...` command now replaces a pending
+> numbered choice instead of being consumed as an invalid answer. Portal
+> session failures during a click now have a separate content-free status.
+> Actual timing and the owner's remaining examples require a restarted live
+> run; the exact cause of the 61-second portal/input failure is not established
+> by the available transcript.
+
 > **Visible-chat speech and OCR grounding (2026-10-20):** The owner reported
 > `openvisibly chat my mother` and `open visibly chat my mother` being rejected
 > as `repeat_command`. The visible-chat grammar now accepts these two bounded

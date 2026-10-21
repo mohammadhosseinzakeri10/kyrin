@@ -16,6 +16,14 @@ PADDLE_CHOICES = (
 PADDLE_VL_CHOICE = ("paddle_vl16", "PaddleOCR-VL 1.6 · read only (slow CPU)", "vl-1.6")
 
 
+def _has_text_language(directory: Path) -> bool:
+    return any(
+        path.is_file() and not path.is_symlink()
+        and path.stem not in {"osd", "equ"}
+        for path in directory.glob("*.traineddata")
+    )
+
+
 def installed_ocr_engine(root: Path) -> OcrEngine | None:
     """Return an OCR adapter without downloading or installing anything."""
     executable = root / "tesseract-local"
@@ -23,7 +31,7 @@ def installed_ocr_engine(root: Path) -> OcrEngine | None:
     if (
         not executable.is_file()
         or not os.access(executable, os.X_OK)
-        or not (tessdata / "eng.traineddata").is_file()
+        or not _has_text_language(tessdata)
     ):
         return None
     return TesseractOcrEngine(tessdata, executable=str(executable))
@@ -48,7 +56,7 @@ def selected_ocr_engine(
         if (
             executable.is_file()
             and os.access(executable, os.X_OK)
-            and (selection.model_path / "eng.traineddata").is_file()
+            and _has_text_language(selection.model_path)
         ):
             return TesseractOcrEngine(
                 selection.model_path, executable=str(executable)

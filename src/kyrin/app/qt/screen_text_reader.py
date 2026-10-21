@@ -21,7 +21,8 @@ from kyrin.vision.text_reader import IdentifiedWindowText
 
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
 ReadRegion = Literal[
-    "left_menu", "left_chat_list", "settings_pane", "settings_header"
+    "left_menu", "left_chat_list", "left_chat_list_fast", "chat_header",
+    "settings_pane", "settings_header"
 ] | None
 
 
@@ -41,6 +42,11 @@ def _crop_png(image: bytes, region: ReadRegion) -> tuple[bytes, int] | None:
         return None
     if region == "left_menu":
         left, width, height = 0, int(source.width() * 0.3), int(source.height() * 0.65)
+    elif region == "left_chat_list_fast":
+        left, width, height = 0, int(source.width() * 0.36), source.height()
+    elif region == "chat_header":
+        left = int(source.width() * 0.3)
+        width, height = source.width() - left, int(source.height() * 0.2)
     elif region == "settings_pane":
         width = min(source.width(), max(430, int(source.width() * 0.23)))
         left, height = (source.width() - width) // 2, int(source.height() * 0.85)
@@ -139,6 +145,7 @@ class ScreenTextReader(QObject):
         self._engine = engine
         self._identity_reader = identity_reader
         self._options = options
+        self._select_supported_default()
         self._busy = False
         self._generation = 0
         self._closed = False
@@ -165,12 +172,29 @@ class ScreenTextReader(QObject):
             else frozenset()
         )
 
+    @property
+    def default_language(self) -> str:
+        return self._options.language
+
     def set_engine(self, engine: OcrEngine | None) -> None:
         """Switch after saving settings; discard any result from the old engine."""
         self._generation += 1
         self._engine = engine
+        self._select_supported_default()
         self._finish()
         self.busy_changed.emit(self._busy)
+
+    def _select_supported_default(self) -> None:
+        if self._engine is None:
+            return
+        available = self._engine.capabilities.supported_languages
+        if set(self._options.language.split("+")).issubset(available):
+            return
+        text_languages = sorted(available.difference({"osd", "equ"}))
+        if text_languages:
+            self._options = OcrOptions(
+                text_languages[0], self._options.device, self._options.layout
+            )
 
     def read(
         self, options: OcrOptions | None = None, *, region: ReadRegion = None

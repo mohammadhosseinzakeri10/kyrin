@@ -52,6 +52,7 @@ class Reader(QObject):
         self.observation = observation
         self.read_on_ui_thread = False
         self.supported_languages = frozenset({"eng", "fas"})
+        self.default_language = "eng"
         self.last_options: OcrOptions | None = None
         self.last_region: str | None = None
 
@@ -214,10 +215,10 @@ def test_visible_chat_choice_uses_current_list_without_search(
         ) is not None and choices.source == "visible",
     )
     assert reader.read_on_ui_thread
-    assert reader.last_region is None
+    assert reader.last_region == "left_chat_list_fast"
 
 
-def test_visible_chat_retries_focused_ocr_only_after_uncertain_full_read(
+def test_visible_chat_retries_magnified_ocr_after_uncertain_fast_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
@@ -255,8 +256,8 @@ def test_visible_chat_retries_focused_ocr_only_after_uncertain_full_read(
             "telegram.desktop", 123, "Spotify Downloader"
         ) is not None,
     )
-    assert reader.regions == [None, "left_chat_list"]
-    assert reader.last_options == OcrOptions("eng", layout="block")
+    assert reader.regions == ["left_chat_list_fast", "left_chat_list"]
+    assert reader.last_options == OcrOptions("eng+fas", layout="block")
 
 
 def test_misheard_matin_uses_full_read_before_focused_ocr(
@@ -288,10 +289,10 @@ def test_misheard_matin_uses_full_read_before_focused_ocr(
     )
     assert choices is not None
     assert choices.grounded_titles == ("matin",)
-    assert reader.last_region is None
+    assert reader.last_region == "left_chat_list_fast"
 
 
-def test_visible_chat_retries_bilingual_ocr_for_romanized_persian_name(
+def test_visible_chat_starts_bilingual_for_romanized_persian_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
@@ -307,7 +308,7 @@ def test_visible_chat_retries_bilingual_ocr_for_romanized_persian_name(
             self, options: OcrOptions | None = None, *, region: str | None = None
         ) -> bool:
             self.reads.append((region, options.language if options else None))
-            if options is not None and options.language == "fas+eng":
+            if options is not None and options.language == "eng+fas":
                 self.observation = IdentifiedWindowText(
                     "telegram.desktop", 123,
                     OcrResult((
@@ -316,7 +317,7 @@ def test_visible_chat_retries_bilingual_ocr_for_romanized_persian_name(
                         ),
                         RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.9),
                         RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.9),
-                    ), "fas+eng", OcrDevice.CPU, "fake"),
+                    ), "eng+fas", OcrDevice.CPU, "fake"),
                     (1600, 900),
                 )
             return super().read(options, region=region)
@@ -333,11 +334,45 @@ def test_visible_chat_retries_bilingual_ocr_for_romanized_persian_name(
     )
     assert choices is not None
     assert choices.grounded_titles == ("ابوالفضل عبادی",)
-    assert reader.reads == [
-        (None, None),
-        ("left_chat_list", "eng"),
-        ("left_chat_list", "fas+eng"),
-    ]
+    assert reader.reads == [("left_chat_list_fast", "eng+fas")]
+
+
+@pytest.mark.parametrize(
+    ("languages", "expected"),
+    [
+        (frozenset({"spa"}), "spa"),
+        (frozenset({"deu", "eng", "fas", "osd"}), "eng+deu+fas"),
+    ],
+)
+def test_visible_chat_uses_selected_ocr_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+    languages: frozenset[str],
+    expected: str,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult((
+            RecognizedText("My Mother", TextBox(70, 200, 100, 18), 0.95),
+            RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.9),
+            RecognizedText("Hello", TextBox(70, 227, 60, 15), 0.9),
+        ), "eng", OcrDevice.CPU, "fake"),
+        (1600, 900),
+    ))
+    reader.supported_languages = languages
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+    _call_from_worker(
+        app,
+        lambda: verifier.find_visible_chat_choices(
+            "telegram.desktop", 123, "My Mother"
+        ),
+    )
+    assert reader.last_region == "left_chat_list_fast"
+    assert reader.last_options == OcrOptions(expected)
 
 
 def test_exact_visible_name_still_asks_when_another_title_sounds_similar(

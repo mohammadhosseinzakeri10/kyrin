@@ -269,6 +269,7 @@ def _click_verified_box(
     menu_button: bool = False,
     menu_item: bool = False,
     settings_item: bool = False,
+    visible_row: bool = False,
 ) -> bool:
     left, top, width, height, image_width, image_height = box
     if (
@@ -291,7 +292,7 @@ def _click_verified_box(
             if menu_button
             else image_height * (0.025 if menu_item else 0.07)
             < top
-            < image_height * 0.75
+            < image_height * (0.98 if visible_row else 0.75)
         )
     ):
         return False
@@ -356,6 +357,7 @@ def main() -> int:
         "search",
         "focus-search",
         "click",
+        "visible-click",
         "menu-click",
         "settings-click",
         "escape",
@@ -368,7 +370,10 @@ def main() -> int:
         (mode == "saved" and len(sys.argv) not in (3, 4))
         or (mode == "search" and len(sys.argv) != 5)
         or (mode == "focus-search" and len(sys.argv) != 4)
-        or (mode in {"click", "menu-click", "settings-click"} and len(sys.argv) != 10)
+        or (
+            mode in {"click", "visible-click", "menu-click", "settings-click"}
+            and len(sys.argv) != 10
+        )
         or (
             mode == "view"
             and (len(sys.argv) != 5 or sys.argv[4] not in {"archive", "contacts"})
@@ -397,6 +402,7 @@ def main() -> int:
             8000,
         )
         if created is None:
+            print("CONTROL_SESSION_UNAVAILABLE:create", flush=True)
             return 1
         session = created["session_handle"]
         options = {
@@ -412,9 +418,11 @@ def main() -> int:
             8000,
         )
         if selected is None:
+            print("CONTROL_SESSION_UNAVAILABLE:devices", flush=True)
             return 1
         started = _request(connection, "Start", (session, "", {}), 30000)
         if started is None or started.get("devices", 0) & device != device:
+            print("CONTROL_SESSION_UNAVAILABLE:start", flush=True)
             return 1
         replacement = started.get("restore_token")
         stored = False
@@ -506,6 +514,7 @@ def main() -> int:
                 box,
                 menu_item=mode == "menu-click",
                 settings_item=mode == "settings-click",
+                visible_row=mode == "visible-click",
             )
             if not clicked:
                 print("TARGET_CHANGED", flush=True)

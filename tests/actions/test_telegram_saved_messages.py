@@ -443,8 +443,48 @@ def test_visible_chat_clicks_one_stable_row_without_search(
         Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12)
     ).execute(_visible_request())
     assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
-    assert [args[4] for args in calls] == ["click"]
+    assert [args[4] for args in calls] == ["visible-click"]
     assert calls[0][5:7] == ["70", "220"]
+
+
+def test_visible_chat_reports_changed_target_instead_of_unknown_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 780, 90, 18, 1600, 900),
+        (), global_section_verified=True, source="visible",
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 2, "TARGET_CHANGED", ""
+        ),
+    )
+    result = _executor(
+        Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12)
+    ).execute(_visible_request())
+    assert result.outcome is ActionOutcome.FAILED
+    assert result.error_code == "chat_target_changed"
+
+
+def test_visible_chat_reports_control_session_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choices = ChatSearchChoices(
+        ChatSearchMatch(70, 220, 90, 18, 1600, 900),
+        (), global_section_verified=True, source="visible",
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.telegram.subprocess.run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 1, "CONTROL_SESSION_UNAVAILABLE:start", ""
+        ),
+    )
+    result = _executor(
+        Delegate(), Verifier(choices=choices), (DESKTOP_ID, 12)
+    ).execute(_visible_request())
+    assert result.outcome is ActionOutcome.FAILED
+    assert result.error_code == "telegram_control_unavailable"
 
 
 def test_visible_chat_never_falls_back_to_search_on_uncertain_list(
@@ -540,7 +580,7 @@ def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
         assert calls == []
         assert selection.on_final_speech("number two")
         assert done.wait(2)
-        assert [args[4] for args in calls] == ["click"]
+        assert [args[4] for args in calls] == ["visible-click"]
         assert calls[0][6] == "280"
     finally:
         selection.cancel()
@@ -583,7 +623,7 @@ def test_grounded_visible_title_requires_number_and_verifies_ocr_title(
         assert calls == []
         assert selection.on_final_speech("first")
         assert done.wait(2)
-        assert [args[4] for args in calls] == ["click"]
+        assert [args[4] for args in calls] == ["visible-click"]
         assert verifier.calls[-1] == (DESKTOP_ID, 12, "matin")
     finally:
         selection.cancel()

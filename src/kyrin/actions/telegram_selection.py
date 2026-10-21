@@ -225,6 +225,21 @@ class TelegramChatSelection:
                 self._feedback(pending.request, "chat_selection_cancelled")
             return True
 
+        # A fresh, explicit chat command replaces the unanswered choice. Let
+        # the command runtime interpret it instead of treating it as a number.
+        if answer.startswith((
+            "open chat ", "open visible chat ", "open visibly chat ",
+            "openvisibly chat ", "open my ",
+        )):
+            with self._lock:
+                replaced = self._pending == pending
+                if replaced:
+                    self._pending = None
+                    self._cancel_timer_locked()
+            if replaced:
+                self._feedback(pending.request, "chat_selection_cancelled")
+            return False
+
         if answer in {
             "next",
             "next page",

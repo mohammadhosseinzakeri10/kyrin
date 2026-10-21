@@ -105,8 +105,18 @@ def _score(spoken: str, visible: str) -> float:
     cross_script_pronunciation = (
         mixed_or_persian and literal >= 0.68 and phonetic >= 0.92
     )
+    # STT may insert vowels and duplicate a consonant in a short proper name
+    # ("visionnate" for "VizoNet"). This only proposes an OCR-grounded row;
+    # the caller still asks for a numbered choice and rechecks the row.
+    short_name_pronunciation = (
+        len(_consonants(spoken)) >= 4
+        and len(_consonants(visible)) >= 4
+        and abs(len(heard) - len(label)) <= 3
+        and literal >= 0.58
+        and phonetic >= 0.88
+    )
     if len(_consonants(spoken)) >= 4 and (
-        close_pronunciation or cross_script_pronunciation
+        close_pronunciation or cross_script_pronunciation or short_name_pronunciation
     ):
         return 0.80 + 0.1 * phonetic
     return 0.0

@@ -73,11 +73,17 @@ _TEXT: dict[str, dict[str, str]] = {
             "برای بازکردن چت، در تنظیمات Desktop Actions دسترسی کنترل Telegram "
             "را فعال و از همان‌جا تأیید کنید."
         ),
+        "telegram_control_unavailable": (
+            "اتصال کنترل تلگرام برقرار نشد؛ دسترسی Desktop Actions را بررسی کنید."
+        ),
         "screen_access_required": "برای بررسی چت، دسترسی صفحه را در برنامه فعال کنید.",
         "telegram_not_active": (
             "تلگرام فعال نیست؛ لطفاً آن را جلو بیاورید و دوباره بگویید."
         ),
         "telegram_focus_changed": "پنجرهٔ فعال تغییر کرد؛ فرمان چت متوقف شد.",
+        "chat_target_changed": (
+            "جای ردیف چت یا اندازهٔ پنجره تغییر کرد؛ دوباره تلاش کنید."
+        ),
         "scroll_focus_changed": "پنجرهٔ فعال تغییر کرد؛ اسکرول متوقف شد.",
         "scroll_control_setup_required": (
             "برای اسکرول، دسترسی آن را در Desktop Actions فعال و تنظیم کنید."
@@ -213,12 +219,18 @@ _TEXT: dict[str, dict[str, str]] = {
         "telegram_control_setup_required": (
             "Set up Telegram control access in Desktop Actions before opening chats."
         ),
+        "telegram_control_unavailable": (
+            "Telegram control could not connect. Check Desktop Actions access."
+        ),
         "screen_access_required": "Enable Screen Access in KYRIN to verify the chat.",
         "telegram_not_active": (
             "Telegram is not active. Bring it forward and try again."
         ),
         "telegram_focus_changed": (
             "The active window changed, so I stopped the chat command."
+        ),
+        "chat_target_changed": (
+            "The chat row or window changed before the click. Please try again."
         ),
         "scroll_focus_changed": "The active window changed, so I stopped scrolling.",
         "scroll_control_setup_required": (
@@ -395,6 +407,7 @@ class ResponsePresenter:
                 "screen_access_required",
                 "telegram_not_active",
                 "telegram_focus_changed",
+                "chat_target_changed",
                 "chat_unverified",
                 "telegram_menu_uncertain",
                 "telegram_setting_not_found",
@@ -407,6 +420,7 @@ class ResponsePresenter:
                 "chat_selection_expired",
                 "chat_selection_cancelled",
                 "telegram_control_setup_required",
+                "telegram_control_unavailable",
                 "scroll_focus_changed",
                 "scroll_control_setup_required",
                 "scroll_unavailable",

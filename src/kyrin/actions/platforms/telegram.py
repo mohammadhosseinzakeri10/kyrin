@@ -255,7 +255,8 @@ class TelegramSavedMessagesExecutor:
                 error_code=f"visible_chat_uncertain:{self._choice_status}",
             )
         return self._click_result(
-            request, identity, target, choices.local_results[0], unique_identity=False
+            request, identity, target, choices.local_results[0],
+            unique_identity=False, visible_row=True,
         )
 
     def _telegram_search(
@@ -752,10 +753,11 @@ class TelegramSavedMessagesExecutor:
         match: ChatSearchMatch,
         *,
         unique_identity: bool = True,
+        visible_row: bool = False,
     ) -> ActionResult:
         clicked = self._run_helper(
             identity,
-            "click",
+            "visible-click" if visible_row else "click",
             *(
                 str(value)
                 for value in (
@@ -773,6 +775,21 @@ class TelegramSavedMessagesExecutor:
                 request.key,
                 ActionOutcome.FAILED,
                 error_code="telegram_control_setup_required",
+            )
+        if clicked is not None and "CONTROL_SESSION_UNAVAILABLE" in clicked.stdout:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED,
+                error_code="telegram_control_unavailable",
+            )
+        if clicked is not None and "FOCUS_CHANGED" in clicked.stdout:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED,
+                error_code="telegram_focus_changed",
+            )
+        if clicked is not None and "TARGET_CHANGED" in clicked.stdout:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED,
+                error_code="chat_target_changed",
             )
         if (
             clicked is None
@@ -865,7 +882,8 @@ class TelegramSavedMessagesExecutor:
                 else target
             )
             return self._click_result(
-                request, identity, verified_title, match, unique_identity=False
+                request, identity, verified_title, match,
+                unique_identity=False, visible_row=shown.source == "visible",
             )
 
     def _settled_search_choices(
@@ -900,13 +918,17 @@ class TelegramSavedMessagesExecutor:
         deadline = monotonic() + 10.0
         previous: ChatSearchChoices | None = None
         saw_choices = False
-        while monotonic() < deadline:
+        needs_confirmation = False
+        while monotonic() < deadline or needs_confirmation:
             current = self._verifier.find_visible_chat_choices(*identity, target)
             self._choice_status = self._verifier.choice_status()
             saw_choices = saw_choices or current is not None
             if current is not None and previous is not None:
                 if _same_selectable_choices(previous, current):
                     return current
+            # A slow bilingual fallback may find its first candidate just as
+            # the deadline passes. Always allow one independent confirmation.
+            needs_confirmation = current is not None and previous is None
             previous = current
             remaining = deadline - monotonic()
             if remaining > 0:

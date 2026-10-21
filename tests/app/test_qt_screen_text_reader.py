@@ -198,6 +198,29 @@ def test_one_read_can_override_default_ocr_language(
         reader.close()
 
 
+def test_single_language_engine_becomes_default_after_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _app(monkeypatch)
+
+    class SpanishOcr(FakeOcr):
+        @property
+        def capabilities(self) -> OcrCapabilities:
+            return OcrCapabilities(
+                frozenset({OcrDevice.CPU}), frozenset({"spa"})
+            )
+
+    reader = ScreenTextReader(
+        cast(ScreenAccess, FakeAccess()), FakeOcr(),
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id), OcrOptions("eng"),
+    )
+    try:
+        reader.set_engine(SpanishOcr(expected_language="spa"))
+        assert reader.default_language == "spa"
+    finally:
+        reader.close()
+
+
 def test_menu_region_ocr_keeps_full_window_geometry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -285,6 +308,39 @@ def test_visible_list_region_magnifies_and_restores_window_coordinates(
         assert results[0].result.spans[0].box.width == 15
     finally:
         reader.close()
+
+
+def test_fast_list_and_chat_header_crops_keep_window_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _app(monkeypatch)
+    image = _valid_png()
+    access = FakeAccess()
+    access.image = IdentifiedWindowImage(
+        _IMAGE.platform_app_id, _IMAGE.process_id, image
+    )
+    for region, expected_size, expected_left in (
+        ("left_chat_list_fast", (360, 800), 0),
+        ("chat_header", (700, 160), 300),
+    ):
+        focused = _crop_png(image, region)
+        assert focused is not None
+        assert QImage.fromData(focused[0]).size().toTuple() == expected_size
+        reader = ScreenTextReader(
+            cast(ScreenAccess, access),
+            FakeOcr(expected_image=focused[0]),
+            lambda: (_IMAGE.platform_app_id, _IMAGE.process_id),
+            OcrOptions("eng"),
+        )
+        results: list[IdentifiedWindowText] = []
+        reader.completed.connect(results.append)
+        try:
+            assert reader.read(region=region)
+            _until(app, lambda results=results: bool(results))
+            assert results[0].image_size == (1000, 800)
+            assert results[0].result.spans[0].box.left == expected_left + 1
+        finally:
+            reader.close()
 
 
 def test_revocation_discards_late_ocr_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -405,3 +461,21 @@ def test_selected_tesseract_language_pack_uses_installed_executable(
 
     assert engine is not None
     assert engine.capabilities.supported_languages == frozenset({"eng", "fas"})
+
+
+def test_selected_single_language_tesseract_does_not_require_english(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "installed"
+    root.mkdir()
+    executable = root / "tesseract-local"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o700)
+    tessdata = tmp_path / "spanish"
+    tessdata.mkdir()
+    (tessdata / "spa.traineddata").write_bytes(b"model")
+
+    engine = selected_ocr_engine(OcrSelection("tesseract", tessdata), root)
+
+    assert engine is not None
+    assert engine.capabilities.supported_languages == frozenset({"spa"})

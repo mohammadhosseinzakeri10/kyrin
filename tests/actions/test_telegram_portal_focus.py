@@ -228,6 +228,30 @@ def test_pointer_accepts_first_chat_row_but_rejects_search_field(
     ]
 
 
+def test_visible_row_can_be_clicked_near_bottom_but_search_result_cannot(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    observations = iter([
+        (*expected, 100, 50, 1600, 900, 500, 300),
+        (*expected, 100, 50, 1600, 900, 215, 812),
+    ])
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(observations))
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    helper.GLib.Variant = lambda signature, value: (signature, value)
+    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
+
+    class Bus:
+        def call_sync(self, *_args: object) -> None:
+            return None
+
+    box = (70, 750, 90, 24, 1600, 900)
+    assert not helper._click_verified_box(Bus(), "/session", expected, box)
+    assert helper._click_verified_box(
+        Bus(), "/session", expected, box, visible_row=True
+    )
+
+
 def test_pointer_does_not_click_when_geometry_differs(
     helper: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:

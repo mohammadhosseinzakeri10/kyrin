@@ -35,6 +35,7 @@ class _Request:
     search: bool = False
     choices: bool = False
     visible_choices: bool = False
+    visible_full: bool = False
     visible_focused: bool = False
     visible_bilingual: bool = False
     left_label: bool = False
@@ -109,6 +110,24 @@ class QtChatVerifier(QObject):
     def choice_status(self) -> str:
         """A content-free reason for the latest search-choice read."""
         return self._last_choice_status
+
+    def _visible_languages(self) -> tuple[str, str | None]:
+        """Use the selected engine's text languages, never a fixed locale pair."""
+        available = sorted(
+            self._reader.supported_languages.difference({"osd", "equ"})
+        )
+        preferred = [
+            code for code in self._reader.default_language.split("+")
+            if code in available
+        ]
+        # A single pass is limited to four installed text languages. Keep the
+        # selected default first, then add other available languages.
+        profile = list(dict.fromkeys([*preferred, *available]))[:4]
+        if not profile:
+            profile = available[:1]
+        primary = "+".join(profile)
+        alternate = preferred[0] if preferred and preferred[0] != primary else None
+        return primary, alternate
 
     def find_left_label(
         self, app_id: str, pid: int, label: str, *, menu: bool = False
@@ -198,6 +217,7 @@ class QtChatVerifier(QObject):
             request.target is not None
             and any("\u0600" <= char <= "\u06ff" for char in request.target)
             and language is None
+            and not request.visible_choices
         ):
             self._finish(False)
             return
@@ -209,6 +229,14 @@ class QtChatVerifier(QObject):
             request.view_title and request.target == "Settings"
         ):
             started = self._reader.read(language, region="settings_pane")
+        elif request.visible_choices:
+            started = self._reader.read(
+                OcrOptions(self._visible_languages()[0]),
+                region="left_chat_list_fast",
+            )
+        elif not any((request.search, request.choices, request.view_title,
+                      request.search_query, request.left_label)):
+            started = self._reader.read(language, region="chat_header")
         else:
             started = (
                 self._reader.read() if language is None else self._reader.read(language)
@@ -320,21 +348,16 @@ class QtChatVerifier(QObject):
                     and result is None
                     and visible_status not in {"search_field_active", "window_changed"}
                 ):
-                    target_is_persian = any(
-                        "\u0600" <= char <= "\u06ff" for char in pending.target
-                    )
+                    primary, alternate = self._visible_languages()
                     if not pending.visible_focused:
                         pending.visible_focused = True
-                        language = "fas+eng" if target_is_persian else "eng"
+                        language = primary
                     elif (
                         not pending.visible_bilingual
-                        and not target_is_persian
-                        and {"fas", "eng"}.issubset(
-                            self._reader.supported_languages
-                        )
+                        and alternate is not None
                     ):
                         pending.visible_bilingual = True
-                        language = "fas+eng"
+                        language = alternate
                     else:
                         language = None
                     if language is not None and self._reader.read(
@@ -342,6 +365,12 @@ class QtChatVerifier(QObject):
                         region="left_chat_list",
                     ):
                         return
+                    if not pending.visible_full:
+                        pending.visible_full = True
+                        if self._reader.read(
+                            OcrOptions(primary)
+                        ):
+                            return
             elif pending.search:
                 assert pending.target is not None
                 result = unique_search_result(

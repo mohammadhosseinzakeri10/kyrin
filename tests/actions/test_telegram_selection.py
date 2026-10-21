@@ -46,6 +46,19 @@ def test_invalid_answer_repeats_prompt_without_clicking() -> None:
     assert calls == []
 
 
+def test_new_visible_chat_command_replaces_pending_numbered_choice() -> None:
+    prompts: list[ResponseRequest] = []
+    feedback = []
+    flow = TelegramChatSelection(prompts.append, feedback.append)
+    flow.set_completion(lambda *args: pytest.fail("old chat must not be opened"))
+    assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", _choices())
+
+    assert not flow.on_final_speech("openvisibly chat shop vimes")
+    assert [item.error_code for item in feedback] == ["chat_selection_cancelled"]
+    assert len(prompts) == 1
+    assert not flow.on_final_speech("first")
+
+
 def test_duplicate_chat_choice_requires_a_valid_number() -> None:
     prompts: list[ResponseRequest] = []
     calls: list[int | None] = []
