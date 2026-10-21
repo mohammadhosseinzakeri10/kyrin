@@ -5134,3 +5134,117 @@ and returning to CPU releases the extra objects. GPU initialization failure
 also restores the CPU count. The denser text point sampling remains in both
 renderers. The earlier 44,999-sample state was an intermediate experiment,
 not a separate user-selectable mode.
+
+On 2026-10-20, the owner requested two GPU-only density choices. At that stage the
+2D options are CPU (29,999 emblem points), GPU Light (29,999), and GPU Heavy
+(119,999). The previous saved `gpu` choice maps to Light. The first 59,999
+packaged samples remain in their earlier order; another 60,000 reproducible
+samples fill nearby gaps, weighted toward the luminous logo. The additional
+samples are stored separately and loaded only for Heavy. The heavy GPU
+draw uses lower per-point opacity so overlap does not wash the blue and purple
+artwork into bright white, while text keeps its original opacity and point
+sampling. A 1000×600 Wayland/OpenGL preview rendered 31,755 total points in
+Light and 121,755 in Heavy, including point-based text. CPU mode and the
+animation pause behavior were unchanged.
+
+The owner then observed that the 120k heavy option mostly made existing
+points brighter while leaving visible gaps. They requested 30k/60k/150k GPU
+Light/Medium/Heavy choices and a shared starting cloud for logo and text
+particles. Heavy now adds 90,000 points sampled directly from colored pixels
+of `kyrin-logo-original.png`; candidates are accepted in passes that fill
+larger gaps before smaller ones. Medium uses the pre-existing 59,999 samples.
+Text remains point-rendered, and its start positions and timing now match the
+emblem's uniform scene-wide scatter, so white text points and colored emblem
+points start mixed before moving to their separate final shapes. In a
+1000×600 Wayland/OpenGL preview, Medium drew 61,755 total points and Heavy
+drew 151,755, including 1,756 text points. The CPU option remains 29,999
+emblem points.
+
+The owner then corrected the artwork source: the intended reference is the
+1254×1254 cosmic image they attached, with fine stars and extended blue and
+purple energy halos, not the transparent `kyrin-logo-original.png` used by
+the earlier heavy-point generator. The attached image is preserved as
+`src/kyrin/app/qt/assets/dashboard_reference.png`. All renderer modes now
+sample their moving points directly from this one reference. CPU and GPU Light
+each keep exactly 29,999 points, GPU Medium uses 59,999, and GPU Heavy uses a
+768×768 grid (589,824). GPU points keep the reference's sampled RGB instead
+of the earlier coarse palette. The earlier synthetic halo and central-hole
+shapes were removed so they cannot change the approved silhouette. Text is
+still drawn as moving points in both CPU and GPU modes. The obsolete JSON
+particle sets and their generator were removed. A 1000×600 Wayland/OpenGL
+preview showed the approved cosmic silhouette with fine details in Heavy;
+the CPU preview showed the same image source at its fixed lower density.
+
+The owner found CPU, GPU Light, and GPU Medium too dim and soft, while GPU
+Heavy looked better but could be brighter. The cause was smooth downsampling
+of the 1254×1254 reference to 174×174 or 245×245 before point selection,
+which diluted thin light trails and stars. GPU point radius also shrank as
+the square root of density, leaving roughly the same screen coverage in
+Light and Medium; the fragment shader's broad fade further reduced brightness.
+The low-density modes now blend each grid cell's averaged color with its
+brightest source pixel, preserving isolated bright stars. CPU still uses
+29,999 particles with slightly wider pens. GPU uses a tighter point-edge fade
+and improved coverage, especially in Medium. Heavy keeps its 768×768 grid
+and applies a mild color gamma of 0.96. A 1000×600 screenshot diagnostic of
+source-bright regions measured output mean brightness of about 192 CPU,
+163 GPU Light, 167 GPU Medium, and 176 GPU Heavy after the change. On the
+owner's machine, five offscreen CPU grabs averaged about 38 ms; initial CPU
+sample preparation took about 326 ms. These are snapshots, not cross-device
+frame-rate measurements.
+
+The owner still found the three limited modes hazy, and requested that minor
+background details be removed there while keeping CPU at 29,999 points. CPU
+and GPU Light now sample 29,999, and GPU Medium 59,999, from brightness bands
+of the approved reference: 60% of points in bright features, 25% in midtone
+features, and 15% in faint visible features. Pixels below peak RGB 12 are
+omitted in these modes. This preserves the main blue/purple trails and ring
+without spending their point budgets on dark background pixels. GPU Heavy now
+uses exactly 800,000 samples from an 895×895 grid of the full reference. A
+1000×600 Wayland/OpenGL preview showed a more legible logo in the limited modes
+and preserved the full artwork in Heavy. Text and emblem GPU data now use
+one vertex buffer with text points placed before emblem points. This keeps
+the text addressable at the front of the buffer even with 800,000 emblem
+vertices. Direct OpenGL framebuffer previews after switching GPU modes showed
+the point-based text and emblem together.
+
+The owner approved GPU Heavy at 800,000 points but preferred the earlier
+locally committed dashboard for CPU, GPU Light, and GPU Medium. Those three
+modes now load the original 59,999-sample `dashboard_particles.json` from
+commit `953e4ed`: CPU and GPU Light use its first 29,999 points, Medium all
+59,999. They also restore the original quantized palette, point sizing,
+blue/purple background halos, dark center, and text scatter/timing. Heavy
+continues to use the approved `dashboard_reference.png` at exactly 800,000
+points, with its previous color sampling, shader edge, and mixed text cloud.
+Visual Qt/OpenGL previews on the owner's machine showed both variants in the
+same dashboard after switching modes.
+
+The owner noticed a square/checkerboard texture when viewing GPU Heavy up
+close and requested a fix scoped only to Heavy, while keeping the emblem
+crisp. The 895×895 sampling grid now uses deterministic within-cell jitter
+for positions; sampled RGB and the 800,000 count remain unchanged. Heavy
+points have a 1.5-pixel minimum size and reduce alpha as they converge, so
+the formed image blends away regular pixel rows without dimming the dispersed
+particles. Text keeps full opacity. CPU, GPU Light, and GPU Medium retain
+their committed sampling and rendering. A 1000×600 local OpenGL preview
+showed reduced regularity with similar mean/max-channel luminance in the
+emblem region (about 109 before and 113 after); the fine cyan/magenta
+filaments and stars remained visible.
+
+The owner then observed that CPU, GPU Light, and GPU Medium still appeared
+to form the emblem before the welcome text, with the two groups scattered in
+different parts of the dashboard. Their text points now start uniformly
+across the full scene with the same delay range and formation duration as
+the emblem points. The CPU right-side shade fades in with formation so it
+does not hide scattered emblem colors. GPU Heavy's particle data and render
+settings remain unchanged.
+
+The owner then requested resource cleanup when switching between GPU and CPU
+and a genuine static-image mode when dashboard animation is disabled. The
+dashboard now composes the approved reference image with the current
+translated welcome copy into one cached raster image, invalidated on resize
+or translation. Disabled animation stops its timer, releases all point data,
+and destroys any GPU widget resources. Point data is loaded lazily when an
+animated renderer becomes visible. GPU-to-CPU transitions explicitly destroy
+vertex buffers, vertex arrays, and shader programs while the OpenGL context
+is current; Qt's deferred widget deletion follows. GPU-to-GPU transitions
+reuse the widget and replace its point buffer with the selected mode's data.

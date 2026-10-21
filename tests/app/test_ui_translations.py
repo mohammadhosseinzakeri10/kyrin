@@ -34,9 +34,13 @@ def test_import_and_select_complete_language_pack(tmp_path: Path) -> None:
 
 def test_dashboard_preferences_round_trip_and_legacy_file(tmp_path: Path) -> None:
     store = UiTranslations(tmp_path / "ui")
-    store.save(UiPreferences("fa", False, "gpu"))
+    store.save(UiPreferences("fa", False, "gpu_heavy"))
     assert UiTranslations(tmp_path / "ui").preferences == UiPreferences(
-        "fa", False, "gpu"
+        "fa", False, "gpu_heavy"
+    )
+    store.save(UiPreferences("fa", True, "gpu_medium"))
+    assert UiTranslations(tmp_path / "ui").preferences == UiPreferences(
+        "fa", True, "gpu_medium"
     )
     (tmp_path / "ui" / "ui.json").write_text(
         json.dumps({"locale": "fa", "dashboard_renderer": "gpu3d"}),

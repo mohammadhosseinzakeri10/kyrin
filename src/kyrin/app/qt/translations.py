@@ -265,6 +265,10 @@ ENGLISH: dict[str, str] = {
     "interface_language": "Interface language",
     "dashboard_animation": "Animate dashboard particles",
     "dashboard_renderer": "Dashboard renderer",
+    "dashboard_renderer_cpu": "CPU (about 30,000 points)",
+    "dashboard_renderer_gpu_light": "GPU Light (about 30,000 points)",
+    "dashboard_renderer_gpu_medium": "GPU Medium (about 60,000 points)",
+    "dashboard_renderer_gpu_heavy": "GPU Heavy (800,000 points)",
     "dashboard_gpu_fallback": "GPU rendering is unavailable; using CPU rendering.",
     "system_language": "System language",
     "power_off_button": "Power off…",
@@ -415,7 +419,7 @@ class UiTranslations:
         if (
             not isinstance(animation, bool)
             or not isinstance(renderer, str)
-            or renderer not in {"cpu", "gpu"}
+            or renderer not in {"cpu", "gpu", "gpu_medium", "gpu_heavy"}
         ):
             raise TranslationError("Invalid dashboard preferences")
         return UiPreferences(locale, animation, renderer)
@@ -545,7 +549,8 @@ class UiTranslations:
         if (
             not isinstance(preferences.dashboard_animation_enabled, bool)
             or not isinstance(preferences.dashboard_renderer, str)
-            or preferences.dashboard_renderer not in {"cpu", "gpu"}
+            or preferences.dashboard_renderer
+            not in {"cpu", "gpu", "gpu_medium", "gpu_heavy"}
         ):
             raise TranslationError("Invalid dashboard preferences")
         active_locale = self._resolve_locale(preferences.locale)

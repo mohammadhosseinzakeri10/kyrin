@@ -283,23 +283,33 @@ Desktop Actions, and Preferences pages. The owner selected the fifth dark cosmic
 Dashboard artwork. After a real-time 3D prototype was reviewed, the owner
 chose a static dashboard to avoid its graphics and package cost at that time.
 The owner later replaced that PNG with a looping particle scene based on their
-selected black-hole K artwork. About 60,000 colored emblem points are packaged
-as JSON; CPU renders the original 30,000 and GPU renders all 60,000. The
-original dashboard PNG is no longer
-loaded or packaged. Translated welcome text is also drawn as points and remains
-point-based while assembled. Text sampling was also made denser for the
-current 2D design. The scene forms,
+selected black-hole K artwork. CPU and GPU Light use the 29,999-point subset
+of the committed `dashboard_particles.json`; GPU Medium uses all 59,999
+points. These modes restore the committed color palette and the original
+blue/purple halo treatment. GPU Heavy alone samples 800,000 points from the
+approved 1254×1254 cosmic reference image, preserving its small stars and
+faint energy trails. Its sample positions have a fixed small jitter and its
+formed points blend softly to reduce visible grid patterns at close range.
+During animation, neither reference is drawn as a dashboard image.
+Translated welcome text remains point-based while assembled. In every mode,
+text and emblem points begin across the full dashboard and share the same
+formation timing. The scene forms,
 pauses, disperses, and repeats
 while the dashboard is visible; its timer pauses when the page is hidden.
 UI preferences save whether this cycle runs and which 2D renderer is selected:
-CPU or GPU. The owner tried several interactive 3D prototypes and chose to
+CPU, GPU Light, GPU Medium, or GPU Heavy. The owner tried several interactive
+3D prototypes and chose to
 remove that feature for the current version. A previously saved 3D renderer
-choice loads as the 2D GPU choice. Disabling the cycle holds the completed
-point artwork and
-stops its timer. The GPU path uses the OpenGL widgets included with the
-existing `PySide6_Essentials` dependency: its vertex shader moves the points
-and its fragment shader paints their colors, while a separate fragment shader
-draws the blue and purple background halos. If OpenGL cannot initialize,
+choice loads as the 2D GPU choice. Disabling the cycle stops its timer,
+discards particle data, and shows one cached raster composition of the
+approved logo image and the current translated copy. Resizing or translating
+the dashboard rebuilds that image; reenabling animation reloads the selected
+particle renderer. Switching from GPU to CPU or the static image explicitly
+destroys the OpenGL buffers, vertex arrays, and programs with the context
+current, before deleting the GPU widget. The GPU path uses the OpenGL widgets
+included with the existing `PySide6_Essentials` dependency: its vertex shader
+moves the points
+and its fragment shader paints their sampled colors. If OpenGL cannot initialize,
 the dashboard falls back to CPU and reports that choice in the UI. The GPU
 path was rendered on the owner's Wayland machine; performance across other
 drivers remains unmeasured.

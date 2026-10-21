@@ -469,6 +469,13 @@ class ControlWindow(QWidget):
             button.setText(t(key))
         for key, label in self._labels.items():
             label.setText(t(key))
+        for index, key in enumerate((
+            "dashboard_renderer_cpu",
+            "dashboard_renderer_gpu_light",
+            "dashboard_renderer_gpu_medium",
+            "dashboard_renderer_gpu_heavy",
+        )):
+            self.dashboard_renderer_combo.setItemText(index, t(key))
         self.cosmic_dashboard.refresh_scene()
         self.feedback_label.setText(t("feedback_default"))
         self.browse_button.setText(t("browse"))

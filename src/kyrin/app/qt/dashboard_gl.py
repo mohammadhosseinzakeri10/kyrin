@@ -2,6 +2,7 @@
 
 from array import array
 
+import shiboken6
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtOpenGL import (
@@ -12,7 +13,11 @@ from PySide6.QtOpenGL import (
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from kyrin.app.qt.dashboard import CosmicDashboard
+from kyrin.app.qt.dashboard import (
+    GPU_HEAVY_EMBLEM_POINTS,
+    GPU_MEDIUM_EMBLEM_POINTS,
+    CosmicDashboard,
+)
 
 _VERTEX = """
 #ifdef GL_ES
@@ -25,7 +30,9 @@ attribute float delayMs;
 attribute float durationMs;
 attribute float pointSize;
 uniform float phaseMs;
+uniform float colorGamma;
 varying vec3 color;
+varying float formation;
 float ease(float value) {
     float t = clamp(value, 0.0, 1.0);
     return t * t * (3.0 - 2.0 * t);
@@ -45,7 +52,8 @@ void main() {
     gl_Position = vec4(position.x * 2.0 - 1.0,
                        1.0 - position.y * 2.0, 0.0, 1.0);
     gl_PointSize = pointSize;
-    color = pointColor * (0.20 + 0.80 * amount);
+    color = pow(pointColor, vec3(colorGamma)) * (0.20 + 0.80 * amount);
+    formation = amount;
 }
 """
 
@@ -54,9 +62,18 @@ _FRAGMENT = """
 precision mediump float;
 #endif
 varying vec3 color;
+varying float formation;
+uniform float pointOpacity;
+uniform float legacyMode;
 void main() {
     float distanceFromCenter = length(gl_PointCoord - vec2(0.5));
-    float alpha = 1.0 - smoothstep(0.18, 0.5, distanceFromCenter);
+    float alpha;
+    if (legacyMode < 0.5) {
+        alpha = 1.0 - smoothstep(0.35, 0.5, distanceFromCenter);
+    } else {
+        alpha = 1.0 - smoothstep(0.18, 0.5, distanceFromCenter);
+    }
+    alpha *= mix(1.0, pointOpacity, formation);
     gl_FragColor = vec4(color, alpha);
 }
 """
@@ -81,7 +98,12 @@ uniform float leftEdge;
 uniform float topEdge;
 uniform float emblemSide;
 uniform float strength;
+uniform float legacyMode;
 void main() {
+    if (legacyMode < 0.5) {
+        gl_FragColor = vec4(0.0, 0.0, 0.016, 1.0);
+        return;
+    }
     vec2 pixel = uv * vec2(screenWidth, screenHeight);
     vec2 blueCenter = vec2(leftEdge + emblemSide * 0.34,
                            topEdge + emblemSide * 0.43);
@@ -160,8 +182,10 @@ class DashboardGL(QOpenGLWidget):
         background_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         background_vao = QOpenGLVertexArrayObject(self)
         if not (
-            buffer.create() and vao.create()
-            and background_buffer.create() and background_vao.create()
+            buffer.create()
+            and vao.create()
+            and background_buffer.create()
+            and background_vao.create()
         ):
             QTimer.singleShot(0, self._fallback)
             return
@@ -177,13 +201,53 @@ class DashboardGL(QOpenGLWidget):
         self._background_buffer = background_buffer
         self._background_vao = background_vao
         self.ready = True
+        self.context().aboutToBeDestroyed.connect(self.cleanup_gl)
+
+    def cleanup_gl(self) -> None:
+        """Delete GL objects while their owning context is current."""
+        context = self.context()
+        if context is None or not context.isValid():
+            return
+        self.makeCurrent()
+        try:
+            for vao in (self._vao, self._background_vao):
+                if vao is not None and vao.isCreated():
+                    vao.destroy()
+            for buffer in (self._buffer, self._background_buffer):
+                if buffer is not None and buffer.isCreated():
+                    buffer.destroy()
+            for program in (self._program, self._background_program):
+                if program is not None:
+                    shiboken6.delete(program)
+        finally:
+            self.doneCurrent()
+        self._vao = self._background_vao = None
+        self._buffer = self._background_buffer = None
+        self._program = self._background_program = None
+        self._signature = None
+        self._point_count = 0
+        self.ready = False
 
     def _fallback(self) -> None:
+        if (
+            self.dashboard._gpu_layer is not self
+            or not self.dashboard._animation_enabled
+        ):
+            return
         self.ready = False
         self.hide()
         self.dashboard._use_cpu_particles()
+        self.dashboard._renderer = "cpu"
         self.dashboard.update()
         self.failed.emit()
+        QTimer.singleShot(
+            0,
+            lambda: (
+                self.dashboard._release_gpu_layer()
+                if self.dashboard._gpu_layer is self
+                else None
+            ),
+        )
 
     def _upload_points(self) -> None:
         dashboard = self.dashboard
@@ -191,31 +255,73 @@ class DashboardGL(QOpenGLWidget):
         height = max(1, dashboard.height())
         text_points = dashboard._text_points()
         signature: tuple[object, ...] = (
-            width, height, dashboard._text_signature, len(dashboard._particles)
+            width,
+            height,
+            dashboard._text_signature,
+            len(dashboard._particles),
         )
         if signature == self._signature:
             return
         side = min(height * 0.94, width * 0.52)
         left = max(12.0, (width * 0.52 - side) / 2)
         top = (height - side) / 2
+        heavy = len(dashboard._particles) == GPU_HEAVY_EMBLEM_POINTS
+        density_scale = (
+            1.3 if len(dashboard._particles) == GPU_MEDIUM_EMBLEM_POINTS else 1.25
+        )
+        point_size = (
+            max(1.5, side / len(dashboard._particles) ** 0.5 * density_scale)
+            if heavy
+            else 2.5
+        )
         data = array("f")
+
+        def append_text() -> None:
+            for text_dot in text_points:
+                data.extend(
+                    (
+                        text_dot.start_x,
+                        text_dot.start_y,
+                        text_dot.x / width,
+                        text_dot.y / height,
+                        text_dot.color.redF(),
+                        text_dot.color.greenF(),
+                        text_dot.color.blueF(),
+                        float(text_dot.delay_ms),
+                        2700.0,
+                        2.8,
+                    )
+                )
+
+        if heavy:
+            append_text()
         for dot in dashboard._particles:
-            color = dashboard._palette[dot.palette_index][0]
-            data.extend((
-                dot.start_x, dot.start_y,
-                (left + dot.x * side) / width,
-                (top + dot.y * side) / height,
-                color.redF(), color.greenF(), color.blueF(),
-                float(dot.delay_ms), 2700.0, 2.5,
-            ))
-        for text_dot in text_points:
-            data.extend((
-                text_dot.start_x, text_dot.start_y,
-                text_dot.x / width, text_dot.y / height,
-                text_dot.color.redF(), text_dot.color.greenF(),
-                text_dot.color.blueF(),
-                float(text_dot.delay_ms), 1200.0, 2.8,
-            ))
+            if heavy:
+                rgb = dot.color_rgb
+                red, green, blue = (
+                    (rgb >> 16) / 255,
+                    ((rgb >> 8) & 255) / 255,
+                    (rgb & 255) / 255,
+                )
+            else:
+                color = dashboard._palette[dot.palette_index][0]
+                red, green, blue = color.redF(), color.greenF(), color.blueF()
+            data.extend(
+                (
+                    dot.start_x,
+                    dot.start_y,
+                    (left + dot.x * side) / width,
+                    (top + dot.y * side) / height,
+                    red,
+                    green,
+                    blue,
+                    float(dot.delay_ms),
+                    2700.0,
+                    point_size,
+                )
+            )
+        if not heavy:
+            append_text()
         assert self._buffer is not None
         if not self._buffer.bind():
             self._fallback()
@@ -233,6 +339,7 @@ class DashboardGL(QOpenGLWidget):
         width = self.width()
         height = self.height()
         phase = dashboard.current_phase()
+        heavy = len(dashboard._particles) == GPU_HEAVY_EMBLEM_POINTS
         strength = dashboard._amount(phase, 0, 2700)
         side = min(height * 0.94, width * 0.52)
         left = max(12.0, (width * 0.52 - side) / 2)
@@ -246,13 +353,15 @@ class DashboardGL(QOpenGLWidget):
         background_vao.bind()
         background_buffer.bind()
         for name, value in (
-            ("screenWidth", width), ("screenHeight", height),
-            ("leftEdge", left), ("topEdge", top),
-            ("emblemSide", side), ("strength", strength),
+            ("screenWidth", width),
+            ("screenHeight", height),
+            ("leftEdge", left),
+            ("topEdge", top),
+            ("emblemSide", side),
+            ("strength", strength),
+            ("legacyMode", 0.0 if heavy else 1.0),
         ):
-            background.setUniformValue1f(
-                background.uniformLocation(name), float(value)
-            )
+            background.setUniformValue1f(background.uniformLocation(name), float(value))
         corner = background.attributeLocation("corner")
         background.enableAttributeArray(corner)
         background.setAttributeBuffer(corner, 0x1406, 0, 2, 8)
@@ -278,6 +387,12 @@ class DashboardGL(QOpenGLWidget):
             self._fallback()
             return
         program.setUniformValue1f(program.uniformLocation("phaseMs"), float(phase))
+        gamma = 0.96 if len(dashboard._particles) == GPU_HEAVY_EMBLEM_POINTS else 1.0
+        program.setUniformValue1f(program.uniformLocation("colorGamma"), gamma)
+        program.setUniformValue1f(program.uniformLocation("pointOpacity"), 1.0)
+        program.setUniformValue1f(
+            program.uniformLocation("legacyMode"), 0.0 if heavy else 1.0
+        )
         stride = 10 * 4
         for name, offset, count in (
             ("startPosition", 0, 2),
@@ -295,7 +410,17 @@ class DashboardGL(QOpenGLWidget):
         if not self.context().isOpenGLES():
             functions.glEnable(0x8642)  # GL_PROGRAM_POINT_SIZE
         functions.glBlendFunc(0x0302, 0x0303)  # SRC_ALPHA, ONE_MINUS_SRC_ALPHA
-        functions.glDrawArrays(0x0000, 0, self._point_count)  # GL_POINTS
+        emblem_count = len(dashboard._particles)
+        text_count = self._point_count - emblem_count
+        if heavy:
+            program.setUniformValue1f(program.uniformLocation("colorGamma"), 1.0)
+            functions.glDrawArrays(0x0000, 0, text_count)
+            program.setUniformValue1f(program.uniformLocation("colorGamma"), gamma)
+            program.setUniformValue1f(program.uniformLocation("pointOpacity"), 0.22)
+            functions.glDrawArrays(0x0000, text_count, emblem_count)
+        else:
+            functions.glDrawArrays(0x0000, 0, emblem_count)
+            functions.glDrawArrays(0x0000, emblem_count, text_count)
         buffer.release()
         vao.release()
         program.release()
