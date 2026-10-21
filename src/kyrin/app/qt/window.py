@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from kyrin.actions.models import ActionFeedback, ActionNotice
+from kyrin.actions.platforms.desktop_control import CONTROL_HELPER
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.platforms.telegram import TELEGRAM_PORTAL_HELPER
 from kyrin.app.app_permissions import AppPickerCatalog
@@ -169,6 +170,7 @@ class ControlWindow(QWidget):
         self._pending_settings: AppSettings | None = None
         self._pointer_grant_process: QProcess | None = None
         self._scroll_grant_process: QProcess | None = None
+        self._control_grant_process: QProcess | None = None
         self._quitting = False
         self._microphone_off_pending = False
         self._last_status_error: Exception | None = None
@@ -342,6 +344,9 @@ class ControlWindow(QWidget):
         self.actions_page.desktop_scroll_grant_button.clicked.connect(
             self._grant_desktop_scroll
         )
+        self.actions_page.desktop_control_grant_button.clicked.connect(
+            self._grant_desktop_control
+        )
         for action, button in self.actions_page.power_buttons.items():
             button.clicked.connect(
                 lambda checked=False, selected=action: self._start_power(selected)
@@ -469,12 +474,14 @@ class ControlWindow(QWidget):
             button.setText(t(key))
         for key, label in self._labels.items():
             label.setText(t(key))
-        for index, key in enumerate((
-            "dashboard_renderer_cpu",
-            "dashboard_renderer_gpu_light",
-            "dashboard_renderer_gpu_medium",
-            "dashboard_renderer_gpu_heavy",
-        )):
+        for index, key in enumerate(
+            (
+                "dashboard_renderer_cpu",
+                "dashboard_renderer_gpu_light",
+                "dashboard_renderer_gpu_medium",
+                "dashboard_renderer_gpu_heavy",
+            )
+        ):
             self.dashboard_renderer_combo.setItemText(index, t(key))
         self.cosmic_dashboard.refresh_scene()
         self.feedback_label.setText(t("feedback_default"))
@@ -560,9 +567,7 @@ class ControlWindow(QWidget):
         self.feedback_label.setText(self._translations.text("ui_saved"))
 
     def _on_dashboard_gpu_fallback(self) -> None:
-        self.feedback_label.setText(
-            self._translations.text("dashboard_gpu_fallback")
-        )
+        self.feedback_label.setText(self._translations.text("dashboard_gpu_fallback"))
 
     def _save_startup(self) -> None:
         registration = self._startup_registration
@@ -761,7 +766,8 @@ class ControlWindow(QWidget):
                 candidates_root=self._ocr_candidates_root,
                 paddle_python=self._paddle_python,
                 paddle_vl_python=self._paddle_vl_python,
-            ) is None
+            )
+            is None
         ):
             raise ValueError(self._translations.text("screen_ocr_unavailable"))
         actions_enabled = self.actions_page.enabled_checkbox.isChecked()
@@ -770,6 +776,7 @@ class ControlWindow(QWidget):
             and not selected_apps
             and not self.actions_page.system_power_checkbox.isChecked()
             and not self.actions_page.desktop_scroll_checkbox.isChecked()
+            and not self.actions_page.desktop_control_checkbox.isChecked()
         ):
             raise ValueError(self._translations.text("action_select_one"))
         return replace(
@@ -788,6 +795,7 @@ class ControlWindow(QWidget):
             allowed_chat_apps=self.actions_page.selected_chat_apps(),
             remember_telegram_pointer=self.actions_page.remember_telegram_pointer(),
             allow_desktop_scroll=self.actions_page.allow_desktop_scroll(),
+            allow_desktop_control=self.actions_page.allow_desktop_control(),
             allowed_window_apps=self.actions_page.selected_window_apps(),
             allowed_close_apps=self.actions_page.selected_close_apps(),
             app_spoken_aliases=self.actions_page.selected_spoken_aliases(),
@@ -865,8 +873,7 @@ class ControlWindow(QWidget):
         ready = (
             code == 0
             and b"CONTROL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
-            and read_opaque_token(permission_token_path("telegram-control"))
-            is not None
+            and read_opaque_token(permission_token_path("telegram-control")) is not None
         )
         if ready:
             for legacy_name in ("telegram-keyboard", "telegram-pointer"):
@@ -882,7 +889,8 @@ class ControlWindow(QWidget):
         self.actions_page.telegram_pointer_grant_status.setText(
             self._translations.text(
                 "telegram_pointer_grant_done"
-                if ready else "telegram_pointer_grant_failed"
+                if ready
+                else "telegram_pointer_grant_failed"
             )
         )
 
@@ -933,6 +941,53 @@ class ControlWindow(QWidget):
             )
         )
 
+    def _grant_desktop_control(self) -> None:
+        if self._control_grant_process is not None:
+            return
+        if (
+            self._settings is None
+            or not self._settings.allow_desktop_control
+            or self.actions_page.has_unsaved_changes(self._settings)
+        ):
+            self.actions_page.desktop_control_grant_status.setText(
+                self._translations.text("desktop_control_save_first")
+            )
+            return
+        process = QProcess(self)
+        process.setProgram("/usr/bin/python3")
+        process.setArguments([str(CONTROL_HELPER), "grant"])
+        process.finished.connect(
+            lambda code, _status: self._finish_desktop_control_grant(process, code)
+        )
+        process.errorOccurred.connect(
+            lambda _error: self._finish_desktop_control_grant(process, -1)
+        )
+        self._control_grant_process = process
+        self.actions_page.desktop_control_grant_button.setEnabled(False)
+        self.actions_page.desktop_control_grant_status.setText(
+            self._translations.text("desktop_control_running")
+        )
+        process.start()
+
+    def _finish_desktop_control_grant(self, process: QProcess, code: int) -> None:
+        if self._control_grant_process is not process:
+            return
+        ready = (
+            code == 0
+            and b"CONTROL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
+            and read_opaque_token(permission_token_path("desktop-control")) is not None
+        )
+        self._control_grant_process = None
+        process.deleteLater()
+        self.actions_page.desktop_control_grant_button.setEnabled(
+            self.actions_page.desktop_control_checkbox.isChecked()
+        )
+        self.actions_page.desktop_control_grant_status.setText(
+            self._translations.text(
+                "desktop_control_done" if ready else "desktop_control_failed"
+            )
+        )
+
     def _apply(self) -> None:
         try:
             candidate = self._candidate_settings()
@@ -975,11 +1030,17 @@ class ControlWindow(QWidget):
             except OSError as error:
                 self._show_error(error)
         if self._settings is not None and (
-            self._settings.allow_desktop_scroll
-            and not candidate.allow_desktop_scroll
+            self._settings.allow_desktop_scroll and not candidate.allow_desktop_scroll
         ):
             try:
                 permission_token_path("desktop-scroll").unlink(missing_ok=True)
+            except OSError as error:
+                self._show_error(error)
+        if self._settings is not None and (
+            self._settings.allow_desktop_control and not candidate.allow_desktop_control
+        ):
+            try:
+                permission_token_path("desktop-control").unlink(missing_ok=True)
             except OSError as error:
                 self._show_error(error)
         self._settings = candidate
@@ -988,6 +1049,9 @@ class ControlWindow(QWidget):
         )
         self.actions_page.set_scroll_grant_ready(
             read_opaque_token(permission_token_path("desktop-scroll")) is not None
+        )
+        self.actions_page.set_control_grant_ready(
+            read_opaque_token(permission_token_path("desktop-control")) is not None
         )
         if self._screen_reader is not None and self._ocr_default_root is not None:
             self._screen_reader.set_engine(
@@ -1025,9 +1089,7 @@ class ControlWindow(QWidget):
             return
         status = self._controller.status().state
         if status is ApplicationState.RUNNING:
-            self._controller.set_commands_active(
-                not self._controller.commands_active()
-            )
+            self._controller.set_commands_active(not self._controller.commands_active())
         elif status not in (ApplicationState.STOPPING,):
             if self._has_unsaved_changes():
                 self.feedback_label.setText(self._translations.text("save_first"))
@@ -1063,19 +1125,14 @@ class ControlWindow(QWidget):
         self._refresh()
         self.feedback_label.setText(
             self._translations.text(
-                "voice_off"
-                if not self._microphone_off_pending
-                else "voice_turning_off"
+                "voice_off" if not self._microphone_off_pending else "voice_turning_off"
             )
         )
 
     def _refresh(self) -> None:
         self._controller.expire_system_action()
         status = self._controller.status()
-        if (
-            self._microphone_off_pending
-            and status.state is ApplicationState.STOPPED
-        ):
+        if self._microphone_off_pending and status.state is ApplicationState.STOPPED:
             self._microphone_off_pending = False
             self.feedback_label.setText(self._translations.text("voice_off"))
         state_key = _STATE_KEYS[status.state]
@@ -1121,9 +1178,8 @@ class ControlWindow(QWidget):
         if self._settings is not None:
             self.listening_button.setEnabled(
                 not self._quitting
-                and status.state not in (
-                    ApplicationState.STOPPING, ApplicationState.STARTING
-                )
+                and status.state
+                not in (ApplicationState.STOPPING, ApplicationState.STARTING)
                 and (status.state is not ApplicationState.RUNNING or self._audio_ready)
             )
             self.microphone_off_button.setEnabled(
@@ -1246,6 +1302,8 @@ class ControlWindow(QWidget):
             self._pointer_grant_process.kill()
         if self._scroll_grant_process is not None:
             self._scroll_grant_process.kill()
+        if self._control_grant_process is not None:
+            self._control_grant_process.kill()
         self.power_dialog.dismiss()
         self._controller.request_stop()
         self._refresh()

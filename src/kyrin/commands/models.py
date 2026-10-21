@@ -17,6 +17,7 @@ class CommandKind(StrEnum):
     TELEGRAM_SEARCH = "telegram_search"
     SCROLL_UP = "scroll_up"
     SCROLL_DOWN = "scroll_down"
+    VISIBLE_CONTROL = "visible_control"
     RESTORE_APP = "restore_app"
     MINIMIZE_APP = "minimize_app"
     CLOSE_APP_WINDOW = "close_app_window"
@@ -44,6 +45,7 @@ class CommandIntent:
     scroll_steps: int | None = None
     scroll_area: str | None = None
     chat_scope: Literal["search", "visible"] = "search"
+    control_state: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -57,9 +59,19 @@ class CommandIntent:
         if self.kind is not CommandKind.OPEN_CHAT and self.chat_scope != "search":
             raise ValueError("only open_chat may limit chat scope")
         if self.kind is CommandKind.OPEN_CHAT and self.chat_scope not in (
-            "search", "visible"
+            "search",
+            "visible",
         ):
             raise ValueError("unsupported chat scope")
+        if self.kind is CommandKind.VISIBLE_CONTROL:
+            if not 1 <= len(self.target.strip()) <= 80 or any(
+                ord(char) < 32 for char in self.target
+            ):
+                raise ValueError("visible control needs a short label")
+            if self.control_state is not None and type(self.control_state) is not bool:
+                raise ValueError("control state must be boolean")
+        elif self.control_state is not None:
+            raise ValueError("only visible controls may carry a state")
         if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
             "archive",
             "contacts",
@@ -76,8 +88,7 @@ class CommandIntent:
                 not self.target.startswith(("label:", "visible:"))
                 or not 1 <= len(explicit_label) <= 64
                 or any(
-                    not (char.isalnum() or char in " -'&")
-                    for char in explicit_label
+                    not (char.isalnum() or char in " -'&") for char in explicit_label
                 )
             ):
                 raise ValueError("unsupported Telegram settings action")

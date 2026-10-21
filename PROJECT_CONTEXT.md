@@ -7,6 +7,24 @@
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
 
+> **Focused-app visible controls (2026-10-21, awaiting live test):** The owner
+> requested text navigation, clicks, and on/off controls across desktop apps.
+> A separate saved `allow_desktop_control` permission and RemoteDesktop pointer
+> grant now gate a generic `visible_control` command. English `click`, `select`,
+> `press`, `go to`, `turn on/off`, `check/uncheck`, and `enable/disable` forms,
+> plus a bounded Persian click form, target the current focused window rather
+> than a named app. The selected OCR engine grounds one sufficiently confident
+> visible label. If no OCR label exists, an exact named AT-SPI control in the
+> focused application's accessibility tree can locate an icon. On/off requests
+> additionally require an accessible checked state; an unknown state stops
+> without a click. The helper rechecks focus, frame, and pointer before input.
+> Sensitive labels currently stop because a generic confirmation dialogue is
+> not yet implemented. Repeated labels, unlabeled controls without accessible
+> names, OCR errors, and non-accessible toggle states remain limitations. The
+> click result is `launch_accepted`, not a claim that the app changed state.
+> Synthetic tests pass, but a restarted owner test in multiple apps is still
+> needed. This generic route does not replace the Telegram-specific flows.
+
 > **Visible-chat live retest and one-row behavior (2026-10-21):** The owner
 > confirmed that `matin` and `visionet` actually opened after the prior
 > correction. `visionet` was reported as `chat_unverified` because the

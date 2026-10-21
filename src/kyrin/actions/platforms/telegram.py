@@ -14,6 +14,7 @@ from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
+from kyrin.actions.visible_control import VisibleControlTarget
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
 from kyrin.text_normalization import fold_case
@@ -101,6 +102,10 @@ def _keep_global_scope(
 
 class ChatVerifier(Protocol):
     def ready(self) -> bool: ...
+
+    def find_visible_control(
+        self, app_id: str, pid: int, label: str
+    ) -> VisibleControlTarget | None: ...
 
     def find_search_result(
         self, app_id: str, pid: int, target: str
@@ -258,8 +263,12 @@ class TelegramSavedMessagesExecutor:
             choices.grounded_titles[0] if choices.grounded_titles else target
         )
         return self._click_result(
-            request, identity, verified_title, choices.local_results[0],
-            unique_identity=False, visible_row=True,
+            request,
+            identity,
+            verified_title,
+            choices.local_results[0],
+            unique_identity=False,
+            visible_row=True,
         )
 
     def _telegram_search(
@@ -379,14 +388,17 @@ class TelegramSavedMessagesExecutor:
         clicked = self._run_helper(
             identity,
             "settings-click",
-            *(str(value) for value in (
-                match.left,
-                match.top,
-                match.width,
-                match.height,
-                match.image_width,
-                match.image_height,
-            )),
+            *(
+                str(value)
+                for value in (
+                    match.left,
+                    match.top,
+                    match.width,
+                    match.height,
+                    match.image_width,
+                    match.image_height,
+                )
+            ),
         )
         if (
             clicked is None
@@ -741,7 +753,7 @@ class TelegramSavedMessagesExecutor:
                 timeout=45,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             return False
         dispatched = result.returncode == 0 and "SCROLL_DISPATCHED" in result.stdout
         if dispatched:
@@ -776,9 +788,7 @@ class TelegramSavedMessagesExecutor:
         )
         control_seconds = monotonic() - control_started
         if control_seconds >= 4:
-            _LOGGER.warning(
-                "Telegram chat control took %.1fs", control_seconds
-            )
+            _LOGGER.warning("Telegram chat control took %.1fs", control_seconds)
         if clicked is not None and "CONTROL_SETUP_REQUIRED" in clicked.stdout:
             return ActionResult(
                 request.key,
@@ -787,17 +797,20 @@ class TelegramSavedMessagesExecutor:
             )
         if clicked is not None and "CONTROL_SESSION_UNAVAILABLE" in clicked.stdout:
             return ActionResult(
-                request.key, ActionOutcome.FAILED,
+                request.key,
+                ActionOutcome.FAILED,
                 error_code="telegram_control_unavailable",
             )
         if clicked is not None and "FOCUS_CHANGED" in clicked.stdout:
             return ActionResult(
-                request.key, ActionOutcome.FAILED,
+                request.key,
+                ActionOutcome.FAILED,
                 error_code="telegram_focus_changed",
             )
         if clicked is not None and "TARGET_CHANGED" in clicked.stdout:
             return ActionResult(
-                request.key, ActionOutcome.FAILED,
+                request.key,
+                ActionOutcome.FAILED,
                 error_code="chat_target_changed",
             )
         if (
@@ -818,9 +831,7 @@ class TelegramSavedMessagesExecutor:
         header_visible = self._verifier.verify(*identity, target)
         header_seconds = monotonic() - header_started
         if header_seconds >= 4:
-            _LOGGER.warning(
-                "Telegram chat header OCR took %.1fs", header_seconds
-            )
+            _LOGGER.warning("Telegram chat header OCR took %.1fs", header_seconds)
         if not header_visible:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
@@ -904,8 +915,12 @@ class TelegramSavedMessagesExecutor:
                 else target
             )
             return self._click_result(
-                request, identity, verified_title, match,
-                unique_identity=False, visible_row=shown.source == "visible",
+                request,
+                identity,
+                verified_title,
+                match,
+                unique_identity=False,
+                visible_row=shown.source == "visible",
             )
 
     def _settled_search_choices(
@@ -954,7 +969,8 @@ class TelegramSavedMessagesExecutor:
                     if elapsed >= 4:
                         _LOGGER.warning(
                             "Telegram visible chat OCR took %.1fs across %d reads",
-                            elapsed, reads,
+                            elapsed,
+                            reads,
                         )
                     return current
             # A slow bilingual fallback may find its first candidate just as
@@ -970,7 +986,8 @@ class TelegramSavedMessagesExecutor:
         if elapsed >= 4:
             _LOGGER.warning(
                 "Telegram visible chat OCR took %.1fs across %d reads",
-                elapsed, reads,
+                elapsed,
+                reads,
             )
         return None
 

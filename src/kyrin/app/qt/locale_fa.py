@@ -162,6 +162,16 @@ PERSIAN: dict[str, str] = {
     "desktop_scroll_done": "دسترسی اسکرول دسکتاپ ذخیره شد.",
     "desktop_scroll_failed": "دسترسی اسکرول ذخیره نشد؛ دوباره تلاش کنید.",
     "desktop_scroll_save_first": "ابتدا تنظیمات اسکرول دسکتاپ را ذخیره کنید.",
+    "allow_desktop_control": "اجازهٔ کلیک روی گزینه‌های قابل‌دیدن در برنامهٔ فعال",
+    "desktop_control_grant_now": "تنظیم دسترسی کلیک دسکتاپ…",
+    "desktop_control_not_ready": (
+        "دسترسی کلیک ذخیره نشده است؛ ابتدا تنظیمات را ذخیره کنید."
+    ),
+    "desktop_control_ready": "دسترسی کلیک دسکتاپ ذخیره شده است.",
+    "desktop_control_running": "درخواست Remote Desktop سیستم را تأیید کنید…",
+    "desktop_control_done": "دسترسی کلیک دسکتاپ ذخیره شد.",
+    "desktop_control_failed": "دسترسی کلیک ذخیره نشد؛ دوباره تلاش کنید.",
+    "desktop_control_save_first": "ابتدا تنظیمات کلیک دسکتاپ را ذخیره کنید.",
     "allow_window_controls": (
         "اجازهٔ بازگرداندن، کوچک‌کردن، بزرگ‌کردن یا تمام‌صفحه‌کردن برنامه‌های انتخاب‌شده"
     ),

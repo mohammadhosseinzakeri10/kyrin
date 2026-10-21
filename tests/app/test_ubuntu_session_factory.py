@@ -373,14 +373,57 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
     with factory(settings) as runtime:
         runtime.run()
 
-    assert [request.intent.target for request in requested] == [
-        "unselected.desktop"
-    ]
+    assert [request.intent.target for request in requested] == ["unselected.desktop"]
     assert any(
         isinstance(event, ActionFeedback)
         and event.outcome is ActionOutcome.LAUNCH_ACCEPTED
         for event in observed
     )
+
+
+def test_visible_click_reaches_unselected_focused_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    completed = Event()
+    requested: list[ActionRequest] = []
+
+    class ControlSpeechController(FakeSpeechController):
+        def events(self):  # type: ignore[no-untyped-def]
+            yield TranscriptUpdate(0, "Click Advanced", TranscriptStatus.FINAL, "en")
+            assert completed.wait(2)
+
+    class ControlExecutor:
+        def __init__(self, delegate, **kwargs) -> None:
+            assert kwargs["identity_reader"]() == ("unselected.desktop", 42)
+
+        def execute(self, request: ActionRequest) -> ActionResult:
+            requested.append(request)
+            completed.set()
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", ControlSpeechController)
+    monkeypatch.setattr(ubuntu, "DesktopControlExecutor", ControlExecutor)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        executor_factory=lambda paths: RecordingExecutor(),
+        focused_window=lambda: ("unselected.desktop", 42),
+        chat_verifier=cast(ubuntu.ChatVerifier, object()),
+    )
+    settings = _settings(
+        tmp_path,
+        allowed_apps=(),
+        allow_desktop_control=True,
+        action_execution_enabled=True,
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+    assert len(requested) == 1
+    assert requested[0].intent.kind is CommandKind.VISIBLE_CONTROL
+    assert requested[0].intent.target == "Advanced"
 
 
 def test_selected_command_model_reaches_live_transcript_without_executing(
@@ -588,9 +631,7 @@ def test_session_uses_saved_aliases_and_unbound_name_collision_abstains(
     )
     allowed = _settings(
         tmp_path,
-        app_spoken_aliases=(
-            AppSpokenAliases("telegram.desktop", ("my messenger",)),
-        ),
+        app_spoken_aliases=(AppSpokenAliases("telegram.desktop", ("my messenger",)),),
     )
     with factory(allowed) as runtime:
         runtime.run()
@@ -602,9 +643,7 @@ def test_session_uses_saved_aliases_and_unbound_name_collision_abstains(
     AliasSpeechController.phrase = "Open Browser"
     collision = replace(
         allowed,
-        app_spoken_aliases=(
-            AppSpokenAliases("telegram.desktop", ("Browser",)),
-        ),
+        app_spoken_aliases=(AppSpokenAliases("telegram.desktop", ("Browser",)),),
     )
     with factory(collision) as runtime:
         runtime.run()

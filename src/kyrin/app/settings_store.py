@@ -20,7 +20,7 @@ from kyrin.app.settings import (
 from kyrin.stt.device import DevicePreference
 from kyrin.vision.ocr.contracts import OcrDevicePreference
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 class SettingsError(ValueError):
@@ -142,6 +142,8 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("allow_desktop_scroll")
     if version >= 14:
         fields.add("document_ocr")
+    if version >= 15:
+        fields.add("allow_desktop_control")
     root = _object(document, fields, "settings")
     microphone = root["microphone_device_key"]
     if microphone is not None:
@@ -338,6 +340,11 @@ def _parse_settings(document: object) -> AppSettings:
                 if version >= 13
                 else False
             ),
+            allow_desktop_control=(
+                _boolean(root["allow_desktop_control"], "allow_desktop_control")
+                if version >= 15
+                else False
+            ),
             allowed_window_apps=window_apps,
             allowed_close_apps=close_apps,
             wake_aliases=wake_aliases,
@@ -405,6 +412,7 @@ def _document(settings: AppSettings) -> dict[str, object]:
         "allowed_chat_apps": list(settings.allowed_chat_apps),
         "remember_telegram_pointer": settings.remember_telegram_pointer,
         "allow_desktop_scroll": settings.allow_desktop_scroll,
+        "allow_desktop_control": settings.allow_desktop_control,
         "allowed_window_apps": list(settings.allowed_window_apps),
         "allowed_close_apps": list(settings.allowed_close_apps),
         "wake_aliases": list(settings.wake_aliases),

@@ -18,6 +18,7 @@ from kyrin.actions.models import (
     ActionResult,
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
+from kyrin.actions.platforms.desktop_control import DesktopControlExecutor
 from kyrin.actions.platforms.desktop_scroll import DesktopScrollExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
 from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
@@ -313,6 +314,7 @@ class UbuntuSessionFactory:
             ),
             allowed_window_apps=frozenset(settings.allowed_window_apps),
             scroll_any_focused_app=settings.allow_desktop_scroll,
+            control_any_focused_app=settings.allow_desktop_control,
             allowed_close_apps=frozenset(settings.allowed_close_apps),
             window_presence=window_presence,
             terminal_app_id=terminal_app_id,
@@ -355,15 +357,23 @@ class UbuntuSessionFactory:
                 }
             )
         if chat_enabled:
-            supported_kinds.update({
-                CommandKind.OPEN_CHAT,
-                CommandKind.TELEGRAM_VIEW,
-                CommandKind.TELEGRAM_SETTINGS,
-                CommandKind.TELEGRAM_SEARCH_FOCUS,
-                CommandKind.TELEGRAM_SEARCH,
-            })
+            supported_kinds.update(
+                {
+                    CommandKind.OPEN_CHAT,
+                    CommandKind.TELEGRAM_VIEW,
+                    CommandKind.TELEGRAM_SETTINGS,
+                    CommandKind.TELEGRAM_SEARCH_FOCUS,
+                    CommandKind.TELEGRAM_SEARCH,
+                }
+            )
         if settings.allow_desktop_scroll and self._focused_window is not None:
             supported_kinds.update({CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN})
+        if (
+            settings.allow_desktop_control
+            and self._focused_window is not None
+            and self._chat_verifier is not None
+        ):
+            supported_kinds.add(CommandKind.VISIBLE_CONTROL)
         if window_controls_available:
             supported_kinds.update(
                 {
@@ -387,6 +397,11 @@ class UbuntuSessionFactory:
                 allowed_window_apps=frozenset(settings.allowed_window_apps),
                 allow_focused_scroll=(
                     settings.allow_desktop_scroll and self._focused_window is not None
+                ),
+                allow_focused_control=(
+                    settings.allow_desktop_control
+                    and self._focused_window is not None
+                    and self._chat_verifier is not None
                 ),
                 allowed_close_apps=frozenset(settings.allowed_close_apps),
                 supported_kinds=frozenset(supported_kinds),
@@ -701,6 +716,16 @@ class UbuntuSessionFactory:
                         identity_reader=self._focused_window,
                         allow_any_focused_app=True,
                     )
+                if (
+                    settings.allow_desktop_control
+                    and self._focused_window is not None
+                    and self._chat_verifier is not None
+                ):
+                    executor = DesktopControlExecutor(
+                        executor,
+                        identity_reader=self._focused_window,
+                        verifier=self._chat_verifier,
+                    )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
                     executor = WindowControlExecutor(executor, controller)
@@ -718,7 +743,9 @@ class UbuntuSessionFactory:
                 on_action_output=show_action,
                 on_session_end=show_session_end,
                 scroll_focus_reader=(
-                    self._focused_window if settings.allow_desktop_scroll else None
+                    self._focused_window
+                    if settings.allow_desktop_scroll or settings.allow_desktop_control
+                    else None
                 ),
                 system_power=power_flow,
                 telegram_selection=chat_selection,

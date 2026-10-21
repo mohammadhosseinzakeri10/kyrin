@@ -9,7 +9,7 @@ from pathlib import Path
 def permission_token_path(name: str) -> Path:
     if name not in {
         "screen", "telegram-keyboard", "telegram-pointer", "telegram-control",
-        "desktop-scroll",
+        "desktop-scroll", "desktop-control",
     }:
         raise ValueError("unknown permission")
     configured = os.environ.get("XDG_DATA_HOME")

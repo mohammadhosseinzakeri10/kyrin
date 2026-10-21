@@ -89,6 +89,26 @@ _TEXT: dict[str, dict[str, str]] = {
             "برای اسکرول، دسترسی آن را در Desktop Actions فعال و تنظیم کنید."
         ),
         "scroll_unavailable": "نتوانستم اسکرول را انجام دهم. لطفاً صفحه را بررسی کنید.",
+        "visible_control_uncertain": "گزینهٔ قابل‌دیدنِ یکتایی با این نام پیدا نکردم.",
+        "visible_control_screen_access_required": (
+            "برای دیدن گزینه‌ها، دسترسی صفحه را در Screen Access فعال کنید."
+        ),
+        "visible_control_focus_changed": "پنجرهٔ فعال تغییر کرد؛ فرمان متوقف شد.",
+        "visible_control_target_changed": (
+            "جای گزینه یا اندازهٔ پنجره تغییر کرد؛ دوباره تلاش کنید."
+        ),
+        "visible_control_setup_required": (
+            "برای کلیک، دسترسی آن را در Desktop Actions تنظیم کنید."
+        ),
+        "visible_control_state_unavailable": (
+            "وضعیت این گزینه از رابط دسترس‌پذیری خوانده نشد؛ تغییری ندادم."
+        ),
+        "visible_control_sensitive": (
+            "این گزینه نیاز به تأیید جداگانه دارد و فعلاً اجرا نشد."
+        ),
+        "visible_control_unavailable": (
+            "کنترل برنامه در دسترس نبود؛ لطفاً صفحه را بررسی کنید."
+        ),
         "scroll_dispatched": "فرمان اسکرول ارسال شد؛ حرکت صفحه را هنوز تأیید نکرده‌ام.",
         "chat_unverified": "بازشدن چت را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید.",
         "telegram_menu_uncertain": (
@@ -237,6 +257,28 @@ _TEXT: dict[str, dict[str, str]] = {
             "Set up desktop scroll access in Desktop Actions first."
         ),
         "scroll_unavailable": "I couldn't scroll. Please check the screen.",
+        "visible_control_uncertain": (
+            "I couldn't find one clear visible option with that name."
+        ),
+        "visible_control_screen_access_required": (
+            "Enable Screen Access in KYRIN to find visible options."
+        ),
+        "visible_control_focus_changed": "The focused window changed, so I stopped.",
+        "visible_control_target_changed": (
+            "The option or window moved. Please try again."
+        ),
+        "visible_control_setup_required": (
+            "Set up desktop click access in Desktop Actions first."
+        ),
+        "visible_control_state_unavailable": (
+            "The control did not expose its state, so I left it unchanged."
+        ),
+        "visible_control_sensitive": (
+            "This option needs separate confirmation and was not activated."
+        ),
+        "visible_control_unavailable": (
+            "Desktop control was unavailable. Please check the screen."
+        ),
         "scroll_dispatched": (
             "I sent the scroll input, but haven't verified that the page moved."
         ),
@@ -249,9 +291,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "telegram_setting_not_found": (
             "I couldn't confidently find that item in Telegram Settings."
         ),
-        "telegram_settings_not_open": (
-            "Telegram Settings is not open. Open it first."
-        ),
+        "telegram_settings_not_open": ("Telegram Settings is not open. Open it first."),
         "telegram_settings_navigation_uncertain": (
             "I couldn't verify the return to Telegram Settings, so I stopped."
         ),
@@ -424,6 +464,14 @@ class ResponsePresenter:
                 "scroll_focus_changed",
                 "scroll_control_setup_required",
                 "scroll_unavailable",
+                "visible_control_uncertain",
+                "visible_control_screen_access_required",
+                "visible_control_focus_changed",
+                "visible_control_target_changed",
+                "visible_control_setup_required",
+                "visible_control_state_unavailable",
+                "visible_control_sensitive",
+                "visible_control_unavailable",
                 "no_window",
                 "multiple_windows",
                 "unavailable",
@@ -432,18 +480,15 @@ class ResponsePresenter:
             }:
                 text = (
                     messages[event.error_code].format(target=event.intent.target)
-                    if event.error_code in {
-                        "chat_search_uncertain", "visible_chat_uncertain"
-                    }
+                    if event.error_code
+                    in {"chat_search_uncertain", "visible_chat_uncertain"}
                     else messages[event.error_code]
                 )
             elif event.error_code is not None and event.error_code.startswith(
                 ("chat_search_uncertain:", "visible_chat_uncertain:")
             ):
                 code = event.error_code.split(":", 1)[0]
-                text = messages[code].format(
-                    target=event.intent.target
-                )
+                text = messages[code].format(target=event.intent.target)
             else:
                 text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id

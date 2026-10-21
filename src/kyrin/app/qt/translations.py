@@ -171,6 +171,16 @@ ENGLISH: dict[str, str] = {
     "desktop_scroll_done": "Desktop scroll access is saved.",
     "desktop_scroll_failed": "Scroll access was not saved. Try again here.",
     "desktop_scroll_save_first": "Save desktop scroll settings first.",
+    "allow_desktop_control": "Allow clicking visible controls in the focused app",
+    "desktop_control_grant_now": "Set up desktop click access now…",
+    "desktop_control_not_ready": (
+        "No saved click access. Save settings, then set it up here."
+    ),
+    "desktop_control_ready": "Desktop click access is saved.",
+    "desktop_control_running": "Confirm the system's Remote Desktop request…",
+    "desktop_control_done": "Desktop click access is saved.",
+    "desktop_control_failed": "Click access was not saved. Try again here.",
+    "desktop_control_save_first": "Save desktop click settings first.",
     "allow_window_controls": (
         "Allow KYRIN to restore, minimize, maximize, or fullscreen selected apps"
     ),

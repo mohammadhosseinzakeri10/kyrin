@@ -114,6 +114,16 @@ class DesktopActionsPage(QWidget):
         self.desktop_scroll_grant_status = QLabel()
         self.desktop_scroll_grant_status.setWordWrap(True)
         layout.addWidget(self.desktop_scroll_grant_status)
+        self.desktop_control_checkbox = QCheckBox()
+        layout.addWidget(self.desktop_control_checkbox)
+        self.desktop_control_grant_button = QPushButton()
+        layout.addWidget(self.desktop_control_grant_button)
+        self.desktop_control_grant_status = QLabel()
+        self.desktop_control_grant_status.setWordWrap(True)
+        layout.addWidget(self.desktop_control_grant_status)
+        self.desktop_control_checkbox.toggled.connect(
+            self._update_control_permission_availability
+        )
         self.desktop_scroll_checkbox.toggled.connect(
             self._update_scroll_permission_availability
         )
@@ -166,6 +176,7 @@ class DesktopActionsPage(QWidget):
                 settings.remember_telegram_pointer
             )
             self.desktop_scroll_checkbox.setChecked(settings.allow_desktop_scroll)
+            self.desktop_control_checkbox.setChecked(settings.allow_desktop_control)
             selected_app_ids = {binding.app_id for binding in settings.allowed_apps}
             self.window_control_checkbox.setChecked(
                 bool(selected_app_ids)
@@ -186,6 +197,8 @@ class DesktopActionsPage(QWidget):
             self.telegram_pointer_grant_button.setEnabled(False)
             self.desktop_scroll_checkbox.setEnabled(False)
             self.desktop_scroll_grant_button.setEnabled(False)
+            self.desktop_control_checkbox.setEnabled(False)
+            self.desktop_control_grant_button.setEnabled(False)
             self.window_control_checkbox.setEnabled(False)
             self.close_window_checkbox.setEnabled(False)
             self.system_power_checkbox.setEnabled(False)
@@ -194,6 +207,7 @@ class DesktopActionsPage(QWidget):
         self._show_aliases()
         self._update_chat_permission_availability()
         self._update_scroll_permission_availability()
+        self._update_control_permission_availability()
 
     def _current_app_choice(self) -> AppChoice | None:
         item = self.apps.currentItem()
@@ -301,6 +315,19 @@ class DesktopActionsPage(QWidget):
         key = "desktop_scroll_ready" if ready else "desktop_scroll_not_ready"
         self.desktop_scroll_grant_status.setText(self._translations.text(key))
 
+    def _update_control_permission_availability(self) -> None:
+        enabled = self.apps.isEnabled()
+        self.desktop_control_checkbox.setEnabled(enabled)
+        if not enabled:
+            self.desktop_control_checkbox.setChecked(False)
+        self.desktop_control_grant_button.setEnabled(
+            enabled and self.desktop_control_checkbox.isChecked()
+        )
+
+    def set_control_grant_ready(self, ready: bool) -> None:
+        key = "desktop_control_ready" if ready else "desktop_control_not_ready"
+        self.desktop_control_grant_status.setText(self._translations.text(key))
+
     def translate(self) -> None:
         text = self._translations.text
         self.heading.setText(text("actions_heading"))
@@ -316,6 +343,11 @@ class DesktopActionsPage(QWidget):
         self.desktop_scroll_grant_button.setText(text("desktop_scroll_grant_now"))
         self.set_scroll_grant_ready(
             read_opaque_token(permission_token_path("desktop-scroll")) is not None
+        )
+        self.desktop_control_checkbox.setText(text("allow_desktop_control"))
+        self.desktop_control_grant_button.setText(text("desktop_control_grant_now"))
+        self.set_control_grant_ready(
+            read_opaque_token(permission_token_path("desktop-control")) is not None
         )
         self.window_control_checkbox.setText(text("allow_window_controls"))
         self.close_window_checkbox.setText(text("allow_window_close"))
@@ -378,6 +410,9 @@ class DesktopActionsPage(QWidget):
     def allow_desktop_scroll(self) -> bool:
         return self.desktop_scroll_checkbox.isChecked()
 
+    def allow_desktop_control(self) -> bool:
+        return self.desktop_control_checkbox.isChecked()
+
     def selected_window_apps(self) -> tuple[str, ...]:
         return (
             tuple(app.app_id for app in self.selected_apps())
@@ -399,6 +434,7 @@ class DesktopActionsPage(QWidget):
             or self.selected_chat_apps() != settings.allowed_chat_apps
             or self.remember_telegram_pointer() != settings.remember_telegram_pointer
             or self.allow_desktop_scroll() != settings.allow_desktop_scroll
+            or self.allow_desktop_control() != settings.allow_desktop_control
             or set(self.selected_window_apps()) != set(settings.allowed_window_apps)
             or set(self.selected_close_apps()) != set(settings.allowed_close_apps)
             or self.system_power_checkbox.isChecked() != settings.system_power_enabled

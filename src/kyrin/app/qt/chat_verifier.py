@@ -20,6 +20,7 @@ from kyrin.actions.telegram_verification import (
     unique_search_result,
 )
 from kyrin.actions.visible_chat_grounding import assess_visible_chat_grounding
+from kyrin.actions.visible_control import VisibleControlTarget, unique_visible_target
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
@@ -44,8 +45,11 @@ class _Request:
     settings_header: bool = False
     view_title: bool = False
     search_query: bool = False
+    visible_control: bool = False
     finished: Event = field(default_factory=Event)
-    result: bool | str | ChatSearchMatch | ChatSearchChoices | None = None
+    result: (
+        bool | str | ChatSearchMatch | ChatSearchChoices | VisibleControlTarget | None
+    ) = None
 
 
 class QtChatVerifier(QObject):
@@ -113,11 +117,10 @@ class QtChatVerifier(QObject):
 
     def _visible_languages(self) -> tuple[str, str | None]:
         """Use the selected engine's text languages, never a fixed locale pair."""
-        available = sorted(
-            self._reader.supported_languages.difference({"osd", "equ"})
-        )
+        available = sorted(self._reader.supported_languages.difference({"osd", "equ"}))
         preferred = [
-            code for code in self._reader.default_language.split("+")
+            code
+            for code in self._reader.default_language.split("+")
             if code in available
         ]
         # A single pass is limited to four installed text languages. Keep the
@@ -147,24 +150,32 @@ class QtChatVerifier(QObject):
         return result if isinstance(result, ChatSearchMatch) else None
 
     def settings_page_header(self, app_id: str, pid: int) -> str | None:
-        result = self._ask(
-            _Request(app_id, pid, settings_header=True), timeout_s=18
-        )
+        result = self._ask(_Request(app_id, pid, settings_header=True), timeout_s=18)
         return result if isinstance(result, str) else None
 
     def has_view_title(self, app_id: str, pid: int, title: str) -> bool:
-        return self._ask(
-            _Request(app_id, pid, title, view_title=True), timeout_s=18
-        ) is True
+        return (
+            self._ask(_Request(app_id, pid, title, view_title=True), timeout_s=18)
+            is True
+        )
 
     def has_search_query(self, app_id: str, pid: int, query: str) -> bool:
-        return self._ask(
-            _Request(app_id, pid, query, search_query=True), timeout_s=18
-        ) is True
+        return (
+            self._ask(_Request(app_id, pid, query, search_query=True), timeout_s=18)
+            is True
+        )
+
+    def find_visible_control(
+        self, app_id: str, pid: int, label: str
+    ) -> VisibleControlTarget | None:
+        result = self._ask(
+            _Request(app_id, pid, label, visible_control=True), timeout_s=18
+        )
+        return result if isinstance(result, VisibleControlTarget) else None
 
     def _ask(
         self, request: _Request, *, timeout_s: float
-    ) -> bool | str | ChatSearchMatch | ChatSearchChoices | None:
+    ) -> bool | str | ChatSearchMatch | ChatSearchChoices | VisibleControlTarget | None:
         if QThread.currentThread() == self.thread():
             return None
         self.requested.emit(request)
@@ -213,11 +224,23 @@ class QtChatVerifier(QObject):
             and {"fas", "eng"}.issubset(self._reader.supported_languages)
             else None
         )
+        if request.visible_control:
+            available_languages = sorted(
+                self._reader.supported_languages.difference({"osd", "equ"})
+            )
+            preferred = [
+                code
+                for code in self._reader.default_language.split("+")
+                if code in available_languages
+            ]
+            selected = "+".join(dict.fromkeys([*preferred, *available_languages[:4]]))
+            if selected:
+                language = OcrOptions("+".join(selected.split("+")[:4]))
         if (
             request.target is not None
             and any("\u0600" <= char <= "\u06ff" for char in request.target)
             and language is None
-            and not request.visible_choices
+            and not (request.visible_choices or request.visible_control)
         ):
             self._finish(False)
             return
@@ -234,8 +257,16 @@ class QtChatVerifier(QObject):
                 OcrOptions(self._visible_languages()[0]),
                 region="left_chat_list_fast",
             )
-        elif not any((request.search, request.choices, request.view_title,
-                      request.search_query, request.left_label)):
+        elif not any(
+            (
+                request.search,
+                request.choices,
+                request.view_title,
+                request.search_query,
+                request.left_label,
+                request.visible_control,
+            )
+        ):
             started = self._reader.read(language, region="chat_header")
         else:
             started = (
@@ -248,7 +279,14 @@ class QtChatVerifier(QObject):
         pending = self._pending
         if pending is None:
             return
-        result: bool | str | ChatSearchMatch | ChatSearchChoices | None = None
+        result: (
+            bool
+            | str
+            | ChatSearchMatch
+            | ChatSearchChoices
+            | VisibleControlTarget
+            | None
+        ) = None
         if (
             isinstance(observation, IdentifiedWindowText)
             and pending.app_id is not None
@@ -258,6 +296,11 @@ class QtChatVerifier(QObject):
             if pending.settings_header:
                 result = telegram_settings_header(
                     observation, pending.app_id, pending.pid
+                )
+            elif pending.visible_control:
+                assert pending.target is not None
+                result = unique_visible_target(
+                    observation, pending.app_id, pending.pid, pending.target
                 )
             elif pending.settings_item:
                 assert pending.target is not None
@@ -294,9 +337,7 @@ class QtChatVerifier(QObject):
                     )
                     result = assessment.choices
                     visible_status = assessment.status
-                    if visible_status not in {
-                        "search_field_active", "window_changed"
-                    }:
+                    if visible_status not in {"search_field_active", "window_changed"}:
                         grounding = assess_visible_chat_grounding(
                             observation, pending.app_id, pending.pid, pending.target
                         )
@@ -352,10 +393,7 @@ class QtChatVerifier(QObject):
                     if not pending.visible_focused:
                         pending.visible_focused = True
                         language = primary
-                    elif (
-                        not pending.visible_bilingual
-                        and alternate is not None
-                    ):
+                    elif not pending.visible_bilingual and alternate is not None:
                         pending.visible_bilingual = True
                         language = alternate
                     else:
@@ -367,9 +405,7 @@ class QtChatVerifier(QObject):
                         return
                     if not pending.visible_full:
                         pending.visible_full = True
-                        if self._reader.read(
-                            OcrOptions(primary)
-                        ):
+                        if self._reader.read(OcrOptions(primary)):
                             return
             elif pending.search:
                 assert pending.target is not None
@@ -412,7 +448,13 @@ class QtChatVerifier(QObject):
             request.finished.set()
 
     def _finish(
-        self, result: bool | str | ChatSearchMatch | ChatSearchChoices | None
+        self,
+        result: bool
+        | str
+        | ChatSearchMatch
+        | ChatSearchChoices
+        | VisibleControlTarget
+        | None,
     ) -> None:
         pending = self._pending
         self._pending = None

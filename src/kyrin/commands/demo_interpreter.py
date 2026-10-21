@@ -131,6 +131,15 @@ _SCROLL_AREA_FA = re.compile(
 )
 _SCROLL_SHORT_EN = re.compile(r"^(?:(?:come|go) )?(up|down)$")
 _SCROLL_SHORT_FA = re.compile(r"^(?:برو )?(بالا|پایین)$")
+_VISIBLE_CLICK_EN = re.compile(
+    r"^(?:please )?(?:click(?: on)?|select|press|go to) (?:the )?(.+?)"
+    r"(?: (?:button|icon|option|item))?$"
+)
+_VISIBLE_CLICK_FA = re.compile(r"^(?:روی |به )?(.+?) (?:کلیک کن|بزن|برو)$")
+_VISIBLE_STATE_EN = re.compile(
+    r"^(?:please )?(?:(turn|switch) (on|off) (?:the )?(.+?)"
+    r"|(check|uncheck|enable|disable) (?:the )?(.+?))$"
+)
 _WAKE_PREFIXES = (*DEFAULT_WAKE_NAMES, "کایری")
 _NUMBERED_CLOSE_EN = re.compile(
     r"^(?:please )?(?:(?:close|exit|quit) (.+)|(.+) (?:close|exit|quit))$"
@@ -172,6 +181,7 @@ class DemoCommandInterpreter:
         allowed_window_apps: frozenset[str] = frozenset(),
         allowed_scroll_apps: frozenset[str] = frozenset(),
         scroll_any_focused_app: bool = False,
+        control_any_focused_app: bool = False,
         allowed_close_apps: frozenset[str] = frozenset(),
         window_presence: AppWindowPresence | None = None,
         terminal_app_id: str | None = None,
@@ -182,6 +192,7 @@ class DemoCommandInterpreter:
         self._allowed_window_apps = allowed_window_apps
         self._allowed_scroll_apps = allowed_scroll_apps
         self._scroll_any_focused_app = scroll_any_focused_app
+        self._control_any_focused_app = control_any_focused_app
         self._allowed_close_apps = allowed_close_apps
         self._window_presence = window_presence
         self._terminal_app_id = terminal_app_id
@@ -251,7 +262,8 @@ class DemoCommandInterpreter:
                 return ReadyCommand(
                     CommandIntent(CommandKind.TELEGRAM_VIEW, destination)
                 )
-            return UnrecognizedCommand()
+            if not (self._control_any_focused_app and context.observed_scroll_app):
+                return UnrecognizedCommand()
 
         if pending is None and context.observed_active_app == "telegram":
             if phrase in {"back", "go back", "go to back", "previous page"}:
@@ -277,9 +289,7 @@ class DemoCommandInterpreter:
                     )
                 settings_named_match = _TELEGRAM_SETTINGS_NAMED_EN.fullmatch(phrase)
                 if settings_named_match is not None:
-                    label = (
-                        settings_named_match[1] or settings_named_match[2]
-                    ).strip()
+                    label = (settings_named_match[1] or settings_named_match[2]).strip()
                     try:
                         return ReadyCommand(
                             CommandIntent(
@@ -298,6 +308,59 @@ class DemoCommandInterpreter:
                         )
                     except ValueError:
                         return UnrecognizedCommand()
+
+        if (
+            pending is None
+            and self._control_any_focused_app
+            and context.observed_scroll_app
+        ):
+            state_match = _VISIBLE_STATE_EN.fullmatch(phrase)
+            if state_match is not None:
+                label = (state_match[3] or state_match[5]).strip()
+                enabled = (
+                    state_match[2] == "on"
+                    if state_match[1]
+                    else state_match[4] in {"check", "enable"}
+                )
+                return ReadyCommand(
+                    CommandIntent(
+                        CommandKind.VISIBLE_CONTROL,
+                        source_spelling(text, label),
+                        control_state=enabled,
+                    )
+                )
+            click_match = _VISIBLE_CLICK_EN.fullmatch(
+                phrase
+            ) or _VISIBLE_CLICK_FA.fullmatch(phrase)
+            if click_match is not None:
+                label = click_match[1].strip()
+                control_app_match = (
+                    self._app_name_resolver.resolve(label)
+                    if self._app_name_resolver is not None
+                    else None
+                )
+                local_label = label in {
+                    "settings",
+                    "setting",
+                    "seating",
+                    "search",
+                    "advanced",
+                    "profile",
+                    "account",
+                    "contacts",
+                }
+                if (
+                    phrase.startswith(("click ", "select ", "press "))
+                    or _VISIBLE_CLICK_FA.fullmatch(phrase) is not None
+                    or local_label
+                    or control_app_match is None
+                    or not control_app_match.exact
+                ):
+                    return ReadyCommand(
+                        CommandIntent(
+                            CommandKind.VISIBLE_CONTROL, source_spelling(text, label)
+                        )
+                    )
 
         # A later explicit "do not open" also withdraws a pending app suggestion.
         # Otherwise a still-pending "yes" could act on the older request.
