@@ -5277,3 +5277,18 @@ numbered `matin` suggestion without needing the focused pass. If future live
 reads still fail, the action diagnostic now includes content-free counts of
 candidate OCR titles and close matches or the row-anchor rejection reason.
 Owner validation of this latest correction remains pending.
+
+The owner then retested. `openvisibly chat matin` reached the correct title
+at x=66,y=692 with 94% OCR confidence and a same-row time, but the row was
+rejected as `rows_1_low_0_time_0_preview_1`: its Persian preview was not
+readable and the fallback was suppressed by nearby text above the date.
+The fallback now accepts a high-confidence, title-sized line aligned with a
+strong date even when the preceding chat has text in that date column; it
+still rejects a preview line below an equally large title. A separate
+`visionet` run reported `similar_0_titles_180`. The mixed-script matcher had
+only checked a Latin word at the start of a title and did not equate the
+spoken `s` with `z` in a title such as `VizoNet`. It now checks Latin words
+anywhere in an OCR-observed mixed-script title and normalizes that phonetic
+variant for suggestions. Any corrected title still needs a numbered choice,
+stable rereads, and header verification. Both corrections have deterministic
+tests; live owner validation is pending.

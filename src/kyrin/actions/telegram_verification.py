@@ -173,6 +173,31 @@ def assess_visible_chat_choices(
             and preview_below
             and not time_above
         )
+        strong_title_shape = (
+            box.height >= 16
+            and any(
+                span.confidence is not None
+                and span.confidence >= 0.85
+                and box.height >= span.box.height * 1.5
+                for span in aligned_time_spans
+            )
+        )
+        prior_title_above = any(
+            prior.confidence is not None
+            and prior.confidence >= 0.65
+            and box.top - 40 <= prior.box.top <= box.top - 12
+            and abs(prior.box.left - box.left) <= 35
+            and prior.box.height >= box.height - 2
+            for prior in observation.result.spans
+        )
+        prior_time_above = any(
+            prior.confidence is not None
+            and prior.confidence >= 0.55
+            and box.top - 40 <= prior.box.top <= box.top - 12
+            and abs(prior.box.left - current.box.left) <= 35
+            for current in aligned_time_spans
+            for prior in observation.result.spans
+        )
         preview_fallback = (
             aligned_right
             and not preview_below
@@ -181,14 +206,8 @@ def assess_visible_chat_choices(
                 span.confidence is not None and span.confidence >= 0.85
                 for span in aligned_time_spans
             )
-            and not any(
-                prior.confidence is not None
-                and prior.confidence >= 0.55
-                and box.top - 40 <= prior.box.top <= box.top - 12
-                and abs(prior.box.left - current.box.left) <= 35
-                for current in aligned_time_spans
-                for prior in observation.result.spans
-            )
+            and not prior_title_above
+            and (strong_title_shape or not prior_time_above)
         )
         if not aligned_right and not time_fallback:
             missing_time += 1

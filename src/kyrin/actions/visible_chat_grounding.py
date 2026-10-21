@@ -76,18 +76,20 @@ def _compact(value: str) -> str:
 
 
 def _consonants(value: str) -> str:
-    value = _compact(value).replace("ph", "f").replace("ck", "k")
+    value = (
+        _compact(value).replace("ph", "f").replace("ck", "k").replace("z", "s")
+    )
     return "".join(char for char in value if char not in "aeiouy")
 
 
 def _score(spoken: str, visible: str) -> float:
     mixed_or_persian = any("\u0600" <= char <= "\u06ff" for char in visible)
     if mixed_or_persian:
-        latin_prefix = re.match(r"[A-Za-z][A-Za-z0-9._-]*", visible.strip())
-        if latin_prefix is not None:
-            prefix_score = _score(spoken, latin_prefix.group())
-            if prefix_score >= 0.86:
-                return prefix_score
+        latin_words = re.findall(r"[A-Za-z][A-Za-z0-9._-]*", visible)
+        for word in latin_words:
+            word_score = _score(spoken, word)
+            if word_score >= 0.86:
+                return word_score
     heard = _compact(spoken)
     label = _compact(visible)
     if len(heard) < 4 or len(label) < 4 or heard[0] != label[0]:
@@ -169,9 +171,12 @@ def assess_visible_chat_grounding(
     candidates: list[tuple[float, str, ChatSearchMatch]] = []
     phrases = _title_phrases(observation)
     similar_count = 0
+    best_score = 0.0
     rejected_status: str | None = None
     for phrase in phrases:
-        if _score(spoken_target, phrase) < 0.86:
+        score = _score(spoken_target, phrase)
+        best_score = max(best_score, score)
+        if score < 0.86:
             continue
         similar_count += 1
         assessed = assess_visible_chat_choices(
@@ -181,7 +186,6 @@ def assess_visible_chat_grounding(
             rejected_status = assessed.status
             continue
         for row in assessed.choices.local_results:
-            score = _score(spoken_target, phrase)
             same_row = next(
                 (
                     index
@@ -193,13 +197,19 @@ def assess_visible_chat_grounding(
             )
             if same_row is None:
                 candidates.append((score, phrase, row))
-            elif score > candidates[same_row][0]:
+            elif score > candidates[same_row][0] or (
+                score == candidates[same_row][0]
+                and len(phrase) > len(candidates[same_row][1])
+            ):
                 candidates[same_row] = (score, phrase, row)
     if not candidates:
         status = (
             f"similar_{similar_count}_row_{rejected_status}"
             if rejected_status is not None
-            else f"similar_{similar_count}_titles_{len(phrases)}"
+            else (
+                f"similar_{similar_count}_titles_{len(phrases)}_"
+                f"best_{round(best_score * 100)}"
+            )
         )
         return VisibleGroundingAssessment(None, status)
     ranked = sorted(candidates, key=lambda item: item[0], reverse=True)

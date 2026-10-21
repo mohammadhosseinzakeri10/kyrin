@@ -224,6 +224,29 @@ def test_visible_chat_accepts_unreadable_preview_with_strong_row_anchors() -> No
     assert assessment.status == "classified_local_1_preview_fallback_1"
 
 
+def test_visible_chat_accepts_stylized_title_below_previous_row_date() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("previous preview", TextBox(68, 665, 90, 10), 0.88),
+                RecognizedText("10/4/26", TextBox(606, 665, 45, 9), 0.92),
+                RecognizedText("matin", TextBox(66, 692, 33, 22), 0.94),
+                RecognizedText("10/3/26", TextBox(606, 700, 45, 9), 0.96),
+                RecognizedText("ناخوانا", TextBox(68, 724, 70, 9), 0.29),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "matin"
+    )
+    assert assessment.choices is not None
+    assert tuple(row.top for row in assessment.choices.local_results) == (692,)
+    assert assessment.status == "classified_local_1_preview_fallback_1"
+
+
 def test_visible_chat_does_not_promote_preview_with_previous_row_time() -> None:
     observation = IdentifiedWindowText(
         "telegram.desktop", 123,
@@ -232,6 +255,27 @@ def test_visible_chat_does_not_promote_preview_with_previous_row_time() -> None:
                 RecognizedText("Alice", TextBox(70, 200, 55, 18), 0.95),
                 RecognizedText("8:12", TextBox(606, 200, 45, 10), 0.93),
                 RecognizedText("matin", TextBox(70, 227, 42, 12), 0.95),
+                RecognizedText("7:30", TextBox(606, 227, 45, 10), 0.94),
+            ),
+            "eng", OcrDevice.CPU, "fake",
+        ),
+        (1853, 1048),
+    )
+    assessment = assess_visible_chat_choices(
+        observation, "telegram.desktop", 123, "matin"
+    )
+    assert assessment.choices is None
+    assert assessment.status == "rows_1_low_0_time_0_preview_1"
+
+
+def test_visible_chat_does_not_promote_bold_preview_below_a_title() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("Alice", TextBox(70, 200, 55, 18), 0.95),
+                RecognizedText("8:12", TextBox(606, 200, 45, 10), 0.93),
+                RecognizedText("matin", TextBox(70, 227, 42, 18), 0.95),
                 RecognizedText("7:30", TextBox(606, 227, 45, 10), 0.94),
             ),
             "eng", OcrDevice.CPU, "fake",

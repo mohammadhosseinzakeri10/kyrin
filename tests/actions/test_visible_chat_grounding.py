@@ -30,6 +30,7 @@ def _window(title: str, *, preview_only: bool = False) -> IdentifiedWindowText:
     [
         ("martin", "matin"),
         ("visionet", "Visonate فارسی"),
+        ("visionet", "ربات فروشگاه VizoNet"),
         ("a bullfazle a body", "ابوالفضل عبادی"),
         ("abolfazl ebadi", "ابوالفضل عبادی"),
     ],
@@ -52,6 +53,53 @@ def test_grounding_rejects_preview_and_different_window() -> None:
         suggest_visible_chat_choices(_window("matin"), "other.desktop", 123, "martin")
         is None
     )
+
+
+def test_mixed_direction_title_split_across_ocr_spans() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("ربات", TextBox(190, 200, 35, 18), 0.95),
+                RecognizedText("فروشگاه", TextBox(120, 200, 65, 18), 0.95),
+                RecognizedText("VizoNet", TextBox(60, 200, 55, 18), 0.95),
+                RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.9),
+                RecognizedText("سلام", TextBox(70, 227, 60, 15), 0.9),
+            ),
+            "fas+eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    choices = suggest_visible_chat_choices(
+        observation, "telegram.desktop", 123, "visionet"
+    )
+    assert choices is not None
+    assert choices.grounded_titles == ("ربات فروشگاه VizoNet",)
+    assert tuple(row.top for row in choices.local_results) == (200,)
+
+
+def test_mixed_title_can_be_grounded_with_unreadable_persian_preview() -> None:
+    observation = IdentifiedWindowText(
+        "telegram.desktop", 123,
+        OcrResult(
+            (
+                RecognizedText("previous preview", TextBox(70, 665, 90, 10), 0.88),
+                RecognizedText("10/4/26", TextBox(455, 665, 45, 9), 0.92),
+                RecognizedText(
+                    "ربات فروشگاه VizoNet", TextBox(70, 692, 210, 20), 0.94
+                ),
+                RecognizedText("10/3/26", TextBox(455, 700, 45, 9), 0.96),
+                RecognizedText("سلام", TextBox(70, 724, 60, 10), 0.29),
+            ),
+            "fas+eng", OcrDevice.CPU, "fake",
+        ),
+        (1600, 900),
+    )
+    choices = suggest_visible_chat_choices(
+        observation, "telegram.desktop", 123, "visionet"
+    )
+    assert choices is not None
+    assert choices.grounded_titles == ("ربات فروشگاه VizoNet",)
 
 
 def test_grounding_keeps_two_similar_titles_in_screen_order() -> None:
@@ -79,4 +127,4 @@ def test_grounding_diagnostic_reports_counts_without_chat_titles() -> None:
         _window("Alice"), "telegram.desktop", 123, "martin"
     )
     assert assessment.choices is None
-    assert assessment.status == "similar_0_titles_2"
+    assert assessment.status == "similar_0_titles_2_best_0"
