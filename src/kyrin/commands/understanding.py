@@ -14,6 +14,7 @@ from kyrin.commands.models import CommandContext
 
 class RequestedOperation(StrEnum):
     SHOW_ALL_WINDOWS = "show_all_windows"
+    VISIBLE_CONTROL = "visible_control"
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
     RESTORE_APP = "restore_app"
@@ -88,6 +89,8 @@ class MeaningStep:
     target_phrase: str | None = None
     app_phrase: str | None = None
     polarity: Polarity = Polarity.AFFIRMATIVE
+    control_state: bool | None = None
+    target_id: str | None = None
 
     def __post_init__(self) -> None:
         targetless_operation = self.operation in {
@@ -108,6 +111,16 @@ class MeaningStep:
             or not self.app_phrase.strip()
         ):
             raise ValueError("app_phrase is only valid for a chat operation")
+        if self.control_state is not None and (
+            self.operation is not RequestedOperation.VISIBLE_CONTROL
+            or type(self.control_state) is not bool
+        ):
+            raise ValueError("only visible controls may carry a boolean state")
+        if self.target_id is not None and (
+            self.operation is not RequestedOperation.VISIBLE_CONTROL
+            or not self.target_id.isdecimal()
+        ):
+            raise ValueError("only visible controls may name a numeric option ID")
 
 
 @dataclass(frozen=True, slots=True)

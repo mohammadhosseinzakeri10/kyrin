@@ -38,6 +38,7 @@ def _accessible_control(
     *,
     near: tuple[int, int] | None,
     state_required: bool,
+    strict_near: bool = False,
 ) -> tuple[bool | None, int, int] | None:
     """Locate one named actionable node in the focused app."""
     import gi
@@ -90,7 +91,7 @@ def _accessible_control(
                         (
                             near is None
                             or (
-                                abs(control_x - near[0]) <= 320
+                                abs(control_x - near[0]) <= (24 if strict_near else 320)
                                 and abs(control_y - near[1]) <= 24
                             )
                         )
@@ -123,6 +124,7 @@ def _click(
     label: str,
     desired: bool | None,
     accessible_only: bool,
+    anchor: tuple[int, int] | None,
 ) -> str:
     left, top, width, height, image_width, image_height = box
     if not accessible_only and (
@@ -148,8 +150,15 @@ def _click(
             label,
             (frame_x, frame_y, frame_w, frame_h),
             expected[1],
-            near=None if accessible_only else (x, y),
+            near=(
+                (frame_x + anchor[0], frame_y + anchor[1])
+                if anchor is not None
+                else None
+                if accessible_only
+                else (x, y)
+            ),
             state_required=desired is not None,
+            strict_near=anchor is not None,
         )
         if control is None:
             return "STATE_UNAVAILABLE" if desired is not None else "TARGET_UNCERTAIN"
@@ -199,13 +208,18 @@ def main() -> int:
     box: tuple[int, int, int, int, int, int] | None = None
     label = ""
     desired: bool | None = None
+    anchor: tuple[int, int] | None = None
     if not grant:
-        if len(sys.argv) != 12:
+        if len(sys.argv) not in {12, 14}:
             raise ValueError("expected identity, box, state and label")
         expected = (sys.argv[1], int(sys.argv[2]))
         box = tuple(int(part) for part in sys.argv[3:9])  # type: ignore[assignment]
         desired = {"click": None, "on": True, "off": False}[sys.argv[9]]
         label = sys.argv[10]
+        if len(sys.argv) == 14:
+            anchor = (int(sys.argv[12]), int(sys.argv[13]))
+            if min(anchor) < 0:
+                raise ValueError("invalid target anchor")
         if sys.argv[11] not in {"visible", "accessible"} or expected[1] <= 0:
             raise ValueError("invalid control arguments")
         if _focused_identity() != expected:
@@ -258,6 +272,7 @@ def main() -> int:
             label,
             desired,
             sys.argv[11] == "accessible",
+            anchor,
         )
         print(result, flush=True)
         return 0 if result in {"CLICK_DISPATCHED", "STATE_ALREADY_SET"} else 2

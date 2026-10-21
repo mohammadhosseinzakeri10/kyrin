@@ -38,6 +38,7 @@ from kyrin.commands.understanding import (
     UnderstandingResult,
     UnderstandingStatus,
 )
+from kyrin.commands.visible_options import VisibleOption
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.desktop.window_presence import WindowPresence
@@ -56,11 +57,13 @@ class FakeModel:
         self.confirmation = confirmation
         self.calls = 0
         self.confirmation_calls = 0
+        self.last_context: CommandContext | None = None
 
     def understand(
         self, source: UnderstandingInput, *, context: CommandContext
     ) -> UnderstandingResult:
         self.calls += 1
+        self.last_context = context
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -86,6 +89,8 @@ def _interpreter(
     model: FakeModel,
     *,
     supported_chat_apps: frozenset[str] = frozenset(),
+    visible_options: tuple[VisibleOption, ...] = (),
+    allow_visible_control: bool = False,
 ) -> ModelAssistedInterpreter:
     applications = tmp_path / "applications"
     applications.mkdir()
@@ -114,6 +119,145 @@ def _interpreter(
         names,
         allowed_apps=frozenset({"telegram", "browser", "visual-studio-code"}),
         supported_chat_apps=supported_chat_apps,
+        allow_visible_control=allow_visible_control,
+        visible_options_reader=(
+            FakeVisibleOptionsReader(visible_options) if allow_visible_control else None
+        ),
+    )
+
+
+class FakeVisibleOptionsReader:
+    def __init__(self, options: tuple[VisibleOption, ...]) -> None:
+        self.options = options
+
+    def read_options(
+        self, expected_app: str, utterance: str
+    ) -> tuple[VisibleOption, ...]:
+        assert expected_app == "example.desktop"
+        assert utterance
+        return self.options
+
+
+def _visible_ready(
+    spoken_target: str, option_id: str, state: bool | None = None
+) -> UnderstandingResult:
+    return UnderstandingResult(
+        UnderstandingStatus.READY,
+        (
+            ProposedMeaning(
+                (
+                    MeaningStep(
+                        RequestedOperation.VISIBLE_CONTROL,
+                        spoken_target,
+                        control_state=state,
+                        target_id=option_id,
+                    ),
+                )
+            ),
+        ),
+    )
+
+
+def test_natural_request_uses_screen_option_id_to_correct_spelling(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_visible_ready("seating", "1"))
+    option = VisibleOption("1", "Settings", "accessibility", "button", anchor=(75, 42))
+    interpreter = _interpreter(
+        tmp_path, model, visible_options=(option,), allow_visible_control=True
+    )
+
+    result = interpreter.interpret(
+        "Could you open seating please?",
+        language="en",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=None,
+    )
+
+    assert result == ReadyCommand(
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL,
+            "Settings",
+            control_source="accessibility",
+            control_anchor=(75, 42),
+        )
+    )
+    assert model.last_context is not None
+    assert model.last_context.visible_options == (option,)
+
+
+def test_natural_state_request_requires_matching_screen_option_and_direction(
+    tmp_path: Path,
+) -> None:
+    option = VisibleOption("2", "Notifications", "accessibility", "switch", True)
+    context = CommandContext(observed_scroll_app="example.desktop")
+    model = FakeModel(_visible_ready("Notifications", "2", False))
+    interpreter = _interpreter(
+        tmp_path, model, visible_options=(option,), allow_visible_control=True
+    )
+    assert interpreter.interpret(
+        "I want Notifications off", language="en", context=context, pending=None
+    ) == ReadyCommand(
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL,
+            "Notifications",
+            control_state=False,
+            control_source="accessibility",
+        )
+    )
+    model.result = _visible_ready("Notifications", "2", True)
+    assert isinstance(
+        interpreter.interpret(
+            "I want Notifications off", language="en", context=context, pending=None
+        ),
+        UnrecognizedCommand,
+    )
+
+
+def test_model_cannot_invent_visible_option_or_use_it_without_focus(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_visible_ready("Search", "9"))
+    interpreter = _interpreter(
+        tmp_path,
+        model,
+        visible_options=(VisibleOption("1", "Search", "ocr"),),
+        allow_visible_control=True,
+    )
+    assert isinstance(
+        interpreter.interpret(
+            "Please tap Search",
+            language="en",
+            context=CommandContext(observed_scroll_app="example.desktop"),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+    assert isinstance(
+        interpreter.interpret(
+            "Please tap Search", language="en", context=CommandContext(), pending=None
+        ),
+        UnrecognizedCommand,
+    )
+
+
+def test_click_on_is_not_mistaken_for_switch_on(tmp_path: Path) -> None:
+    model = FakeModel(_visible_ready("Search", "1"))
+    interpreter = _interpreter(
+        tmp_path,
+        model,
+        visible_options=(VisibleOption("1", "Search", "accessibility"),),
+        allow_visible_control=True,
+    )
+    assert interpreter.interpret(
+        "Could you click on Search?",
+        language="en",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=None,
+    ) == ReadyCommand(
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL, "Search", control_source="accessibility"
+        )
     )
 
 
@@ -233,7 +377,9 @@ def test_unrecognizable_stt_cannot_invent_visual_studio_code(
     [
         (
             "Kindly open Telegram",
-            RequestedOperation.OPEN_APP, "Browser", "en",
+            RequestedOperation.OPEN_APP,
+            "Browser",
+            "en",
         ),
         ("Do not open Telegram", RequestedOperation.OPEN_APP, "Telegram", "en"),
         ("Öffne Telegram", RequestedOperation.OPEN_APP, "Telegram", "de"),
@@ -272,9 +418,7 @@ def test_explicit_polite_close_does_not_depend_on_model(
 
 def test_negated_polite_close_never_executes(tmp_path: Path) -> None:
     model = FakeModel(_ready(RequestedOperation.CLOSE_APP_WINDOW, "Telegram"))
-    result = _interpret(
-        _interpreter(tmp_path, model), "Kindly do not close Telegram"
-    )
+    result = _interpret(_interpreter(tmp_path, model), "Kindly do not close Telegram")
     assert not isinstance(result, ReadyCommand)
 
 
@@ -345,19 +489,19 @@ def test_close_cloud_needs_one_explicit_confirmation(
     names = CatalogSpokenAppResolver(
         XdgDesktopAppCatalog((tmp_path,)), {"claude.desktop": "claude"}
     )
-    rules = DemoCommandInterpreter(
-        names, allowed_close_apps=frozenset({"claude"})
-    )
+    rules = DemoCommandInterpreter(names, allowed_close_apps=frozenset({"claude"}))
     model = FakeModel(
         CommandModelError("offline"), confirmation=CommandModelError("offline")
     )
-    coordinator = CommandCoordinator(ModelAssistedInterpreter(
-        rules,
-        model,
-        names,
-        allowed_apps=frozenset({"claude"}),
-        supported_chat_apps=frozenset(),
-    ))
+    coordinator = CommandCoordinator(
+        ModelAssistedInterpreter(
+            rules,
+            model,
+            names,
+            allowed_apps=frozenset({"claude"}),
+            supported_chat_apps=frozenset(),
+        )
+    )
 
     first = coordinator.observe(
         TranscriptUpdate(0, "Close.", TranscriptStatus.FINAL, "en")
@@ -391,9 +535,7 @@ def test_new_close_command_is_not_classified_as_yes_to_old_app_question(
     model = FakeModel(
         CommandModelError("offline"), confirmation=ConfirmationDecision.YES
     )
-    names = CatalogSpokenAppResolver(
-        XdgDesktopAppCatalog((tmp_path,)), {}
-    )
+    names = CatalogSpokenAppResolver(XdgDesktopAppCatalog((tmp_path,)), {})
     pending = PendingAppClarification(
         (SpokenAppCandidate("claude", "Claude"),),
         confirmation=True,
@@ -596,6 +738,48 @@ def test_ollama_device_options_and_probe() -> None:
             assert "num_gpu" not in options
         else:
             assert options["num_gpu"] == expected
+
+
+def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
+    request: dict[str, object] = {}
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        request.update(payload)
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "route": "execute",
+                        "steps": [
+                            {
+                                "operation": "visible_control",
+                                "target": "seating",
+                                "target_id": "1",
+                            }
+                        ],
+                    }
+                )
+            }
+        }
+
+    engine = OllamaCommandEngine(
+        "http://127.0.0.1:11435",
+        "qwen3.5:4b",
+        DevicePreference.AUTO,
+        transport=transport,
+    )
+    result = engine.understand(
+        UnderstandingInput("open seating", "en"),
+        context=CommandContext(
+            visible_options=(VisibleOption("1", "Settings", "accessibility"),)
+        ),
+    )
+    assert result.candidates[0].steps[0].target_id == "1"
+    messages = request["messages"]
+    assert isinstance(messages, list)
+    user = json.loads(messages[1]["content"])
+    assert user["context"]["visible_options"][0]["label"] == "Settings"
+    assert user["context"]["available_visible_actions"] == ["click"]
 
 
 def test_explicit_gpu_without_gpu_memory_does_not_claim_success() -> None:

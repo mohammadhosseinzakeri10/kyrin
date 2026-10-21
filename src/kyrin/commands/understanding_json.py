@@ -58,8 +58,7 @@ def decode_model_response(payload: object) -> UnderstandingResult:
             isinstance(item, Mapping)
             and set(item) <= {"operation", "target", "app", "reply"}
             and all(
-                item.get(field, "") == ""
-                for field in ("operation", "target", "app")
+                item.get(field, "") == "" for field in ("operation", "target", "app")
             )
         ):
             nested_reply = item.get("reply")
@@ -80,6 +79,8 @@ def decode_model_response(payload: object) -> UnderstandingResult:
             "target",
             "app",
             "polarity",
+            "state",
+            "target_id",
         }:
             raise ValueError("invalid model step fields")
         operation_name = raw.get("operation")
@@ -103,6 +104,21 @@ def decode_model_response(payload: object) -> UnderstandingResult:
                 raise ValueError(f"invalid model {field}")
         target = raw.get("target")
         app = raw.get("app")
+        state = raw.get("state")
+        target_id = raw.get("target_id")
+        if state is not None and (
+            operation is not RequestedOperation.VISIBLE_CONTROL
+            or type(state) is not bool
+        ):
+            raise ValueError("state is only valid for a visible control")
+        if operation is RequestedOperation.VISIBLE_CONTROL and app is not None:
+            raise ValueError("visible control uses the focused window, not an app name")
+        if target_id is not None and (
+            operation is not RequestedOperation.VISIBLE_CONTROL
+            or not isinstance(target_id, str)
+            or not target_id.isdecimal()
+        ):
+            raise ValueError("target_id is only valid for a visible option")
         if operation in _SYSTEM_OPERATIONS:
             if target is not None or app is not None:
                 raise ValueError("system proposal cannot name an app")
@@ -119,7 +135,7 @@ def decode_model_response(payload: object) -> UnderstandingResult:
             ):
                 raise ValueError("app context is only valid for a chat proposal")
             app = None
-        steps.append(MeaningStep(operation, target, app, polarity))
+        steps.append(MeaningStep(operation, target, app, polarity, state, target_id))
 
     if route == "execute":
         if not steps or any(

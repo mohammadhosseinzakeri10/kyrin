@@ -91,7 +91,31 @@ class DesktopControlExecutor:
                 ActionOutcome.FAILED,
                 error_code="visible_control_screen_access_required",
             )
-        target = self._verifier.find_visible_control(*identity, label)
+        target = (
+            None
+            if request.intent.control_source == "accessibility"
+            else self._verifier.find_visible_control(*identity, label)
+        )
+        if request.intent.control_source == "ocr" and target is None:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="visible_control_uncertain",
+            )
+        anchor = request.intent.control_anchor
+        if (
+            target is not None
+            and anchor is not None
+            and (
+                abs(target.left + target.width // 2 - anchor[0]) > 24
+                or abs(target.top + target.height // 2 - anchor[1]) > 24
+            )
+        ):
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="visible_control_target_changed",
+            )
         if self._identity_reader() != identity:
             return ActionResult(
                 request.key,
@@ -130,6 +154,7 @@ class DesktopControlExecutor:
                     mode,
                     label,
                     "visible" if target is not None else "accessible",
+                    *([str(anchor[0]), str(anchor[1])] if anchor is not None else []),
                 ],
                 capture_output=True,
                 text=True,

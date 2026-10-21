@@ -6,6 +6,7 @@ from typing import Literal
 
 from kyrin.commands.app_names import SpokenAppCandidate
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
+from kyrin.commands.visible_options import VisibleOption
 
 
 class CommandKind(StrEnum):
@@ -46,6 +47,8 @@ class CommandIntent:
     scroll_area: str | None = None
     chat_scope: Literal["search", "visible"] = "search"
     control_state: bool | None = None
+    control_source: Literal["accessibility", "ocr"] | None = None
+    control_anchor: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -72,6 +75,17 @@ class CommandIntent:
                 raise ValueError("control state must be boolean")
         elif self.control_state is not None:
             raise ValueError("only visible controls may carry a state")
+        if (
+            self.kind is not CommandKind.VISIBLE_CONTROL
+            and self.control_source is not None
+        ):
+            raise ValueError("only visible controls may carry a source")
+        if self.control_anchor is not None and (
+            self.kind is not CommandKind.VISIBLE_CONTROL
+            or len(self.control_anchor) != 2
+            or any(type(value) is not int or value < 0 for value in self.control_anchor)
+        ):
+            raise ValueError("only visible controls may carry a valid anchor")
         if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
             "archive",
             "contacts",
@@ -150,6 +164,7 @@ class CommandContext:
     observed_scroll_app: str | None = None
     recent_scroll_area: str | None = None
     telegram_settings_context: bool = False
+    visible_options: tuple[VisibleOption, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

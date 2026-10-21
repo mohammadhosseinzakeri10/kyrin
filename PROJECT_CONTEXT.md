@@ -25,6 +25,22 @@
 > Synthetic tests pass, but a restarted owner test in multiple apps is still
 > needed. This generic route does not replace the Telegram-specific flows.
 
+> **Natural visible-control requests (2026-10-21, awaiting live test):** When a
+> local command-understanding model and generic desktop control are selected,
+> free-form control requests now receive a fresh catalog of uniquely named
+> controls from AT-SPI and, when the spoken name is not uniquely available
+> there, confident OCR text in the focused window. The
+> catalog and available actions are passed to the model; it must return the
+> ID of one catalog option and retain a target phrase from the current speech.
+> The interpreter independently checks the utterance's action and requested
+> on/off direction before constructing `visible_control`. The selected label
+> and its OCR/accessibility source and location are passed to the executor,
+> which rereads the focused target before dispatching input. A missing,
+> repeated, moved, or stale
+> OCR target and an unverified accessibility target stop safely. The model
+> does not identify unlabeled icon graphics. This is an offline local-model
+> path and is currently verified by deterministic tests, not a live owner run.
+
 > **Visible-chat live retest and one-row behavior (2026-10-21):** The owner
 > confirmed that `matin` and `visionet` actually opened after the prior
 > correction. `visionet` was reported as `chat_unverified` because the

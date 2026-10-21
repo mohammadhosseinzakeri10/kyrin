@@ -22,6 +22,7 @@ class CommandModelError(RuntimeError):
 
 _OPERATIONS = [
     "show_all_windows",
+    "visible_control",
     "open_app",
     "open_chat",
     "restore_app",
@@ -59,6 +60,8 @@ _SCHEMA: dict[str, object] = {
                     "target": {"type": "string"},
                     "app": {"type": "string"},
                     "polarity": {"type": "string", "enum": ["affirmative", "negated"]},
+                    "state": {"type": "boolean"},
+                    "target_id": {"type": "string"},
                 },
                 "required": ["operation"],
                 "additionalProperties": False,
@@ -104,6 +107,20 @@ _SYSTEM = (
     "running program'; these request a chooser, not opening each app. "
     "open_chat is only for an explicit chat or conversation inside an app; "
     "never use open_chat for a request to open the app itself. "
+    "visible_control means activating one named control in the currently focused "
+    "window, including buttons, menu entries, and named icons. Use it for "
+    "natural requests such as 'could you tap Search', 'I want the sound settings "
+    "opened', or 'روی جستجو بزن'. Put the exact spoken control name in target. "
+    "When visible_options are supplied, visible_control must choose exactly "
+    "one option_id from that list and copy it to target_id. Do not invent an "
+    "option or use an old option. If no listed option matches, choose clarify. "
+    "The available_visible_actions list states which control actions this "
+    "session can perform; do not propose an action outside that list. "
+    "Omit state and target_id for operations other than visible_control. "
+    "For a requested switch, checkbox, or enable/disable action include state "
+    "true for on and false for off. Do not set state for a plain click. "
+    "Never infer an unnamed icon, coordinate, or a target absent from the "
+    "current utterance. If the target is unclear, choose clarify. "
     "For other operations, copy the target exactly from the utterance; "
     "do not translate, correct, "
     "or invent an application name. "
@@ -120,7 +137,8 @@ _SYSTEM = (
     "'anything' or 'whatever you need'. Never claim an "
     "action was completed. For unrelated background speech return no_action. "
     "Return at most three ordered steps. The required keys are route and steps. "
-    "The permitted step keys are operation, target, app, and polarity. "
+    "The permitted step keys are operation, target, app, polarity, state, and "
+    "target_id. "
     "Only respond may include the reply key, at most 300 characters."
 )
 _CONFIRMATION_SYSTEM = (
@@ -190,6 +208,29 @@ class OllamaCommandEngine:
                             "context": {
                                 "observed_active_app": context.observed_active_app,
                                 "recent_utterances": context.recent_utterances[-6:],
+                                "visible_options": [
+                                    {
+                                        "option_id": option.option_id,
+                                        "label": option.label,
+                                        "source": option.source,
+                                        "role": option.role,
+                                        "checked": option.checked,
+                                    }
+                                    for option in context.visible_options
+                                ],
+                                "available_visible_actions": (
+                                    ["click"]
+                                    + (
+                                        ["set_on", "set_off"]
+                                        if any(
+                                            option.checked is not None
+                                            for option in context.visible_options
+                                        )
+                                        else []
+                                    )
+                                    if context.visible_options
+                                    else []
+                                ),
                             },
                         },
                         ensure_ascii=False,

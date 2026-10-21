@@ -2,6 +2,8 @@
 
 import re
 from collections.abc import Callable
+from dataclasses import replace
+from typing import Protocol
 
 from kyrin.commands.app_names import AppNameResolver
 from kyrin.commands.interpreter import (
@@ -42,6 +44,7 @@ from kyrin.commands.understanding import (
     UnderstandingResult,
     UnderstandingStatus,
 )
+from kyrin.commands.visible_options import VisibleOption
 from kyrin.text_normalization import fold_case, source_spelling
 
 
@@ -79,6 +82,60 @@ _DESKTOP_QUALIFIER = re.compile(
     r"\b(?:window|windows|app|apps|application|applications|desktop)\b|"
     r"پنجره|برنامه"
 )
+_VISIBLE_ACTION_EN = re.compile(
+    r"\b(?:click|tap|press|select|choose|open|opened|show|go to|navigate to|"
+    r"turn on|turn off|switch on|switch off|enable|disable|check|uncheck)\b"
+)
+_VISIBLE_ACTION_FA = re.compile(
+    r"(?:کلیک|بزن|انتخاب|باز\s+کن|نشان\s+بده|برو|روشن\s+کن|"
+    r"خاموش\s+کن|فعال\s+کن|غیرفعال\s+کن|تیک\s+بزن|تیک\s+بردار)"
+)
+_VISIBLE_ON = re.compile(
+    r"\b(?:turn on|switch on|enable|check)\b|"
+    r"\b(?:want|make|set|turn|switch)\b[^.!?]{0,60}\bon\b|"
+    r"(?:روشن|(?<!غیر)فعال|تیک\s+بزن)"
+)
+_VISIBLE_OFF = re.compile(
+    r"\b(?:turn off|switch off|disable|uncheck)\b|"
+    r"\b(?:want|make|set|turn|switch)\b[^.!?]{0,60}\boff\b|"
+    r"(?:خاموش|غیرفعال|تیک\s+بردار)"
+)
+_VISIBLE_EXCLUDED = re.compile(
+    r"\b(?:if|when|maybe|perhaps|should i|how (?:do|can) i|"
+    r"don't|dont|not|never|without|instead of)\b|"
+    r"(?:اگر|شاید|چطور|چگونه|آیا|نباید|نکن|نمی\s*خواهم|به\s*جای)"
+)
+
+
+class VisibleOptionsReader(Protocol):
+    def read_options(
+        self, expected_app: str, utterance: str
+    ) -> tuple[VisibleOption, ...]: ...
+
+
+def _visible_request_supported(text: str, target: str, state: bool | None) -> bool:
+    """Check the proposal against the current utterance before UI grounding."""
+    normalized = fold_case(text)
+    if (
+        not _spoken_target_occurs(text, target)
+        or _VISIBLE_EXCLUDED.search(normalized)
+        or not (
+            _VISIBLE_ACTION_EN.search(normalized)
+            or _VISIBLE_ACTION_FA.search(normalized)
+            or _VISIBLE_ON.search(normalized)
+            or _VISIBLE_OFF.search(normalized)
+        )
+    ):
+        return False
+    on = bool(_VISIBLE_ON.search(normalized))
+    off = bool(_VISIBLE_OFF.search(normalized))
+    if on and off:
+        return False
+    return (
+        (state is None and not (on or off))
+        or (state is True and on)
+        or (state is False and off)
+    )
 
 
 class ModelAssistedInterpreter:
@@ -92,6 +149,8 @@ class ModelAssistedInterpreter:
         *,
         allowed_apps: frozenset[str],
         supported_chat_apps: frozenset[str],
+        allow_visible_control: bool = False,
+        visible_options_reader: VisibleOptionsReader | None = None,
         action_review: Callable[[CommandIntent, CommandContext], Interpretation]
         | None = None,
     ) -> None:
@@ -107,6 +166,8 @@ class ModelAssistedInterpreter:
         )
         self._grounder = SourceTargetGrounder(app_names)
         self._action_review = action_review
+        self._allow_visible_control = allow_visible_control
+        self._visible_options_reader = visible_options_reader
 
     def interpret(
         self,
@@ -142,9 +203,7 @@ class ModelAssistedInterpreter:
                 and pending.confirmation
                 and len(_words(text)) <= 5
             ):
-                if self._source_operations.extract(
-                    text, language=language
-                ).operations:
+                if self._source_operations.extract(text, language=language).operations:
                     return direct
                 try:
                     decision = self._model.classify_confirmation(
@@ -153,8 +212,7 @@ class ModelAssistedInterpreter:
                             f"Close {pending.candidates[0].display_name}?"
                             if pending.operation is CommandKind.CLOSE_APP_WINDOW
                             else (
-                                "Is this the "
-                                f"{pending.candidates[0].display_name} app?"
+                                f"Is this the {pending.candidates[0].display_name} app?"
                             )
                         ),
                     )
@@ -184,6 +242,23 @@ class ModelAssistedInterpreter:
         if not text.strip():
             return direct
         source = UnderstandingInput(text, language)
+        if (
+            self._allow_visible_control
+            and self._visible_options_reader is not None
+            and context.observed_scroll_app
+            and (
+                _VISIBLE_ACTION_EN.search(fold_case(text))
+                or _VISIBLE_ACTION_FA.search(fold_case(text))
+                or _VISIBLE_ON.search(fold_case(text))
+                or _VISIBLE_OFF.search(fold_case(text))
+            )
+        ):
+            context = replace(
+                context,
+                visible_options=self._visible_options_reader.read_options(
+                    context.observed_scroll_app, text
+                ),
+            )
         try:
             proposal = self._model.understand(source, context=context)
         except CommandModelError, ValueError:
@@ -202,6 +277,47 @@ class ModelAssistedInterpreter:
         if proposal.status is not UnderstandingStatus.READY:
             return UnrecognizedCommand()
         steps = proposal.candidates[0].steps
+        if any(step.operation is RequestedOperation.VISIBLE_CONTROL for step in steps):
+            if (
+                not self._allow_visible_control
+                or not context.observed_scroll_app
+                or len(steps) != 1
+            ):
+                return UnrecognizedCommand()
+            visible_step = steps[0]
+            target = visible_step.target_phrase
+            option = next(
+                (
+                    item
+                    for item in context.visible_options
+                    if item.option_id == visible_step.target_id
+                ),
+                None,
+            )
+            if (
+                target is None
+                or option is None
+                or (visible_step.control_state is not None and option.checked is None)
+                or not _visible_request_supported(
+                    text, target, visible_step.control_state
+                )
+            ):
+                return UnrecognizedCommand()
+            try:
+                intent = CommandIntent(
+                    CommandKind.VISIBLE_CONTROL,
+                    option.label,
+                    control_state=visible_step.control_state,
+                    control_source=option.source,
+                    control_anchor=option.anchor,
+                )
+            except ValueError:
+                return UnrecognizedCommand()
+            return (
+                self._action_review(intent, context)
+                if self._action_review is not None
+                else ReadyCommand(intent)
+            )
         if (
             len(steps) == 1
             and steps[0].operation is RequestedOperation.SHOW_ALL_WINDOWS

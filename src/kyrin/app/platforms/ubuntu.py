@@ -19,6 +19,7 @@ from kyrin.actions.models import (
 )
 from kyrin.actions.observed_executor import ObservedAppExecutor
 from kyrin.actions.platforms.desktop_control import DesktopControlExecutor
+from kyrin.actions.platforms.desktop_control_inventory import DesktopControlInventory
 from kyrin.actions.platforms.desktop_scroll import DesktopScrollExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
 from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
@@ -456,6 +457,16 @@ class UbuntuSessionFactory:
                     supported_chat_apps=frozenset({"telegram"})
                     if "telegram" in settings.allowed_chat_apps
                     else frozenset(),
+                    allow_visible_control=settings.allow_desktop_control,
+                    visible_options_reader=(
+                        DesktopControlInventory(
+                            self._focused_window, self._chat_verifier
+                        )
+                        if settings.allow_desktop_control
+                        and self._focused_window is not None
+                        and self._chat_verifier is not None
+                        else None
+                    ),
                     action_review=rules.review_model_action,
                 )
             try:

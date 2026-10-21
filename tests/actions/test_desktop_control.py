@@ -158,6 +158,93 @@ def test_focus_change_stops_before_input(monkeypatch: pytest.MonkeyPatch) -> Non
     assert executor.execute(request).error_code == "visible_control_focus_changed"
 
 
+def test_model_selected_ocr_option_must_still_be_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        desktop_control.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("must not click a vanished OCR option"),
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(CommandKind.VISIBLE_CONTROL, "Settings", control_source="ocr"),
+    )
+
+    class MissingVerifier:
+        def ready(self) -> bool:
+            return True
+
+        def find_visible_control(self, *_args: object) -> None:
+            return None
+
+    executor = desktop_control.DesktopControlExecutor(
+        Delegate(),
+        identity_reader=lambda: ("example.desktop", 42),
+        verifier=MissingVerifier(),
+    )
+    assert executor.execute(request).error_code == "visible_control_uncertain"
+
+
+def test_model_selected_accessibility_icon_stays_on_accessibility_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, "CLICK_DISPATCHED", "")
+
+    monkeypatch.setattr(desktop_control.subprocess, "run", run)
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL,
+            "Search",
+            control_source="accessibility",
+            control_anchor=(40, 20),
+        ),
+    )
+
+    class AccessibleVerifier:
+        def ready(self) -> bool:
+            return True
+
+        def find_visible_control(self, *_args: object) -> None:
+            pytest.fail("selected accessible icon must not use OCR coordinates")
+
+    executor = desktop_control.DesktopControlExecutor(
+        Delegate(),
+        identity_reader=lambda: ("example.desktop", 42),
+        verifier=AccessibleVerifier(),
+    )
+    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert commands[0][-3:] == ["accessible", "40", "20"]
+
+
+def test_moved_ocr_option_stops_before_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        desktop_control.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("moved target must not be clicked"),
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL,
+            "Advanced",
+            control_source="ocr",
+            control_anchor=(250, 80),
+        ),
+    )
+    executor = desktop_control.DesktopControlExecutor(
+        Delegate(),
+        identity_reader=lambda: ("example.desktop", 42),
+        verifier=Verifier(VisibleControlTarget(40, 80, 90, 18, 800, 600)),
+    )
+    assert executor.execute(request).error_code == "visible_control_target_changed"
+
+
 def test_unlabeled_icon_uses_accessibility_and_unknown_state_stops(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

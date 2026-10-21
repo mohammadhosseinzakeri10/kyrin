@@ -14,7 +14,7 @@ from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
-from kyrin.actions.visible_control import VisibleControlTarget
+from kyrin.actions.visible_control import VisibleControlTarget, VisibleTextOption
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
 from kyrin.text_normalization import fold_case
@@ -102,6 +102,10 @@ def _keep_global_scope(
 
 class ChatVerifier(Protocol):
     def ready(self) -> bool: ...
+
+    def list_visible_text(
+        self, app_id: str, pid: int
+    ) -> tuple[VisibleTextOption, ...]: ...
 
     def find_visible_control(
         self, app_id: str, pid: int, label: str

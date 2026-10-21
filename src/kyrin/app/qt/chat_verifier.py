@@ -20,7 +20,12 @@ from kyrin.actions.telegram_verification import (
     unique_search_result,
 )
 from kyrin.actions.visible_chat_grounding import assess_visible_chat_grounding
-from kyrin.actions.visible_control import VisibleControlTarget, unique_visible_target
+from kyrin.actions.visible_control import (
+    VisibleControlTarget,
+    VisibleTextOption,
+    unique_visible_target,
+    visible_ocr_labels,
+)
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.vision.ocr.contracts import OcrOptions
@@ -46,9 +51,16 @@ class _Request:
     view_title: bool = False
     search_query: bool = False
     visible_control: bool = False
+    visible_inventory: bool = False
     finished: Event = field(default_factory=Event)
     result: (
-        bool | str | ChatSearchMatch | ChatSearchChoices | VisibleControlTarget | None
+        bool
+        | str
+        | ChatSearchMatch
+        | ChatSearchChoices
+        | VisibleControlTarget
+        | tuple[VisibleTextOption, ...]
+        | None
     ) = None
 
 
@@ -173,9 +185,21 @@ class QtChatVerifier(QObject):
         )
         return result if isinstance(result, VisibleControlTarget) else None
 
+    def list_visible_text(self, app_id: str, pid: int) -> tuple[VisibleTextOption, ...]:
+        result = self._ask(_Request(app_id, pid, visible_inventory=True), timeout_s=18)
+        return result if isinstance(result, tuple) else ()
+
     def _ask(
         self, request: _Request, *, timeout_s: float
-    ) -> bool | str | ChatSearchMatch | ChatSearchChoices | VisibleControlTarget | None:
+    ) -> (
+        bool
+        | str
+        | ChatSearchMatch
+        | ChatSearchChoices
+        | VisibleControlTarget
+        | tuple[VisibleTextOption, ...]
+        | None
+    ):
         if QThread.currentThread() == self.thread():
             return None
         self.requested.emit(request)
@@ -224,7 +248,7 @@ class QtChatVerifier(QObject):
             and {"fas", "eng"}.issubset(self._reader.supported_languages)
             else None
         )
-        if request.visible_control:
+        if request.visible_control or request.visible_inventory:
             available_languages = sorted(
                 self._reader.supported_languages.difference({"osd", "equ"})
             )
@@ -265,6 +289,7 @@ class QtChatVerifier(QObject):
                 request.search_query,
                 request.left_label,
                 request.visible_control,
+                request.visible_inventory,
             )
         ):
             started = self._reader.read(language, region="chat_header")
@@ -285,18 +310,25 @@ class QtChatVerifier(QObject):
             | ChatSearchMatch
             | ChatSearchChoices
             | VisibleControlTarget
+            | tuple[VisibleTextOption, ...]
             | None
         ) = None
         if (
             isinstance(observation, IdentifiedWindowText)
             and pending.app_id is not None
             and pending.pid is not None
-            and (pending.target is not None or pending.settings_header)
+            and (
+                pending.target is not None
+                or pending.settings_header
+                or pending.visible_inventory
+            )
         ):
             if pending.settings_header:
                 result = telegram_settings_header(
                     observation, pending.app_id, pending.pid
                 )
+            elif pending.visible_inventory:
+                result = visible_ocr_labels(observation, pending.app_id, pending.pid)
             elif pending.visible_control:
                 assert pending.target is not None
                 result = unique_visible_target(
@@ -454,6 +486,7 @@ class QtChatVerifier(QObject):
         | ChatSearchMatch
         | ChatSearchChoices
         | VisibleControlTarget
+        | tuple[VisibleTextOption, ...]
         | None,
     ) -> None:
         pending = self._pending

@@ -26,20 +26,50 @@ def test_execute_preserves_spoken_target_and_order() -> None:
 
 
 def test_window_overview_is_targetless_and_cannot_smuggle_an_app() -> None:
-    result = decode_model_response({
-        "route": "execute",
-        "steps": [{"operation": "show_all_windows", "target": ""}],
-    })
+    result = decode_model_response(
+        {
+            "route": "execute",
+            "steps": [{"operation": "show_all_windows", "target": ""}],
+        }
+    )
     assert (
-        result.candidates[0].steps[0].operation
-        is RequestedOperation.SHOW_ALL_WINDOWS
+        result.candidates[0].steps[0].operation is RequestedOperation.SHOW_ALL_WINDOWS
     )
     assert result.candidates[0].steps[0].target_phrase is None
     with pytest.raises(ValueError):
-        decode_model_response({
+        decode_model_response(
+            {
+                "route": "execute",
+                "steps": [{"operation": "show_all_windows", "target": "Telegram"}],
+            }
+        )
+
+
+def test_visible_control_requires_a_valid_option_reference() -> None:
+    result = decode_model_response(
+        {
             "route": "execute",
-            "steps": [{"operation": "show_all_windows", "target": "Telegram"}],
-        })
+            "steps": [
+                {
+                    "operation": "visible_control",
+                    "target": "Notifications",
+                    "target_id": "2",
+                    "state": False,
+                }
+            ],
+        }
+    )
+    step = result.candidates[0].steps[0]
+    assert step.target_id == "2"
+    assert step.control_state is False
+    for invalid in (
+        {"operation": "open_app", "target": "Telegram", "target_id": "2"},
+        {"operation": "visible_control", "target": "Sound", "target_id": "fake"},
+        {"operation": "visible_control", "target": "Sound", "state": "off"},
+        {"operation": "visible_control", "target": "Sound", "app": "Telegram"},
+    ):
+        with pytest.raises(ValueError):
+            decode_model_response({"route": "execute", "steps": [invalid]})
 
 
 def test_redundant_app_field_is_discarded_only_when_it_matches_target() -> None:
