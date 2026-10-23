@@ -24,9 +24,12 @@ def _same_line(left: RecognizedText, right: RecognizedText) -> bool:
         horizontal_gap = left_box.left - (right_box.left + right_box.width)
     else:
         horizontal_gap = right_box.left - (left_box.left + left_box.width)
-    return overlaps_vertically and 0 <= horizontal_gap <= max(
-        12, 2 * max(left_box.height, right_box.height)
-    )
+    # OCR boxes can slightly overlap even for adjacent words (for example a
+    # button border may be included in one word's box). Keep the allowance
+    # small so two distant or unrelated spans cannot become one phrase.
+    overlap_limit = min(12, max(left_box.height, right_box.height))
+    gap_limit = max(12, 2 * max(left_box.height, right_box.height))
+    return overlaps_vertically and -overlap_limit <= horizontal_gap <= gap_limit
 
 
 @dataclass(frozen=True, slots=True)

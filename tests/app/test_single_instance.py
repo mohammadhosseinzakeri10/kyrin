@@ -41,6 +41,7 @@ def test_second_instance_activates_first(application: QApplication) -> None:
         assert primary.start()
         assert not secondary.start()
         application.processEvents()
+        application.processEvents()
         assert activations == ["show"]
     finally:
         primary.close()
@@ -54,6 +55,29 @@ def test_abandoned_socket_is_recovered(application: QApplication) -> None:
     primary = SingleInstanceGuard(address)
     try:
         assert primary.start()
+    finally:
+        primary.close()
+        address.unlink(missing_ok=True)
+
+
+def test_audio_paste_request_is_distinct_from_window_activation(
+    application: QApplication,
+) -> None:
+    address = Path("/tmp") / f"kyrin-test-{uuid4().hex[:12]}.sock"
+    primary = SingleInstanceGuard(address)
+    pastes: list[str] = []
+    activations: list[str] = []
+    primary.audio_paste_requested.connect(lambda: pastes.append("paste"))
+    primary.activation_requested.connect(lambda: activations.append("show"))
+    try:
+        assert primary.start()
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(str(address))
+            client.sendall(b"paste-audio\n")
+        application.processEvents()
+        application.processEvents()
+        assert pastes == ["paste"]
+        assert activations == []
     finally:
         primary.close()
         address.unlink(missing_ok=True)

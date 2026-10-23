@@ -1,12 +1,13 @@
 """Match spoken names against the device catalog before permission filtering."""
 
 import re
+import time
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from kyrin.commands.app_names import SpokenAppCandidate, SpokenAppMatch
+from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate, SpokenAppMatch
 from kyrin.desktop.app_catalog import AppCatalog
 
 
@@ -92,6 +93,8 @@ class CatalogSpokenAppResolver:
         self._names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
         self._registered_names: tuple[_RegisteredName, ...] = ()
         self._browser_candidates: tuple[SpokenAppCandidate, ...] = ()
+        self._model_options: tuple[ModelAppOption, ...] = ()
+        self._last_refresh = 0.0
         self.refresh()
 
     def refresh(self) -> None:
@@ -99,6 +102,7 @@ class CatalogSpokenAppResolver:
         names: dict[str, tuple[SpokenAppCandidate, set[str]]] = {}
         registered: list[_RegisteredName] = []
         browser_ids: set[str] = set()
+        model_options: list[ModelAppOption] = []
         for installed in self._catalog.list_apps():
             app_id = self._app_ids.get(installed.platform_id)
             user_spellings = {
@@ -129,6 +133,24 @@ class CatalogSpokenAppResolver:
             )
             if app_id is None:
                 continue
+            model_options.append(
+                ModelAppOption(
+                    app_id,
+                    installed.platform_id,
+                    installed.display_name,
+                    tuple(
+                        dict.fromkeys(
+                            (
+                                *installed.alternate_names,
+                                *self._aliases.get(app_id, ()),
+                                *self._registered_aliases.get(
+                                    installed.platform_id, ()
+                                ),
+                            )
+                        )
+                    ),
+                )
+            )
             if "WebBrowser" in installed.categories:
                 browser_ids.add(app_id)
             _, allowed_spellings = names.setdefault(
@@ -146,6 +168,14 @@ class CatalogSpokenAppResolver:
                 ),
             )
         )
+        self._model_options = tuple(sorted(model_options, key=lambda item: item.app_id))
+        self._last_refresh = time.monotonic()
+
+    def model_options(self) -> tuple[ModelAppOption, ...]:
+        """Refresh installed names periodically; this catalog grants no permission."""
+        if time.monotonic() - self._last_refresh >= 60:
+            self.refresh()
+        return self._model_options
 
     def browser_candidates(self) -> tuple[SpokenAppCandidate, ...]:
         """Return only permitted installed apps registered as web browsers."""

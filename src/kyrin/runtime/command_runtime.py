@@ -9,7 +9,7 @@ import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import closing
 from datetime import UTC, datetime
-from threading import Lock
+from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
@@ -39,6 +39,7 @@ from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import SystemPowerFlow
 
 _LOGGER = logging.getLogger(__name__)
+_FILE_ACTION_DRAIN_TIMEOUT_S = 60.0
 
 
 def dispatch_command_action(
@@ -125,6 +126,7 @@ class LiveCommandRuntime:
         history: ConversationHistory | None = None,
         voice_standby: bool = False,
         on_voice_mode: Callable[[VoiceModeChanged], None] | None = None,
+        finite_source: bool = False,
     ) -> None:
         if (coordinator is None) != (gate is None):
             raise ValueError("coordinator and action gate must be supplied together")
@@ -149,6 +151,8 @@ class LiveCommandRuntime:
         self._commands_active = not voice_standby
         self._reset_dialogue = False
         self._on_voice_mode = on_voice_mode
+        self._finite_source = finite_source
+        self._stop_requested = Event()
         self._worker = (
             QueuedActionDispatcher(
                 lambda command: execute_final_command(
@@ -164,6 +168,9 @@ class LiveCommandRuntime:
         )
 
     def stop(self) -> None:
+        self._stop_requested.set()
+        if self._worker is not None:
+            self._worker.invalidate_pending()
         if self._telegram_selection is not None:
             self._telegram_selection.cancel()
         if self._system_power is not None:
@@ -176,6 +183,8 @@ class LiveCommandRuntime:
             self._commands_active = active
             if not active:
                 self._reset_dialogue = True
+                if self._worker is not None:
+                    self._worker.invalidate_pending()
 
     def _clear_dialogue_if_requested(self) -> None:
         with self._voice_lock:
@@ -227,11 +236,13 @@ class LiveCommandRuntime:
         """Consume speech until stopped, exhausted, or a terminal failure."""
         worker = self._worker
         coordinator = self._coordinator
+        exhausted = False
         try:
             if worker is not None:
                 worker.start()
             with closing(self._controller.events()) as stream:
                 for event in stream:
+                    generation = worker.generation if worker is not None else 0
                     self._clear_dialogue_if_requested()
                     if isinstance(event, SpeechSessionEnded):
                         self._end_stream()
@@ -280,7 +291,11 @@ class LiveCommandRuntime:
                         if worker is not None and isinstance(
                             decision, (CommandResolution, CommandPlanResolution)
                         ):
-                            notice = worker.submit(decision)
+                            notice = worker.submit(
+                                decision,
+                                wait_for_capacity=self._finite_source,
+                                generation=generation,
+                            )
                             if notice is not None:
                                 self._on_action_output(notice)
                         elif worker is None:
@@ -290,11 +305,23 @@ class LiveCommandRuntime:
                             ):
                                 self._on_action_output(action)
                     self._remember(event)
+            exhausted = True
         finally:
             try:
                 self._end_stream()
                 if worker is not None:
-                    worker.close()
+                    worker.close(
+                        drain=(
+                            self._finite_source
+                            and exhausted
+                            and not self._stop_requested.is_set()
+                        ),
+                        timeout_s=(
+                            _FILE_ACTION_DRAIN_TIMEOUT_S
+                            if self._finite_source
+                            else 20.0
+                        ),
+                    )
             finally:
                 if self._telegram_selection is not None:
                     self._telegram_selection.cancel()

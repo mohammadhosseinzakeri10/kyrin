@@ -165,7 +165,8 @@ PERSIAN: dict[str, str] = {
     "allow_desktop_control": "اجازهٔ کلیک روی گزینه‌های قابل‌دیدن در برنامهٔ فعال",
     "desktop_control_grant_now": "تنظیم دسترسی کلیک دسکتاپ…",
     "desktop_control_not_ready": (
-        "دسترسی کلیک ذخیره نشده است؛ ابتدا تنظیمات را ذخیره کنید."
+        "برای کلیک، مجوز یک‌بارهٔ Remote Desktop لازم است. "
+        "تنظیمات را ذخیره کنید و دکمهٔ تنظیم دسترسی را بزنید."
     ),
     "desktop_control_ready": "دسترسی کلیک دسکتاپ ذخیره شده است.",
     "desktop_control_running": "درخواست Remote Desktop سیستم را تأیید کنید…",

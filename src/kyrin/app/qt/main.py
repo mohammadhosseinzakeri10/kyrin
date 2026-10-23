@@ -25,6 +25,7 @@ from kyrin.app.platforms.xdg_startup import (
     XdgDesktopRegistration,
     user_desktop_paths,
 )
+from kyrin.app.qt.audio_file_import import AudioFileImport
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.chat_verifier import QtChatVerifier
 from kyrin.app.qt.document_text_reader import DocumentTextReader
@@ -402,6 +403,7 @@ def main() -> int:
         visual_publish=visual_sink.publish if visual_sink is not None else None,
     )
     controller = ApplicationController(factory, power_flow, start_in_standby=True)
+    audio_import = AudioFileImport(controller, factory, app)
     window = ControlWindow(
         settings,
         store,
@@ -438,8 +440,10 @@ def main() -> int:
         document_runtimes_root=document_runtimes_root,
         startup_registration=registration,
         startup_error=startup_error,
+        audio_import=audio_import,
     )
     window.show()
+    guard.audio_paste_requested.connect(window.paste_audio_file)
     guard.activation_requested.connect(lambda: _activate_window(window))
     QTimer.singleShot(0, window.start_initial_session)
     return app.exec()

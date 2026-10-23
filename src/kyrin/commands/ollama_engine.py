@@ -1,11 +1,15 @@
 """Local Ollama adapter that proposes command meaning, never an action."""
 
 import json
+import logging
 from collections.abc import Callable
+from difflib import SequenceMatcher
+from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from kyrin.commands.app_names import ModelAppOption
 from kyrin.commands.models import CommandContext
 from kyrin.commands.understanding import (
     ConfirmationDecision,
@@ -14,15 +18,21 @@ from kyrin.commands.understanding import (
 )
 from kyrin.commands.understanding_json import decode_model_response
 from kyrin.stt.device import DevicePreference
+from kyrin.text_normalization import fold_case
 
 
 class CommandModelError(RuntimeError):
     """The local model is unavailable or returned an invalid proposal."""
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 _OPERATIONS = [
     "show_all_windows",
     "visible_control",
+    "scroll_up",
+    "scroll_down",
     "open_app",
     "open_chat",
     "restore_app",
@@ -89,6 +99,15 @@ _SYSTEM = (
     "Use the utterance itself to understand meaning, including mixed scripts. "
     "The operation names in JSON are canonical English identifiers, not "
     "translations of the full utterance. "
+    "Understand the current utterance in its own language. The language hint "
+    "may be wrong and canonical operations do not require English speech. "
+    "installed_apps lists the installed applications this session permits; "
+    "use their names to interpret an app reference, but copy the actual spoken "
+    "target into the target field. Never invent an app or treat a catalog name "
+    "as permission for an unrequested action. "
+    "Only propose an operation listed in available_operations. An operation "
+    "may still need permission, a current target, or separate confirmation. "
+    "scroll_up and scroll_down move the focused window; omit target and app. "
     "Allowed routes: execute, clarify, confirm, no_action, respond, unsupported. "
     "Preserve negation. If the operation or target is uncertain, choose clarify. "
     "Never turn an application request into a computer power request. "
@@ -112,10 +131,15 @@ _SYSTEM = (
     "natural requests such as 'could you tap Search', 'I want the sound settings "
     "opened', or 'روی جستجو بزن'. Put the exact spoken control name in target. "
     "When visible_options are supplied, visible_control must choose exactly "
-    "one option_id from that list and copy it to target_id. Do not invent an "
-    "option or use an old option. If no listed option matches, choose clarify. "
+    "one option_id from that list and copy it to target_id. If the list is "
+    "empty, a clear request about a named visible control may propose "
+    "visible_control without target_id so the app can discover current options. "
+    "Do not invent an option or use an old option. If a nonempty option list "
+    "has no matching target, choose clarify. "
     "The available_visible_actions list states which control actions this "
-    "session can perform; do not propose an action outside that list. "
+    "session can perform. 'discover' means propose the spoken control name "
+    "and desired state without a target_id; the app will read the window "
+    "before deciding whether input is possible. "
     "Omit state and target_id for operations other than visible_control. "
     "For a requested switch, checkbox, or enable/disable action include state "
     "true for on and false for off. Do not set state for a plain click. "
@@ -148,6 +172,24 @@ _CONFIRMATION_SYSTEM = (
     "multi-part reply is unclear. Do not execute anything. "
     "Never infer consent from an app name alone."
 )
+
+
+def _relevant_app_names(
+    app: ModelAppOption, utterance: str, limit: int = 12
+) -> tuple[str, ...]:
+    """Keep the local model prompt bounded without losing a spoken alias."""
+    speech = fold_case(utterance)
+    names = tuple(dict.fromkeys(app.alternate_names))
+    ranked = sorted(
+        enumerate(names),
+        key=lambda entry: (
+            fold_case(entry[1]) in speech,
+            SequenceMatcher(None, fold_case(entry[1]), speech).ratio(),
+            -entry[0],
+        ),
+        reverse=True,
+    )
+    return tuple(name for _, name in ranked[:limit])
 
 
 def _post_json(url: str, payload: dict[str, object], timeout: float) -> object:
@@ -208,6 +250,22 @@ class OllamaCommandEngine:
                             "context": {
                                 "observed_active_app": context.observed_active_app,
                                 "recent_utterances": context.recent_utterances[-6:],
+                                "installed_apps": [
+                                    {
+                                        "app_id": app.app_id,
+                                        "platform_id": app.platform_id,
+                                        "display_name": app.display_name,
+                                        "alternate_names": _relevant_app_names(
+                                            app, utterance.text
+                                        ),
+                                    }
+                                    for app in context.available_apps
+                                ],
+                                "available_operations": (
+                                    context.available_operations
+                                    if context.available_operations is not None
+                                    else _OPERATIONS
+                                ),
                                 "visible_options": [
                                     {
                                         "option_id": option.option_id,
@@ -229,6 +287,8 @@ class OllamaCommandEngine:
                                         else []
                                     )
                                     if context.visible_options
+                                    else ["discover"]
+                                    if context.visible_control_enabled
                                     else []
                                 ),
                             },
@@ -305,7 +365,11 @@ class OllamaCommandEngine:
     def _invoke(self, payload: dict[str, object]) -> object:
         timeout = 120.0 if self._device is DevicePreference.CPU else 60.0
         try:
+            started = perf_counter()
             result = self._transport(f"{self._base_url}/api/chat", payload, timeout)
+            elapsed = perf_counter() - started
+            if elapsed >= 2.0:
+                _LOGGER.warning("Command model inference took %.1fs", elapsed)
             if self._device is not DevicePreference.AUTO:
                 vram = self._device_probe(self._base_url, self._model)
                 if vram is None or (self._device is DevicePreference.GPU) != (vram > 0):

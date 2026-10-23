@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from kyrin.commands.app_names import SpokenAppCandidate
+from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
 from kyrin.commands.visible_options import VisibleOption
 
@@ -49,6 +49,7 @@ class CommandIntent:
     control_state: bool | None = None
     control_source: Literal["accessibility", "ocr"] | None = None
     control_anchor: tuple[int, int] | None = None
+    control_window_app: str | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -86,6 +87,11 @@ class CommandIntent:
             or any(type(value) is not int or value < 0 for value in self.control_anchor)
         ):
             raise ValueError("only visible controls may carry a valid anchor")
+        if self.control_window_app is not None and (
+            self.kind is not CommandKind.VISIBLE_CONTROL
+            or not self.control_window_app.strip()
+        ):
+            raise ValueError("only visible controls may name a focused app")
         if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
             "archive",
             "contacts",
@@ -165,6 +171,9 @@ class CommandContext:
     recent_scroll_area: str | None = None
     telegram_settings_context: bool = False
     visible_options: tuple[VisibleOption, ...] = ()
+    visible_control_enabled: bool = False
+    available_apps: tuple[ModelAppOption, ...] = ()
+    available_operations: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,7 @@ proposal: focus, frame size and pointer movement are checked again here.
 
 import sys
 from pathlib import Path
+from time import monotonic, sleep
 from uuid import uuid4
 
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
@@ -31,6 +32,26 @@ from kyrin.app.permission_token import (  # noqa: E402
 TOKEN_PATH = permission_token_path("desktop-control")
 
 
+def _wait_for_pointer(
+    frame: tuple[str, int, int, int, int, int, int, int],
+    x: int,
+    y: int,
+    *,
+    timeout_s: float = 0.3,
+) -> bool:
+    """Wait briefly for asynchronous portal motion, without trusting a moved window."""
+    deadline = monotonic() + timeout_s
+    while True:
+        after = _window_and_pointer()
+        if after is None or after[:6] != frame[:6]:
+            return False
+        if abs(after[6] - x) <= 5 and abs(after[7] - y) <= 5:
+            return _focused_identity() == frame[:2]
+        if monotonic() >= deadline:
+            return False
+        sleep(min(0.05, max(0.0, deadline - monotonic())))
+
+
 def _accessible_control(
     label: str,
     frame: tuple[int, int, int, int],
@@ -41,7 +62,7 @@ def _accessible_control(
     strict_near: bool = False,
 ) -> tuple[bool | None, int, int] | None:
     """Locate one named actionable node in the focused app."""
-    import gi
+    import gi  # type: ignore[import-not-found]
 
     gi.require_version("Atspi", "2.0")
     from gi.repository import Atspi
@@ -125,6 +146,7 @@ def _click(
     desired: bool | None,
     accessible_only: bool,
     anchor: tuple[int, int] | None,
+    capture_geometry: tuple[int, int, int, int, int, int, int, int] | None = None,
 ) -> str:
     left, top, width, height, image_width, image_height = box
     if not accessible_only and (
@@ -139,12 +161,43 @@ def _click(
     if frame is None or frame[:2] != expected:
         return "FOCUS_CHANGED"
     _, _, frame_x, frame_y, frame_w, frame_h, pointer_x, pointer_y = frame
-    if not accessible_only and (
-        abs(frame_w - image_width) > 4 or abs(frame_h - image_height) > 4
-    ):
-        return "TARGET_CHANGED"
-    x = frame_x + left + width // 2
-    y = frame_y + top + height // 2
+    if not accessible_only and capture_geometry is not None:
+        capture_x, capture_y, capture_w, capture_h, *captured_frame = capture_geometry
+        if (frame_x, frame_y, frame_w, frame_h) != tuple(captured_frame):
+            return "TARGET_CHANGED:frame_size"
+        extra_w = image_width - capture_w
+        extra_h = image_height - capture_h
+        symmetric_shadow = (
+            (capture_x, capture_y, capture_w, capture_h)
+            == (frame_x, frame_y, frame_w, frame_h)
+            and 0 < extra_w == extra_h <= 128
+            and extra_w % 2 == 0
+        )
+        if symmetric_shadow:
+            # GNOME's window PNG can include the drop shadow while its area
+            # describes only the frame. The extra border is on every side.
+            x = capture_x + left + width // 2 - extra_w // 2
+            y = capture_y + top + height // 2 - extra_h // 2
+        elif (
+            abs(extra_w) <= max(4, capture_w // 50)
+            and abs(extra_h) <= max(4, capture_h // 50)
+        ):
+            x = capture_x + round((left + width / 2) * capture_w / image_width)
+            y = capture_y + round((top + height / 2) * capture_h / image_height)
+        else:
+            return (
+                "TARGET_CHANGED:image_scale_"
+                f"{capture_w}x{capture_h}_png_{image_width}x{image_height}"
+            )
+        if not (frame_x <= x < frame_x + frame_w and frame_y <= y < frame_y + frame_h):
+            return "TARGET_UNCERTAIN"
+    else:
+        if not accessible_only and (
+            abs(frame_w - image_width) > 4 or abs(frame_h - image_height) > 4
+        ):
+            return "CAPTURE_GEOMETRY_REQUIRED"
+        x = frame_x + left + width // 2
+        y = frame_y + top + height // 2
     if desired is not None or accessible_only:
         control = _accessible_control(
             label,
@@ -178,15 +231,8 @@ def _click(
         3000,
         None,
     )
-    after = _window_and_pointer()
-    if (
-        after is None
-        or after[:6] != frame[:6]
-        or abs(after[6] - x) > 5
-        or abs(after[7] - y) > 5
-        or _focused_identity() != expected
-    ):
-        return "TARGET_CHANGED"
+    if not _wait_for_pointer(frame, x, y):
+        return "TARGET_CHANGED:pointer_or_window"
     for state in (1, 0):
         connection.call_sync(
             BUS,
@@ -210,16 +256,21 @@ def main() -> int:
     desired: bool | None = None
     anchor: tuple[int, int] | None = None
     if not grant:
-        if len(sys.argv) not in {12, 14}:
+        if len(sys.argv) not in {12, 14, 20, 22}:
             raise ValueError("expected identity, box, state and label")
         expected = (sys.argv[1], int(sys.argv[2]))
         box = tuple(int(part) for part in sys.argv[3:9])  # type: ignore[assignment]
         desired = {"click": None, "on": True, "off": False}[sys.argv[9]]
         label = sys.argv[10]
-        if len(sys.argv) == 14:
+        if len(sys.argv) in {14, 22}:
             anchor = (int(sys.argv[12]), int(sys.argv[13]))
             if min(anchor) < 0:
                 raise ValueError("invalid target anchor")
+        capture_geometry = (
+            tuple(int(value) for value in sys.argv[14 if anchor else 12 :])
+            if len(sys.argv) in {20, 22}
+            else None
+        )
         if sys.argv[11] not in {"visible", "accessible"} or expected[1] <= 0:
             raise ValueError("invalid control arguments")
         if _focused_identity() != expected:
@@ -273,6 +324,7 @@ def main() -> int:
             desired,
             sys.argv[11] == "accessible",
             anchor,
+            capture_geometry,  # type: ignore[arg-type]
         )
         print(result, flush=True)
         return 0 if result in {"CLICK_DISPATCHED", "STATE_ALREADY_SET"} else 2

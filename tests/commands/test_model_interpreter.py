@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from kyrin.commands.app_names import SpokenAppCandidate
+from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.interpreter import (
@@ -91,9 +91,10 @@ def _interpreter(
     supported_chat_apps: frozenset[str] = frozenset(),
     visible_options: tuple[VisibleOption, ...] = (),
     allow_visible_control: bool = False,
+    available_operations: tuple[str, ...] | None = None,
 ) -> ModelAssistedInterpreter:
     applications = tmp_path / "applications"
-    applications.mkdir()
+    applications.mkdir(exist_ok=True)
     (applications / "telegram.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Telegram\n", encoding="utf-8"
     )
@@ -123,6 +124,7 @@ def _interpreter(
         visible_options_reader=(
             FakeVisibleOptionsReader(visible_options) if allow_visible_control else None
         ),
+        available_operations=available_operations,
     )
 
 
@@ -139,7 +141,7 @@ class FakeVisibleOptionsReader:
 
 
 def _visible_ready(
-    spoken_target: str, option_id: str, state: bool | None = None
+    spoken_target: str, option_id: str | None, state: bool | None = None
 ) -> UnderstandingResult:
     return UnderstandingResult(
         UnderstandingStatus.READY,
@@ -158,7 +160,7 @@ def _visible_ready(
     )
 
 
-def test_natural_request_uses_screen_option_id_to_correct_spelling(
+def test_natural_request_does_not_correct_spelling_from_model_option_id(
     tmp_path: Path,
 ) -> None:
     model = FakeModel(_visible_ready("seating", "1"))
@@ -166,7 +168,6 @@ def test_natural_request_uses_screen_option_id_to_correct_spelling(
     interpreter = _interpreter(
         tmp_path, model, visible_options=(option,), allow_visible_control=True
     )
-
     result = interpreter.interpret(
         "Could you open seating please?",
         language="en",
@@ -174,16 +175,34 @@ def test_natural_request_uses_screen_option_id_to_correct_spelling(
         pending=None,
     )
 
-    assert result == ReadyCommand(
-        CommandIntent(
-            CommandKind.VISIBLE_CONTROL,
-            "Settings",
-            control_source="accessibility",
-            control_anchor=(75, 42),
-        )
-    )
+    assert isinstance(result, UnrecognizedCommand)
     assert model.last_context is not None
     assert model.last_context.visible_options == (option,)
+
+
+@pytest.mark.parametrize("wrong_label", ("Help", "Quit"))
+def test_visible_option_id_cannot_change_spoken_target(
+    tmp_path: Path, wrong_label: str
+) -> None:
+    model = FakeModel(_visible_ready("Settings", "2"))
+    interpreter = _interpreter(
+        tmp_path,
+        model,
+        visible_options=(
+            VisibleOption("1", "Settings", "accessibility"),
+            VisibleOption("2", wrong_label, "accessibility"),
+        ),
+        allow_visible_control=True,
+    )
+
+    result = interpreter.interpret(
+        "I want Settings opened",
+        language="en",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=None,
+    )
+
+    assert isinstance(result, UnrecognizedCommand)
 
 
 def test_natural_state_request_requires_matching_screen_option_and_direction(
@@ -203,12 +222,182 @@ def test_natural_state_request_requires_matching_screen_option_and_direction(
             "Notifications",
             control_state=False,
             control_source="accessibility",
+            control_window_app="example.desktop",
         )
     )
     model.result = _visible_ready("Notifications", "2", True)
     assert isinstance(
         interpreter.interpret(
             "I want Notifications off", language="en", context=context, pending=None
+        ),
+        UnrecognizedCommand,
+    )
+
+
+def test_unlisted_language_does_not_authorize_visible_control(
+    tmp_path: Path,
+) -> None:
+    option = VisibleOption("2", "Benachrichtigungen", "accessibility", "switch", True)
+    model = FakeModel(_visible_ready("Benachrichtigungen", None, False))
+    interpreter = _interpreter(
+        tmp_path, model, visible_options=(option,), allow_visible_control=True
+    )
+    result = interpreter.interpret(
+        "Benachrichtigungen ausschalten",
+        language="de",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=None,
+    )
+    assert isinstance(result, UnrecognizedCommand)
+    assert model.calls == 1
+    assert model.last_context is not None
+    assert model.last_context.visible_options == ()
+    assert {item.app_id for item in model.last_context.available_apps} == {
+        "telegram",
+        "browser",
+        "visual-studio-code",
+    }
+
+
+def test_multilingual_discovery_rejects_changed_model_target(tmp_path: Path) -> None:
+    class ChangingModel(FakeModel):
+        def understand(
+            self, source: UnderstandingInput, *, context: CommandContext
+        ) -> UnderstandingResult:
+            self.calls += 1
+            return _visible_ready(
+                "Notifications" if context.visible_options else "Search",
+                "1" if context.visible_options else None,
+            )
+
+    model = ChangingModel(_visible_ready("Search", None))
+    interpreter = _interpreter(
+        tmp_path,
+        model,
+        visible_options=(VisibleOption("1", "Zoeken", "accessibility"),),
+        allow_visible_control=True,
+    )
+    result = interpreter.interpret(
+        "Search openen",
+        language="nl",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=None,
+    )
+    assert isinstance(result, UnrecognizedCommand)
+    assert model.calls == 2
+
+
+def test_unlisted_language_scroll_requires_independent_source_rules(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(
+        UnderstandingResult(
+            UnderstandingStatus.READY,
+            (ProposedMeaning((MeaningStep(RequestedOperation.SCROLL_DOWN),)),),
+        )
+    )
+    interpreter = _interpreter(tmp_path, model)
+    assert isinstance(
+        interpreter.interpret(
+            "Weiter nach unten",
+            language="de",
+            context=CommandContext(observed_scroll_app="example.desktop"),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+    assert isinstance(
+        interpreter.interpret(
+            "Weiter nach unten",
+            language="de",
+            context=CommandContext(),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+    blocked = _interpreter(tmp_path, model, available_operations=("open_app",))
+    assert isinstance(
+        blocked.interpret(
+            "Weiter nach unten",
+            language="de",
+            context=CommandContext(observed_scroll_app="example.desktop"),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+
+
+@pytest.mark.parametrize(
+    "utterance",
+    (
+        "Please do not scroll down",
+        'The words "scroll down" are on screen',
+        "What is the weather today?",
+    ),
+)
+def test_model_scroll_requires_explicit_affirmative_request(
+    tmp_path: Path, utterance: str
+) -> None:
+    model = FakeModel(
+        UnderstandingResult(
+            UnderstandingStatus.READY,
+            (ProposedMeaning((MeaningStep(RequestedOperation.SCROLL_DOWN),)),),
+        )
+    )
+    interpreter = _interpreter(tmp_path, model)
+    assert isinstance(
+        interpreter.interpret(
+            utterance,
+            language="en",
+            context=CommandContext(observed_scroll_app="example.desktop"),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+
+
+@pytest.mark.parametrize(
+    "utterance",
+    (
+        "Please do not click Search",
+        'What does "click Search" mean?',
+        "The words click Search are on screen",
+    ),
+)
+def test_model_visible_control_requires_explicit_affirmative_request(
+    tmp_path: Path, utterance: str
+) -> None:
+    interpreter = _interpreter(
+        tmp_path,
+        FakeModel(_visible_ready("Search", "1")),
+        visible_options=(VisibleOption("1", "Search", "accessibility"),),
+        allow_visible_control=True,
+    )
+    assert isinstance(
+        interpreter.interpret(
+            utterance,
+            language="en",
+            context=CommandContext(observed_scroll_app="example.desktop"),
+            pending=None,
+        ),
+        UnrecognizedCommand,
+    )
+
+
+def test_model_power_proposal_cannot_start_confirmation(tmp_path: Path) -> None:
+    model = FakeModel(
+        UnderstandingResult(
+            UnderstandingStatus.READY,
+            (ProposedMeaning((MeaningStep(RequestedOperation.RESTART_SYSTEM),)),),
+        )
+    )
+    interpreter = _interpreter(tmp_path, model)
+    assert isinstance(
+        interpreter.interpret(
+            "Restart Telegram",
+            language="en",
+            context=CommandContext(),
+            pending=None,
         ),
         UnrecognizedCommand,
     )
@@ -256,7 +445,10 @@ def test_click_on_is_not_mistaken_for_switch_on(tmp_path: Path) -> None:
         pending=None,
     ) == ReadyCommand(
         CommandIntent(
-            CommandKind.VISIBLE_CONTROL, "Search", control_source="accessibility"
+            CommandKind.VISIBLE_CONTROL,
+            "Search",
+            control_source="accessibility",
+            control_window_app="example.desktop",
         )
     )
 
@@ -267,6 +459,22 @@ def _interpret(
     return interpreter.interpret(
         text, language=language, context=CommandContext(), pending=None
     )
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    (
+        "Could you open Telegram please?",
+        "Can you please launch Telegram for me?",
+    ),
+)
+def test_common_polite_app_request_keeps_fast_path(
+    tmp_path: Path, phrase: str
+) -> None:
+    model = FakeModel(CommandModelError("model should not run"))
+    result = _interpret(_interpreter(tmp_path, model), phrase)
+    assert result == ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "telegram"))
+    assert model.calls == 0
 
 
 def test_model_chat_target_keeps_source_capitalization(tmp_path: Path) -> None:
@@ -476,6 +684,41 @@ def test_pending_app_confirmation_keeps_language_and_safety(
         assert not isinstance(result, ReadyCommand)
     assert model.calls == 0
     assert model.confirmation_calls == 0
+
+
+def test_unreviewed_language_app_action_names_the_operation_before_confirmation(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.MINIMIZE_APP, "Telegram"))
+    coordinator = CommandCoordinator(_interpreter(tmp_path, model))
+    question = coordinator.observe(
+        TranscriptUpdate(0, "Telegram minimieren", TranscriptStatus.FINAL, "de")
+    )
+    assert isinstance(question[1], ResponseRequest)
+    assert question[1].kind is ResponseKind.CONFIRM_ACTION
+    assert question[1].operation_candidates == (CommandKind.MINIMIZE_APP,)
+    assert ResponsePresenter("en").present(question[1]).text == (
+        "Do you want me to minimize Telegram? Yes or no?"
+    )
+    result = coordinator.observe(
+        TranscriptUpdate(1, "Ja", TranscriptStatus.FINAL, "de")
+    )
+    assert result[0] == CommandResolution(
+        1, CommandIntent(CommandKind.MINIMIZE_APP, "telegram"), language="de"
+    )
+
+
+def test_unreviewed_language_app_action_requires_exact_spoken_app(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.MINIMIZE_APP, "Telegram"))
+    result = _interpreter(tmp_path, model).interpret(
+        "Bitte minimieren",
+        language="de",
+        context=CommandContext(),
+        pending=None,
+    )
+    assert isinstance(result, UnrecognizedCommand)
 
 
 def test_close_cloud_needs_one_explicit_confirmation(
@@ -769,9 +1012,18 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
         transport=transport,
     )
     result = engine.understand(
-        UnderstandingInput("open seating", "en"),
+        UnderstandingInput("تلگرام را باز کن", "fa"),
         context=CommandContext(
-            visible_options=(VisibleOption("1", "Settings", "accessibility"),)
+            visible_options=(VisibleOption("1", "Settings", "accessibility"),),
+            available_apps=(
+                ModelAppOption(
+                    "telegram",
+                    "telegram.desktop",
+                    "Telegram",
+                    tuple(f"localized-{index}" for index in range(30)) + ("تلگرام",),
+                ),
+            ),
+            available_operations=("visible_control",),
         ),
     )
     assert result.candidates[0].steps[0].target_id == "1"
@@ -780,6 +1032,34 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
     user = json.loads(messages[1]["content"])
     assert user["context"]["visible_options"][0]["label"] == "Settings"
     assert user["context"]["available_visible_actions"] == ["click"]
+    assert user["context"]["installed_apps"][0]["platform_id"] == "telegram.desktop"
+    aliases = user["context"]["installed_apps"][0]["alternate_names"]
+    assert len(aliases) == 12
+    assert "تلگرام" in aliases
+    assert user["context"]["available_operations"] == ["visible_control"]
+
+
+def test_ollama_can_request_control_discovery_without_screen_options() -> None:
+    sent: dict[str, object] = {}
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        sent.update(payload)
+        return {"message": {"content": '{"route":"no_action","steps":[]}'}}
+
+    engine = OllamaCommandEngine(
+        "http://127.0.0.1:11435",
+        "qwen3.5:4b",
+        DevicePreference.AUTO,
+        transport=transport,
+    )
+    engine.understand(
+        UnderstandingInput("Benachrichtigungen ausschalten", "de"),
+        context=CommandContext(visible_control_enabled=True),
+    )
+    messages = sent["messages"]
+    assert isinstance(messages, list)
+    user = json.loads(messages[1]["content"])
+    assert user["context"]["available_visible_actions"] == ["discover"]
 
 
 def test_explicit_gpu_without_gpu_memory_does_not_claim_success() -> None:

@@ -260,6 +260,8 @@ class ScreenTextReader(QObject):
                     image.process_id,
                     result,
                     original_size,
+                    image.capture_rect,
+                    image.frame_rect,
                 )
                 events.completed.emit(generation, observation)
             except Exception:

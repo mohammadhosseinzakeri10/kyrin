@@ -495,6 +495,12 @@ def test_generic_visible_control_reads_full_focused_window(
     assert result is not None
     assert (result.left, result.top) == (60, 220)
     assert reader.last_region is None
+    assert reader.last_options == OcrOptions("eng")
+    assert _call_from_worker(
+        app,
+        lambda: verifier.find_visible_control("example.desktop", 42, "تنظیمات"),
+    ) is None
+    assert reader.last_options == OcrOptions("eng+fas")
 
 
 def test_settings_verification_requests_center_region(

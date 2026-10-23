@@ -90,6 +90,10 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "scroll_unavailable": "نتوانستم اسکرول را انجام دهم. لطفاً صفحه را بررسی کنید.",
         "visible_control_uncertain": "گزینهٔ قابل‌دیدنِ یکتایی با این نام پیدا نکردم.",
+        "visible_control_capture_geometry_required": (
+            "افزونهٔ تصویربرداری اطلاعات مختصات را نمی‌دهد. پس از نصب نسخهٔ جدید، "
+            "کارهایتان را ذخیره کنید و یک بار از حساب Ubuntu خارج و دوباره وارد شوید."
+        ),
         "visible_control_screen_access_required": (
             "برای دیدن گزینه‌ها، دسترسی صفحه را در Screen Access فعال کنید."
         ),
@@ -98,13 +102,18 @@ _TEXT: dict[str, dict[str, str]] = {
             "جای گزینه یا اندازهٔ پنجره تغییر کرد؛ دوباره تلاش کنید."
         ),
         "visible_control_setup_required": (
-            "برای کلیک، دسترسی آن را در Desktop Actions تنظیم کنید."
+            "مجوز سیستم برای کلیک هنوز ذخیره نشده است. در Desktop Actions، "
+            "پس از ذخیرهٔ تنظیمات، «تنظیم دسترسی کلیک دسکتاپ» را بزنید و "
+            "پنجرهٔ Remote Desktop را یک‌بار تأیید کنید."
         ),
         "visible_control_state_unavailable": (
             "وضعیت این گزینه از رابط دسترس‌پذیری خوانده نشد؛ تغییری ندادم."
         ),
         "visible_control_sensitive": (
             "این گزینه نیاز به تأیید جداگانه دارد و فعلاً اجرا نشد."
+        ),
+        "visible_control_risk_unknown": (
+            "پیامد این گزینه مشخص نیست و تا فراهم شدن تأیید جداگانه اجرا نمی‌شود."
         ),
         "visible_control_unavailable": (
             "کنترل برنامه در دسترس نبود؛ لطفاً صفحه را بررسی کنید."
@@ -260,6 +269,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "visible_control_uncertain": (
             "I couldn't find one clear visible option with that name."
         ),
+        "visible_control_capture_geometry_required": (
+            "The capture extension is missing coordinate information. After "
+            "installing the update, save your work, log out of Ubuntu and log back in."
+        ),
         "visible_control_screen_access_required": (
             "Enable Screen Access in KYRIN to find visible options."
         ),
@@ -268,13 +281,18 @@ _TEXT: dict[str, dict[str, str]] = {
             "The option or window moved. Please try again."
         ),
         "visible_control_setup_required": (
-            "Set up desktop click access in Desktop Actions first."
+            "Desktop click permission is enabled, but its system grant is not "
+            "saved. In Desktop Actions, save settings, press 'Set up desktop "
+            "click access now', and approve Remote Desktop once."
         ),
         "visible_control_state_unavailable": (
             "The control did not expose its state, so I left it unchanged."
         ),
         "visible_control_sensitive": (
             "This option needs separate confirmation and was not activated."
+        ),
+        "visible_control_risk_unknown": (
+            "This option's effect is unknown and it cannot run without confirmation."
         ),
         "visible_control_unavailable": (
             "Desktop control was unavailable. Please check the screen."
@@ -465,12 +483,14 @@ class ResponsePresenter:
                 "scroll_control_setup_required",
                 "scroll_unavailable",
                 "visible_control_uncertain",
+                "visible_control_capture_geometry_required",
                 "visible_control_screen_access_required",
                 "visible_control_focus_changed",
                 "visible_control_target_changed",
                 "visible_control_setup_required",
                 "visible_control_state_unavailable",
                 "visible_control_sensitive",
+                "visible_control_risk_unknown",
                 "visible_control_unavailable",
                 "no_window",
                 "multiple_windows",
@@ -485,10 +505,18 @@ class ResponsePresenter:
                     else messages[event.error_code]
                 )
             elif event.error_code is not None and event.error_code.startswith(
-                ("chat_search_uncertain:", "visible_chat_uncertain:")
+                (
+                    "chat_search_uncertain:",
+                    "visible_chat_uncertain:",
+                    "visible_control_target_changed:",
+                )
             ):
                 code = event.error_code.split(":", 1)[0]
-                text = messages[code].format(target=event.intent.target)
+                text = (
+                    messages[code].format(target=event.intent.target)
+                    if code in {"chat_search_uncertain", "visible_chat_uncertain"}
+                    else messages[code]
+                )
             else:
                 text = messages[event.outcome.value]
             stream_id, segment_id = event.key.stream_id, event.key.segment_id
@@ -565,6 +593,34 @@ class ResponsePresenter:
                 template = messages["choose_operation"]
             return template.format(target=event.target, options=options)
         if event.kind is ResponseKind.CONFIRM_ACTION:
+            operation = event.operation_candidates[0]
+            app_actions = {
+                "en": {
+                    CommandKind.RESTORE_APP: "bring {target} forward",
+                    CommandKind.MINIMIZE_APP: "minimize {target}",
+                    CommandKind.MAXIMIZE_APP: "maximize {target}",
+                    CommandKind.UNMAXIMIZE_APP: "restore {target} to normal size",
+                    CommandKind.FULLSCREEN_APP: "make {target} full screen",
+                    CommandKind.UNFULLSCREEN_APP: "leave full screen in {target}",
+                },
+                "fa": {
+                    CommandKind.RESTORE_APP: "{target} را جلو بیاورم",
+                    CommandKind.MINIMIZE_APP: "{target} را کوچک کنم",
+                    CommandKind.MAXIMIZE_APP: "{target} را بزرگ کنم",
+                    CommandKind.UNMAXIMIZE_APP: "اندازهٔ {target} را عادی کنم",
+                    CommandKind.FULLSCREEN_APP: "{target} را تمام‌صفحه کنم",
+                    CommandKind.UNFULLSCREEN_APP: (
+                        "{target} را از حالت تمام‌صفحه خارج کنم"
+                    ),
+                },
+            }
+            if operation in app_actions[language]:
+                action = app_actions[language][operation].format(target=event.target)
+                return (
+                    f"آیا می‌خواهید {action}؟ بله یا خیر؟"
+                    if language == "fa"
+                    else f"Do you want me to {action}? Yes or no?"
+                )
             return messages["confirm_action"].format(target=event.target)
         if event.kind is ResponseKind.CONFIRM_NUMBERED_CLOSE:
             return messages["confirm_numbered_close"].format(number=event.window_index)

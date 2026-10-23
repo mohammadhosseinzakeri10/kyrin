@@ -92,6 +92,21 @@ def test_preroll_does_not_trigger_a_wasted_preview_for_short_speech() -> None:
     assert len(calls) == 1
 
 
+def test_file_session_can_skip_preview_inference_and_keep_final() -> None:
+    calls: list[int] = []
+
+    def infer(pcm: bytes, language: str) -> str:
+        calls.append(len(pcm))
+        return "Open Telegram"
+
+    session = WhisperSession(infer, "en", lambda: None, emit_partials=False)
+    session.start_turn()
+    assert session.accept_audio(audio(3.0)) == ()
+    assert calls == []
+    assert session.end_turn()[0].text == "Open Telegram"
+    assert len(calls) == 1
+
+
 def test_wrong_format_and_closed_session_fail_explicitly() -> None:
     session = WhisperSession(lambda pcm, language: "", "en", lambda: None)
     wrong = AudioData(bytes(160), AudioFormat(8000, 1, AudioSampleFormat.INT16))

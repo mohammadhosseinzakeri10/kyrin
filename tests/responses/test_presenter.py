@@ -253,6 +253,27 @@ def test_action_errors_do_not_expose_diagnostic_codes(outcome: ActionOutcome) ->
     assert response.channel is ResponseChannel.TEXT_AND_VOICE
 
 
+def test_visible_control_stage_detail_keeps_the_plain_user_message() -> None:
+    feedback = ActionFeedback(
+        KEY,
+        TELEGRAM,
+        ActionOutcome.FAILED,
+        ResponseChannel.TEXT_AND_VOICE,
+        "visible_control_target_changed:pointer_or_window",
+    )
+    response = ResponsePresenter("en").present(feedback)
+    assert response.text == "The option or window moved. Please try again."
+
+
+def test_legacy_capture_explains_required_session_restart() -> None:
+    feedback = ActionFeedback(
+        KEY, TELEGRAM, ActionOutcome.FAILED, ResponseChannel.TEXT_AND_VOICE,
+        "visible_control_capture_geometry_required",
+    )
+    assert "log out of Ubuntu" in ResponsePresenter("en").present(feedback).text
+    assert "دوباره وارد شوید" in ResponsePresenter("fa").present(feedback).text
+
+
 def test_response_request_rejects_invalid_details() -> None:
     with pytest.raises(ValueError, match="requires a target"):
         ResponseRequest(0, ResponseKind.CHOOSE_CHAT_APP, ResponseChannel.TEXT_ONLY)

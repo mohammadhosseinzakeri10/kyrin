@@ -17,6 +17,8 @@ class IdentifiedWindowImage:
     platform_app_id: str
     process_id: int
     image: bytes
+    capture_rect: tuple[int, int, int, int] | None = None
+    frame_rect: tuple[int, int, int, int] | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -27,6 +29,14 @@ class IdentifiedWindowImage:
             raise ValueError("captured window identity is missing")
         if self.process_id <= 0 or not self.image.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("captured window image is invalid")
+        for rect in (self.capture_rect, self.frame_rect):
+            if rect is not None and (
+                len(rect) != 4
+                or any(type(value) is not int for value in rect)
+                or rect[2] <= 0
+                or rect[3] <= 0
+            ):
+                raise ValueError("captured window geometry is invalid")
 
 
 class ActiveWindowCapture(Protocol):

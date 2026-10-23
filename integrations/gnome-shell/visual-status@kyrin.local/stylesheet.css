@@ -8,6 +8,15 @@
     spacing: 0;
 }
 
+.kyrin-audio-import {
+    font-size: 11px;
+    color: #e3dbff;
+    background-color: rgba(19, 13, 47, 0.93);
+    border: 1px solid #7863ee;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+
 .kyrin-status-icon {
     icon-size: 112px;
 }

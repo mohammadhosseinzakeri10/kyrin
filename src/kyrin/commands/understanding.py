@@ -15,6 +15,8 @@ from kyrin.commands.models import CommandContext
 class RequestedOperation(StrEnum):
     SHOW_ALL_WINDOWS = "show_all_windows"
     VISIBLE_CONTROL = "visible_control"
+    SCROLL_UP = "scroll_up"
+    SCROLL_DOWN = "scroll_down"
     OPEN_APP = "open_app"
     OPEN_CHAT = "open_chat"
     RESTORE_APP = "restore_app"
@@ -95,6 +97,8 @@ class MeaningStep:
     def __post_init__(self) -> None:
         targetless_operation = self.operation in {
             RequestedOperation.SHOW_ALL_WINDOWS,
+            RequestedOperation.SCROLL_UP,
+            RequestedOperation.SCROLL_DOWN,
             RequestedOperation.POWER_OFF_SYSTEM,
             RequestedOperation.RESTART_SYSTEM,
             RequestedOperation.LOG_OUT_SYSTEM,

@@ -110,6 +110,185 @@ def test_close_cancels_queued_command_but_finishes_active_action() -> None:
         worker.submit(command(2))
 
 
+def test_natural_close_drains_pending_commands() -> None:
+    started = Event()
+    release = Event()
+    outputs: list[ActionNotice] = []
+    errors: list[Exception] = []
+
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        if item.segment_id == 0:
+            started.set()
+            assert release.wait(2)
+        return (output_for(item),)
+
+    worker = QueuedActionDispatcher(process, outputs.append, max_queued=2)
+    worker.start()
+    assert worker.submit(command(0)) is None
+    assert started.wait(1)
+    assert worker.submit(command(1)) is None
+    assert worker.submit(command(2)) is None
+
+    def close() -> None:
+        try:
+            worker.close(drain=True, timeout_s=2)
+        except Exception as exc:
+            errors.append(exc)
+
+    closer = Thread(target=close)
+    closer.start()
+    release.set()
+    closer.join(3)
+
+    assert not closer.is_alive()
+    assert errors == []
+    assert [(item.key.segment_id, item.reason) for item in outputs] == [
+        (0, ActionNoticeReason.NOT_ALLOWED),
+        (1, ActionNoticeReason.NOT_ALLOWED),
+        (2, ActionNoticeReason.NOT_ALLOWED),
+    ]
+
+
+def test_finite_source_waits_for_queue_capacity_instead_of_dropping_command() -> None:
+    started = Event()
+    release = Event()
+    submitted = Event()
+    notices: list[ActionNotice | None] = []
+    outputs: list[ActionNotice] = []
+
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        if item.segment_id == 0:
+            started.set()
+            assert release.wait(2)
+        return (output_for(item),)
+
+    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker.start()
+    assert worker.submit(command(0)) is None
+    assert started.wait(1)
+    assert worker.submit(command(1)) is None
+
+    def submit_third() -> None:
+        notices.append(worker.submit(command(2), wait_for_capacity=True))
+        submitted.set()
+
+    submitter = Thread(target=submit_third)
+    submitter.start()
+    assert not submitted.wait(0.05)
+    release.set()
+    assert submitted.wait(2)
+    submitter.join(1)
+    worker.close(drain=True, timeout_s=2)
+
+    assert notices == [None]
+    assert [item.key.segment_id for item in outputs] == [0, 1, 2]
+
+
+def test_generation_change_cancels_unstarted_and_late_old_commands() -> None:
+    started = Event()
+    release = Event()
+    outputs: list[ActionNotice] = []
+    processed: list[int] = []
+
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        processed.append(item.segment_id)
+        if item.segment_id == 0:
+            started.set()
+            assert release.wait(2)
+        return (output_for(item),)
+
+    worker = QueuedActionDispatcher(process, outputs.append, max_queued=2)
+    worker.start()
+    generation = worker.generation
+    assert worker.submit(command(0), generation=generation) is None
+    assert started.wait(1)
+    assert worker.submit(command(1), generation=generation) is None
+
+    worker.invalidate_pending()
+    late = worker.submit(command(2), generation=generation)
+    assert late is not None
+    assert late.reason is ActionNoticeReason.CANCELLED
+    release.set()
+    worker.close(drain=True, timeout_s=2)
+
+    assert processed == [0]
+    assert [(item.key.segment_id, item.reason) for item in outputs] == [
+        (1, ActionNoticeReason.CANCELLED),
+        (0, ActionNoticeReason.NOT_ALLOWED),
+    ]
+
+
+def test_generation_change_releases_finite_source_waiting_for_capacity() -> None:
+    started = Event()
+    release = Event()
+    submitted = Event()
+    notices: list[ActionNotice | None] = []
+    outputs: list[ActionNotice] = []
+
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        if item.segment_id == 0:
+            started.set()
+            assert release.wait(2)
+        return (output_for(item),)
+
+    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker.start()
+    generation = worker.generation
+    assert worker.submit(command(0), generation=generation) is None
+    assert started.wait(1)
+    assert worker.submit(command(1), generation=generation) is None
+
+    def submit_third() -> None:
+        notices.append(
+            worker.submit(command(2), wait_for_capacity=True, generation=generation)
+        )
+        submitted.set()
+
+    submitter = Thread(target=submit_third)
+    submitter.start()
+    assert not submitted.wait(0.05)
+    worker.invalidate_pending()
+    assert submitted.wait(1)
+    release.set()
+    submitter.join(1)
+    worker.close(drain=True, timeout_s=2)
+
+    assert len(notices) == 1
+    assert notices[0] is not None
+    assert notices[0].reason is ActionNoticeReason.CANCELLED
+    assert [(item.key.segment_id, item.reason) for item in outputs] == [
+        (1, ActionNoticeReason.CANCELLED),
+        (0, ActionNoticeReason.NOT_ALLOWED),
+    ]
+
+
+def test_drain_deadline_cancels_pending_without_killing_active_action() -> None:
+    started = Event()
+    release = Event()
+    finished = Event()
+    outputs: list[ActionNotice] = []
+
+    def process(item: FinalActionCommand) -> tuple[ActionOutput, ...]:
+        if item.segment_id == 0:
+            started.set()
+            assert release.wait(2)
+            finished.set()
+        return (output_for(item),)
+
+    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker.start()
+    assert worker.submit(command(0)) is None
+    assert started.wait(1)
+    assert worker.submit(command(1)) is None
+    with pytest.raises(RuntimeError, match="did not stop"):
+        worker.close(drain=True, timeout_s=0.01)
+    assert (1, ActionNoticeReason.CANCELLED) in [
+        (item.key.segment_id, item.reason) for item in outputs
+    ]
+    release.set()
+    assert finished.wait(1)
+
+
 def test_no_command_is_not_queued_and_worker_cannot_restart() -> None:
     worker = QueuedActionDispatcher(lambda item: (output_for(item),), lambda _: None)
     worker.start()

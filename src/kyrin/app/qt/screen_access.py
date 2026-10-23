@@ -149,10 +149,12 @@ class ScreenAccess(QObject):
                 done(None)
                 return
             arguments = reply.arguments()
-            if len(arguments) != 3:
+            if len(arguments) not in {3, 11}:
                 done(None)
                 return
-            app_id, pid, raw_image = arguments
+            app_id, pid = arguments[:2]
+            raw_image = arguments[-1]
+            geometry = arguments[2:10] if len(arguments) == 11 else None
             try:
                 image = bytes(cast("bytes | bytearray", raw_image))
                 if (
@@ -166,7 +168,22 @@ class ScreenAccess(QObject):
                 ):
                     done(None)
                     return
-                done(IdentifiedWindowImage(app_id, pid, image))
+                if geometry is not None and any(
+                    type(value) is not int for value in geometry
+                ):
+                    done(None)
+                    return
+                capture_rect = tuple(geometry[:4]) if geometry is not None else None
+                frame_rect = tuple(geometry[4:]) if geometry is not None else None
+                done(
+                    IdentifiedWindowImage(
+                        app_id,
+                        pid,
+                        image,
+                        capture_rect,
+                        frame_rect,
+                    )
+                )
             except TypeError, ValueError:
                 done(None)
 

@@ -127,6 +127,32 @@ export default class KyrinVisualStatusExtension extends Extension {
         });
         this._actor.add_child(this._closeRow);
         this._actor.add_child(this._content);
+        this._audioButton = new St.Button({
+            label: 'Paste audio',
+            style_class: 'kyrin-audio-import',
+            x_align: Clutter.ActorAlign.CENTER,
+            can_focus: true,
+            reactive: true,
+            track_hover: true,
+        });
+        this._audioButton.set_accessible_name('Paste an audio file into KYRIN');
+        this._actor.add_child(this._audioButton);
+        this._audioButtonId = this._audioButton.connect('clicked', () => {
+            try {
+                const path = GLib.build_filenamev([
+                    GLib.get_user_runtime_dir(), 'kyrin-control.sock',
+                ]);
+                const client = new Gio.SocketClient();
+                client.set_timeout(1);
+                const connection = client.connect(
+                    new Gio.UnixSocketAddress({path}), null);
+                connection.get_output_stream().write_all(
+                    new TextEncoder().encode('paste-audio\n'), null);
+                connection.close(null);
+            } catch (error) {
+                console.warn(`KYRIN audio paste request failed: ${error}`);
+            }
+        });
         this._actor.set_accessible_name(STATES.ready[1]);
         const monitor = Main.layoutManager.primaryMonitor;
         this._actor.set_position(monitor.x + monitor.width - 175, monitor.y + 55);
@@ -299,6 +325,9 @@ export default class KyrinVisualStatusExtension extends Extension {
         if (this._closeId && this._closeButton)
             this._closeButton.disconnect(this._closeId);
         this._closeId = 0;
+        if (this._audioButtonId && this._audioButton)
+            this._audioButton.disconnect(this._audioButtonId);
+        this._audioButtonId = 0;
         this._dragOrigin = null;
         this._dbusObject?.unexport();
         this._dbusObject = null;
@@ -314,5 +343,6 @@ export default class KyrinVisualStatusExtension extends Extension {
         this._closeRow = null;
         this._closeHint = null;
         this._closeButton = null;
+        this._audioButton = null;
     }
 }

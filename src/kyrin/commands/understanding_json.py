@@ -92,9 +92,13 @@ def decode_model_response(payload: object) -> UnderstandingResult:
             polarity = Polarity(polarity_name)
         except ValueError as exc:
             raise ValueError("invalid model operation or polarity") from exc
-        if operation is RequestedOperation.SHOW_ALL_WINDOWS:
+        if operation in {
+            RequestedOperation.SHOW_ALL_WINDOWS,
+            RequestedOperation.SCROLL_UP,
+            RequestedOperation.SCROLL_DOWN,
+        }:
             if raw.get("target") not in (None, "") or raw.get("app") not in (None, ""):
-                raise ValueError("window overview cannot name an application")
+                raise ValueError("focused desktop operation cannot name an application")
             steps.append(MeaningStep(operation, polarity=polarity))
             continue
         for field in ("target", "app"):

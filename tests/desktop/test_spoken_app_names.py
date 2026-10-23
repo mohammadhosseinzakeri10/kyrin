@@ -618,11 +618,39 @@ def test_explicit_user_name_selects_one_of_duplicate_registered_chrome_labels(
 
 def test_catalog_supplied_localized_name_is_an_exact_app_name() -> None:
     resolver = CatalogSpokenAppResolver(
-        _DeviceCatalog((
-            InstalledApp(
-                "vendor.notes", "Acme Notes", alternate_names=("یادداشت‌های اَکمه",)
-            ),
-        )),
+        _DeviceCatalog(
+            (
+                InstalledApp(
+                    "vendor.notes", "Acme Notes", alternate_names=("یادداشت‌های اَکمه",)
+                ),
+            )
+        ),
         {"vendor.notes": "notes"},
     )
     assert resolver.resolve("یادداشت‌های اَکمه").exact
+
+
+def test_model_catalog_contains_only_bound_installed_apps_and_refreshes() -> None:
+    catalog = _DeviceCatalog(
+        (
+            InstalledApp(
+                "vendor.notes", "Acme Notes", alternate_names=("یادداشت‌های اَکمه",)
+            ),
+            InstalledApp("vendor.private", "Private Tool"),
+        )
+    )
+    resolver = CatalogSpokenAppResolver(
+        catalog,
+        {"vendor.notes": "notes"},
+        aliases={"notes": ("یادداشت",)},
+    )
+    options = resolver.model_options()
+    assert len(options) == 1
+    assert options[0].app_id == "notes"
+    assert options[0].platform_id == "vendor.notes"
+    assert options[0].display_name == "Acme Notes"
+    assert set(options[0].alternate_names) == {"یادداشت‌های اَکمه", "یادداشت"}
+
+    catalog.apps = (InstalledApp("vendor.notes", "Renamed Notes"),)
+    resolver.refresh()
+    assert resolver.model_options()[0].display_name == "Renamed Notes"

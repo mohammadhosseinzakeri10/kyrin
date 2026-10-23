@@ -45,6 +45,20 @@ def test_window_overview_is_targetless_and_cannot_smuggle_an_app() -> None:
         )
 
 
+def test_multilingual_scroll_proposal_is_targetless() -> None:
+    result = decode_model_response(
+        {"route": "execute", "steps": [{"operation": "scroll_down"}]}
+    )
+    assert result.candidates[0].steps[0].operation is RequestedOperation.SCROLL_DOWN
+    with pytest.raises(ValueError):
+        decode_model_response(
+            {
+                "route": "execute",
+                "steps": [{"operation": "scroll_down", "target": "Telegram"}],
+            }
+        )
+
+
 def test_visible_control_requires_a_valid_option_reference() -> None:
     result = decode_model_response(
         {

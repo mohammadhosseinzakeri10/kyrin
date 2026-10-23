@@ -260,6 +260,17 @@ class QtChatVerifier(QObject):
             selected = "+".join(dict.fromkeys([*preferred, *available_languages[:4]]))
             if selected:
                 language = OcrOptions("+".join(selected.split("+")[:4]))
+            # A short English control label is easier to read with English
+            # alone: other Tesseract language packs can lower one word's
+            # confidence enough to reject an otherwise unique button.
+            if (
+                request.visible_control
+                and request.target is not None
+                and request.target.isascii()
+                and any(char.isalpha() for char in request.target)
+                and "eng" in self._reader.supported_languages
+            ):
+                language = OcrOptions("eng")
         if (
             request.target is not None
             and any("\u0600" <= char <= "\u06ff" for char in request.target)

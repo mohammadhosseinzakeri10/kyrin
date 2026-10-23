@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager
+from copy import copy
 from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
@@ -40,6 +41,8 @@ from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
 from kyrin.audio.audio_backlog import BacklogNotice
 from kyrin.audio.audio_errors import AudioCaptureStopError
 from kyrin.audio.audio_input import AudioInput
+from kyrin.audio.file_input import FILE_AUDIO_FORMAT, AudioFileInput
+from kyrin.audio.file_speech_pipeline import FileSpeechPipeline
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent, LiveSpeechPipeline
 from kyrin.audio.microphone.devices import (
     MicrophoneConfiguration,
@@ -60,6 +63,7 @@ from kyrin.commands.models import (
 from kyrin.commands.ollama_engine import OllamaCommandEngine
 from kyrin.commands.ollama_models import installed_ollama_models
 from kyrin.commands.ollama_server import LocalOllamaServer
+from kyrin.commands.understanding import RequestedOperation
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.app_activation import ExistingAppActivator
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
@@ -83,7 +87,11 @@ from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import CancellableSpeechToTextEngine, SpeechToTextEngine
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
-from kyrin.system_power.flow import PowerBackend, PowerPrompt, SystemPowerFlow
+from kyrin.system_power.flow import (
+    PowerBackend,
+    PowerPrompt,
+    SystemPowerFlow,
+)
 from kyrin.system_power.gnome import GnomePowerBackend
 
 EngineOpener = Callable[[SttSelection], SpeechToTextEngine]
@@ -250,6 +258,14 @@ class UbuntuSessionFactory:
         self._command_server_factory = command_server_factory
         self._echo_cancellation_factory = echo_cancellation_factory
         self._voice_standby = voice_standby
+        self._audio_file: Path | None = None
+
+    def for_audio_file(self, path: Path) -> UbuntuSessionFactory:
+        """Use the same composition and permissions with a file source."""
+        clone = copy(self)
+        clone._audio_file = path
+        clone._voice_standby = False
+        return clone
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
@@ -416,7 +432,8 @@ class UbuntuSessionFactory:
 
         # A missing microphone or unsupported explicit device fails before
         # capture. No alternative model or compute device is chosen silently.
-        self._microphones.resolve(settings.microphone_device_key)
+        if self._audio_file is None:
+            self._microphones.resolve(settings.microphone_device_key)
         engine = opener(selection)
         safe_to_close_engine = True
         speaker: ResponseSpeaker | None = self._response_speaker
@@ -433,6 +450,7 @@ class UbuntuSessionFactory:
                     "the selected STT model and backend cannot run on GPU"
                 )
             interpreter: CommandInterpreter = rules
+
             command_selection = settings.command_model
             if command_selection is not None:
                 if spoken_names is None:
@@ -468,6 +486,11 @@ class UbuntuSessionFactory:
                         else None
                     ),
                     action_review=rules.review_model_action,
+                    available_operations=tuple(
+                        operation.value
+                        for operation in RequestedOperation
+                        if operation.value in {kind.value for kind in supported_kinds}
+                    ),
                 )
             try:
                 history = SqliteConversationHistory(default_history_path())
@@ -504,6 +527,7 @@ class UbuntuSessionFactory:
                 speaker = ResponseSpeaker(self._synthesizer, on_error=self._on_event)
             if (
                 speaker is not None
+                and self._audio_file is None
                 and settings.microphone_device_key is None
                 and self._echo_cancellation_factory is not None
             ):
@@ -525,29 +549,36 @@ class UbuntuSessionFactory:
                 ):
                     self._on_event(SpeechSynthesisError("voice response queue is full"))
 
-            def create_pipeline() -> LiveSpeechPipeline:
-                configuration = self._microphones.resolve(
-                    settings.microphone_device_key
-                )
-                echo_source = echo_cancel.input() if echo_cancel is not None else None
-                source = (
-                    echo_source
-                    if echo_source is not None
-                    else self._source_factory(configuration)
-                )
+            def create_pipeline() -> LiveSpeechPipeline | FileSpeechPipeline:
+                if self._audio_file is not None:
+                    file_source = AudioFileInput(self._audio_file)
+                    source: AudioInput = file_source
+                    source_format = FILE_AUDIO_FORMAT
+                else:
+                    configuration = self._microphones.resolve(
+                        settings.microphone_device_key
+                    )
+                    echo_source = (
+                        echo_cancel.input() if echo_cancel is not None else None
+                    )
+                    source = (
+                        echo_source
+                        if echo_source is not None
+                        else self._source_factory(configuration)
+                    )
+                    source_format = (
+                        echo_source.audio_format
+                        if echo_source is not None
+                        else configuration.audio_format
+                    )
                 guarded = (
                     source
-                    if echo_cancel is not None or speaker is None
+                    if self._audio_file is not None
+                    or echo_cancel is not None
+                    or speaker is None
                     else PlaybackGuardInput(source, speaker)
                 )
-                return LiveSpeechPipeline(
-                    guarded,
-                    echo_source.audio_format
-                    if echo_source is not None
-                    else configuration.audio_format,
-                    detector,
-                    engine,
-                    options=SpeechToTextOptions(
+                options = SpeechToTextOptions(
                         device=selection.device,
                         language_hint=selection.language,
                         vocabulary_hints=(
@@ -556,17 +587,38 @@ class UbuntuSessionFactory:
                             and engine.capabilities.supports_vocabulary_hints
                             else ()
                         ),
-                    ),
+                        emit_partials=self._audio_file is None,
+                    )
+                pause_confirm_ms = (
+                    800 if selection.backend == "omnilingual" else 384
+                )
+                def on_compute_device(device: ComputeDevice) -> None:
+                    self._on_event(SttDeviceReady(device))
+
+                def on_audio_ready() -> None:
+                    self._on_event(AudioCaptureReady())
+                if self._audio_file is not None:
+                    return FileSpeechPipeline(
+                        file_source,
+                        detector,
+                        engine,
+                        options=options,
+                        pause_confirm_ms=pause_confirm_ms,
+                        on_compute_device=on_compute_device,
+                        on_audio_ready=on_audio_ready,
+                    )
+                return LiveSpeechPipeline(
+                    guarded,
+                    source_format,
+                    detector,
+                    engine,
+                    options=options,
                     # Omnilingual infers complete utterances. A 640 ms pause
                     # inside a verified Persian sentence split it at the
                     # generic 384 ms boundary and corrupted the first word.
-                    pause_confirm_ms=(
-                        800 if selection.backend == "omnilingual" else 384
-                    ),
-                    on_compute_device=lambda device: self._on_event(
-                        SttDeviceReady(device)
-                    ),
-                    on_audio_ready=lambda: self._on_event(AudioCaptureReady()),
+                    pause_confirm_ms=pause_confirm_ms,
+                    on_compute_device=on_compute_device,
+                    on_audio_ready=on_audio_ready,
                 )
 
             def show_live(event: LiveSpeechEvent) -> None:
@@ -763,6 +815,7 @@ class UbuntuSessionFactory:
                 history=history,
                 voice_standby=self._voice_standby,
                 on_voice_mode=self._on_event,
+                finite_source=self._audio_file is not None,
             )
             yield runtime
         except AudioCaptureStopError:

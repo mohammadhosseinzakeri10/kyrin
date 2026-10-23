@@ -27,6 +27,8 @@ class IdentifiedWindowText:
     process_id: int
     result: OcrResult
     image_size: tuple[int, int] | None = None
+    capture_rect: tuple[int, int, int, int] | None = None
+    frame_rect: tuple[int, int, int, int] | None = None
 
 
 class ActiveWindowTextReader:

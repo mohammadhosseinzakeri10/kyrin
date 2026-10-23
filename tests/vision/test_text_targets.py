@@ -45,6 +45,23 @@ def test_different_or_distant_words_do_not_match() -> None:
     assert find_exact_phrases(result, "Saved Message") == ()
 
 
+def test_adjacent_words_allow_small_ocr_box_overlap() -> None:
+    result = _result(
+        RecognizedText("Select", TextBox(589, 212, 49, 10), 0.94),
+        RecognizedText("All", TextBox(627, 203, 14, 28), 0.96),
+    )
+    matches = find_literal_phrases(result, "Select All", allow_joined_words=True)
+    assert len(matches) == 1
+    assert matches[0].lowest_confidence == 0.94
+    assert matches[0].box == TextBox(589, 203, 52, 28)
+
+    too_much_overlap = _result(
+        RecognizedText("Select", TextBox(589, 212, 49, 10), 0.94),
+        RecognizedText("All", TextBox(625, 203, 14, 28), 0.96),
+    )
+    assert find_literal_phrases(too_much_overlap, "Select All") == ()
+
+
 def test_compact_phrase_matches_only_adjacent_full_words() -> None:
     result = _result(_span("My", 10, 20), _span("Mother", 62, 20))
     assert len(find_compact_phrases(result, "mymother")) == 1

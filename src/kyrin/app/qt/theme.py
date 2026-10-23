@@ -37,6 +37,10 @@ QLabel#SceneHint { color: #a9bcef; font-family: 'Lato'; font-size: 16px;
 QLabel#PageTitle { color: #eff1ff; font-size: 28px; font-weight: 700; }
 QLabel#Status { color: #89e8d4; padding: 8px 12px; background: #132437;
                 border: 1px solid #244e5c; border-radius: 10px; }
+QWidget#AudioDropZone { background: #111a32; border: 1px dashed #7466b3;
+                        border-radius: 9px; }
+QWidget#AudioDropZone:focus { border-color: #8fe6ff; }
+QWidget#AudioDropZone QPushButton { padding: 4px 9px; }
 QLabel#Feedback { color: #d7dbfa; padding: 12px 15px; background: #161c35;
                   border: 1px solid #29345a; border-radius: 10px; }
 QLabel#Info { color: #aebae0; margin-top: 18px; }

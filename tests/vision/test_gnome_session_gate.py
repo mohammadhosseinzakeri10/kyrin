@@ -17,10 +17,14 @@ let owner = ':1.42';
 let dialogs = [];
 let ownerChanged = null;
 let screenshotCount = 0;
+let screenshotIncludedFrame = false;
 let deferOwner = false;
 let pendingOwnerCheck = null;
 let files = new Map();
-const window = {get_pid: () => 123};
+const window = {
+    get_pid: () => 123,
+    get_frame_rect: () => ({x: 10, y: 20, width: 800, height: 600}),
+};
 let signals = new Map();
 let nextId = 1;
 const global = {display: {
@@ -83,10 +87,13 @@ const Shell = {
         is_window_backed: () => false, get_id: () => 'test.desktop',
     })})},
     Screenshot: class {
-        screenshot_window(_frame, _cursor, _stream, callback) {
+        screenshot_window(frame, _cursor, _stream, callback) {
+            screenshotIncludedFrame = frame;
             screenshotCount++; callback(this, {});
         }
-        screenshot_window_finish() {return true;}
+        screenshot_window_finish() {
+            return [true, {x: 12, y: 48, width: 796, height: 570}];
+        }
     },
 };
 const St = {Label: class {}};
@@ -140,6 +147,9 @@ check(foreignCapture.reply.values[0] === '' && screenshotCount === 0,
 let captured = request(extension, 'CaptureActiveWindow', ':1.42');
 check(captured.reply.values[0] === 'test.desktop' && screenshotCount === 1,
     'authorized requester could not capture');
+check(screenshotIncludedFrame, 'captured window must include its frame');
+check(captured.reply.values.slice(2, 10).join(',') ===
+    '12,48,796,570,10,20,800,600', 'capture geometry was lost');
 let revoke = request(extension, 'RevokeSession', ':1.42');
 check(revoke.reply.values[0] === true, 'revoke failed');
 captured = request(extension, 'CaptureActiveWindow', ':1.42');

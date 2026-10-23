@@ -61,6 +61,12 @@ def test_restart_requires_explicit_computer_scope() -> None:
     assert recognized_power_request("Restart Telegram") is None
 
 
+def test_colloquial_persian_power_off_keeps_explicit_computer_scope() -> None:
+    assert recognized_power_request("سیستمم رو خاموش کن") is PowerAction.POWER_OFF
+    assert recognized_power_request("سیستم من را خاموش کن") is PowerAction.POWER_OFF
+    assert recognized_power_request("تلگرام رو خاموش کن") is None
+
+
 def test_voice_and_click_share_two_step_flow() -> None:
     backend = FakeBackend()
     events: list[PowerPrompt] = []

@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from queue import Empty, Full, Queue
-from threading import Lock, Thread
+from threading import Condition, Lock, Thread
 
 from kyrin.actions.models import (
     ActionFeedback,
@@ -59,8 +59,8 @@ def _unknown_for(command: FinalActionCommand) -> ActionFeedback:
 class QueuedActionDispatcher:
     """One bounded FIFO worker owns action policy and execution.
 
-    Submit never waits for an OS operation. On close, unstarted commands are
-    cancelled and the current operation is allowed a bounded time to finish.
+    Live submit never waits for an OS operation. Finite sources may wait for
+    queue capacity. Close can drain or cancel unstarted commands.
     """
 
     def __init__(
@@ -74,11 +74,19 @@ class QueuedActionDispatcher:
             raise ValueError("max_queued must be positive")
         self._process = process
         self._on_output = on_output
-        self._queue: Queue[FinalActionCommand] = Queue(maxsize=max_queued)
+        self._queue: Queue[tuple[int, FinalActionCommand]] = Queue(maxsize=max_queued)
         self._lock = Lock()
+        self._capacity = Condition(self._lock)
         self._thread: Thread | None = None
         self._closed = False
+        self._drain = False
+        self._generation = 0
         self._error: Exception | None = None
+
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
 
     def start(self) -> None:
         with self._lock:
@@ -87,38 +95,78 @@ class QueuedActionDispatcher:
             self._thread = Thread(target=self._run, name="kyrin-actions", daemon=True)
             self._thread.start()
 
-    def submit(self, command: FinalActionCommand) -> ActionNotice | None:
+    def submit(
+        self,
+        command: FinalActionCommand,
+        *,
+        wait_for_capacity: bool = False,
+        generation: int | None = None,
+    ) -> ActionNotice | None:
         """Enqueue a final command or return a visible capacity notice."""
         if isinstance(command, CommandResolution) and command.intent is None:
             return None
-        with self._lock:
-            if self._thread is None or self._closed or self._error is not None:
-                raise RuntimeError("action dispatcher is not running")
-            try:
-                self._queue.put_nowait(command)
-            except Full:
-                return _notice_for(command, ActionNoticeReason.BUSY)
+        with self._capacity:
+            while True:
+                if self._thread is None or self._closed or self._error is not None:
+                    raise RuntimeError("action dispatcher is not running")
+                if generation is not None and generation != self._generation:
+                    return _notice_for(command, ActionNoticeReason.CANCELLED)
+                try:
+                    self._queue.put_nowait((self._generation, command))
+                    break
+                except Full:
+                    if not wait_for_capacity:
+                        return _notice_for(command, ActionNoticeReason.BUSY)
+                    self._capacity.wait()
         return None
 
-    def close(self, *, timeout_s: float = 20.0) -> None:
-        if timeout_s <= 0:
-            raise ValueError("timeout_s must be positive")
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            thread = self._thread
+    def invalidate_pending(self) -> None:
+        """Advance session generation and cancel work that has not started."""
+        with self._capacity:
+            self._generation += 1
             cancelled: list[FinalActionCommand] = []
             while True:
                 try:
-                    cancelled.append(self._queue.get_nowait())
+                    cancelled.append(self._queue.get_nowait()[1])
                 except Empty:
                     break
+            self._capacity.notify_all()
+        for command in cancelled:
+            self._on_output(_notice_for(command, ActionNoticeReason.CANCELLED))
+
+    def close(self, *, drain: bool = False, timeout_s: float = 20.0) -> None:
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        with self._capacity:
+            if self._closed:
+                return
+            self._closed = True
+            self._drain = drain
+            thread = self._thread
+            cancelled: list[FinalActionCommand] = []
+            if not drain:
+                while True:
+                    try:
+                        cancelled.append(self._queue.get_nowait()[1])
+                    except Empty:
+                        break
+            self._capacity.notify_all()
         for command in cancelled:
             self._on_output(_notice_for(command, ActionNoticeReason.CANCELLED))
         if thread is not None:
             thread.join(timeout_s)
             if thread.is_alive():
+                timed_out: list[FinalActionCommand] = []
+                with self._capacity:
+                    self._drain = False
+                    while True:
+                        try:
+                            timed_out.append(self._queue.get_nowait()[1])
+                        except Empty:
+                            break
+                    self._capacity.notify_all()
+                for command in timed_out:
+                    self._on_output(_notice_for(command, ActionNoticeReason.CANCELLED))
                 raise RuntimeError("action worker did not stop")
         if self._error is not None:
             raise RuntimeError("action worker failed") from self._error
@@ -126,22 +174,26 @@ class QueuedActionDispatcher:
     def _run(self) -> None:
         while True:
             with self._lock:
-                if self._closed:
+                if self._closed and (not self._drain or self._queue.empty()):
                     return
             try:
-                command = self._queue.get(timeout=0.05)
+                generation, command = self._queue.get(timeout=0.05)
             except Empty:
                 continue
-            with self._lock:
-                cancelled = self._closed
+            with self._capacity:
+                self._capacity.notify_all()
+                cancelled = (
+                    self._closed and not self._drain
+                ) or generation != self._generation
             if cancelled:
                 self._on_output(_notice_for(command, ActionNoticeReason.CANCELLED))
-                return
+                continue
             try:
                 outputs = self._process(command)
             except Exception as exc:
-                with self._lock:
+                with self._capacity:
                     self._error = exc
+                    self._capacity.notify_all()
                 try:
                     self._on_output(_unknown_for(command))
                 except Exception:
@@ -153,6 +205,7 @@ class QueuedActionDispatcher:
                 try:
                     self._on_output(output)
                 except Exception as exc:
-                    with self._lock:
+                    with self._capacity:
                         self._error = exc
+                        self._capacity.notify_all()
                     return

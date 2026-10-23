@@ -15,6 +15,7 @@ class SingleInstanceGuard(QObject):
     """Hold a process lock; use a local socket only to show the open window."""
 
     activation_requested = Signal()
+    audio_paste_requested = Signal()
 
     def __init__(self, socket_path: Path) -> None:
         super().__init__()
@@ -59,9 +60,15 @@ class SingleInstanceGuard(QObject):
         while self._server.hasPendingConnections():
             client = self._server.nextPendingConnection()
             if client is not None:
+                if not client.canReadLine():
+                    client.waitForReadyRead(50)
+                command = client.readLine(128).data() if client.canReadLine() else b""
                 client.close()
                 client.deleteLater()
-                self.activation_requested.emit()
+                if command == b"show\n":
+                    self.activation_requested.emit()
+                elif command == b"paste-audio\n":
+                    self.audio_paste_requested.emit()
 
     def close(self) -> None:
         if self._primary:

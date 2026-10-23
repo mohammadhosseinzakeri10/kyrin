@@ -174,7 +174,8 @@ ENGLISH: dict[str, str] = {
     "allow_desktop_control": "Allow clicking visible controls in the focused app",
     "desktop_control_grant_now": "Set up desktop click access now…",
     "desktop_control_not_ready": (
-        "No saved click access. Save settings, then set it up here."
+        "Click access needs a separate one-time Remote Desktop grant. "
+        "Save settings, then press the setup button below."
     ),
     "desktop_control_ready": "Desktop click access is saved.",
     "desktop_control_running": "Confirm the system's Remote Desktop request…",

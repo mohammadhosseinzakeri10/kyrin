@@ -14,6 +14,8 @@ class VisibleControlTarget:
     height: int
     image_width: int
     image_height: int
+    capture_rect: tuple[int, int, int, int] | None = None
+    frame_rect: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +98,13 @@ def unique_visible_target(
     if len(matches) != 1:
         return None
     box = matches[0].box
-    return VisibleControlTarget(box.left, box.top, box.width, box.height, width, height)
+    return VisibleControlTarget(
+        box.left,
+        box.top,
+        box.width,
+        box.height,
+        width,
+        height,
+        observation.capture_rect,
+        observation.frame_rect,
+    )

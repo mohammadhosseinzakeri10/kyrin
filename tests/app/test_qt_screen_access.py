@@ -77,7 +77,10 @@ def test_session_permission_and_capture_use_the_owned_connection(
         {
             "RequestPersistentSession": _reply(True),
             "RevokeSession": _reply(True),
-            "CaptureActiveWindow": _reply("test.desktop", 123, _PNG),
+            "CaptureActiveWindow": _reply(
+                "test.desktop", 123,
+                12, 48, 796, 570, 10, 20, 800, 600, _PNG,
+            ),
         }
     )
     assert bus.registered == [SERVICE_NAME]
@@ -87,6 +90,8 @@ def test_session_permission_and_capture_use_the_owned_connection(
     access.capture(captured.append)
     assert captured[0] is not None
     assert captured[0].platform_app_id == "test.desktop"
+    assert captured[0].capture_rect == (12, 48, 796, 570)
+    assert captured[0].frame_rect == (10, 20, 800, 600)
     access.revoke()
     assert not access.granted
     access.capture(captured.append)

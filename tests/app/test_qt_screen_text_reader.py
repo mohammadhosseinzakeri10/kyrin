@@ -230,7 +230,8 @@ def test_menu_region_ocr_keeps_full_window_geometry(
     assert cropped is not None
     access = FakeAccess()
     access.image = IdentifiedWindowImage(
-        _IMAGE.platform_app_id, _IMAGE.process_id, image
+        _IMAGE.platform_app_id, _IMAGE.process_id, image,
+        (12, 48, 1000, 800), (10, 20, 1004, 830),
     )
     engine = FakeOcr(expected_image=cropped)
     reader = ScreenTextReader(
@@ -245,6 +246,8 @@ def test_menu_region_ocr_keeps_full_window_geometry(
         assert reader.read(region="left_menu")
         _until(app, lambda: bool(results))
         assert results[0].image_size == (1000, 800)
+        assert results[0].capture_rect == (12, 48, 1000, 800)
+        assert results[0].frame_rect == (10, 20, 1004, 830)
         assert engine.used_worker
     finally:
         reader.close()

@@ -244,6 +244,7 @@ class WhisperEngine:
             self._language,
             self._session_closed,
             compute_device=self._compute_device,
+            emit_partials=options.emit_partials,
         )
 
     def _session_closed(self) -> None:

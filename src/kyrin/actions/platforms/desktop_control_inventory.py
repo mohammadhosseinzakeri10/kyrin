@@ -1,12 +1,14 @@
 """Build a short-lived, identity-bound catalog for language understanding."""
 
 import json
+import logging
 import re
 import subprocess
 from collections import Counter
 from collections.abc import Callable
 from difflib import SequenceMatcher
 from pathlib import Path
+from time import perf_counter
 from typing import Literal, Protocol
 
 from kyrin.actions.visible_control import VisibleTextOption
@@ -14,6 +16,7 @@ from kyrin.commands.visible_options import VisibleOption
 from kyrin.text_normalization import fold_case
 
 ACCESSIBILITY_HELPER = Path(__file__).with_name("desktop_accessibility_inventory.py")
+_LOGGER = logging.getLogger(__name__)
 
 
 def _spoken_similarity(label: str, utterance: str) -> float:
@@ -71,6 +74,7 @@ class DesktopControlInventory:
                 tuple[int, int] | None,
             ]
         ] = []
+        accessibility_started = perf_counter()
         try:
             result = subprocess.run(
                 [self._system_python, str(self._helper_path), *map(str, identity)],
@@ -82,6 +86,12 @@ class DesktopControlInventory:
             payload = json.loads(result.stdout) if result.returncode == 0 else []
         except OSError, subprocess.TimeoutExpired, ValueError:
             payload = []
+        accessibility_seconds = perf_counter() - accessibility_started
+        if accessibility_seconds >= 1.0:
+            _LOGGER.warning(
+                "Focused control accessibility scan took %.1fs",
+                accessibility_seconds,
+            )
         if isinstance(payload, list):
             for item in payload[:300]:
                 if not isinstance(item, dict):
@@ -120,11 +130,15 @@ class DesktopControlInventory:
             for name in accessible_names
         )
         if not has_named_match:
+            ocr_started = perf_counter()
             observed.extend(
                 (item.label.strip(), "ocr", None, None, item.anchor)
                 for item in self._verifier.list_visible_text(*identity)
                 if 1 <= len(item.label.strip()) <= 80
             )
+            ocr_seconds = perf_counter() - ocr_started
+            if ocr_seconds >= 1.0:
+                _LOGGER.warning("Focused control OCR took %.1fs", ocr_seconds)
         if self._identity_reader() != identity:
             return ()
         # A repeated name is not a unique click target. Multiple OCR readings

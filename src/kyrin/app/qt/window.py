@@ -33,6 +33,8 @@ from kyrin.app.permission_token import permission_token_path, read_opaque_token
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.archived_memory_dialog import ArchivedMemoryDialog
+from kyrin.app.qt.audio_drop_zone import AudioDropZone
+from kyrin.app.qt.audio_file_import import AudioFileImport, AudioImportResult
 from kyrin.app.qt.audio_page import AudioPage
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.command_model_page import CommandModelPage
@@ -156,6 +158,7 @@ class ControlWindow(QWidget):
         startup_registration: StartupRegistration | None = None,
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
+        audio_import: AudioFileImport | None = None,
     ) -> None:
         super().__init__()
         self._settings = settings
@@ -176,6 +179,7 @@ class ControlWindow(QWidget):
         self._last_status_error: Exception | None = None
         self._translations = ui_translations
         self._startup_registration = startup_registration
+        self._audio_import = audio_import
         self._configure_tts = configure_tts
         self._screen_reader = screen_reader
         self._ocr_default_root = ocr_default_root
@@ -261,6 +265,13 @@ class ControlWindow(QWidget):
         self.status_label.setObjectName("Status")
         self.status_label.setAccessibleName("KYRIN status")
         root.addWidget(self.status_label)
+        self.audio_drop_zone = AudioDropZone()
+        self.audio_drop_zone.file_selected.connect(self.import_audio_file)
+        self.audio_drop_zone.invalid_input.connect(self._show_audio_import_message)
+        self.audio_drop_zone.browse_requested.connect(self._browse_audio_file)
+        root.addWidget(self.audio_drop_zone)
+        if audio_import is not None:
+            audio_import.finished.connect(self._audio_import_finished)
         root.addWidget(self.pages, 1)
         self.feedback_label = QLabel()
         self.feedback_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -1085,6 +1096,8 @@ class ControlWindow(QWidget):
         self._refresh()
 
     def _toggle_listening(self) -> None:
+        if self._audio_import is not None and self._audio_import.busy:
+            return
         if self._settings is None:
             return
         status = self._controller.status().state
@@ -1148,6 +1161,8 @@ class ControlWindow(QWidget):
         ):
             state_key = "state_paused"
         state_text = self._translations.text(state_key)
+        if self._audio_import is not None and self._audio_import.busy:
+            state_text = "Processing audio file…"
         self.status_label.setText(f"{self._translations.text('status')}: {state_text}")
         if status.error is not None and status.error is not self._last_status_error:
             self._show_error(status.error)
@@ -1165,7 +1180,11 @@ class ControlWindow(QWidget):
                 )
             else:
                 self._save_and_start(candidate)
-        if self._quitting and self._controller.wait_until_stopped(0):
+        if (
+            self._quitting
+            and (self._audio_import is None or not self._audio_import.busy)
+            and self._controller.wait_until_stopped(0)
+        ):
             application = QApplication.instance()
             if application is not None:
                 application.quit()
@@ -1178,6 +1197,7 @@ class ControlWindow(QWidget):
         if self._settings is not None:
             self.listening_button.setEnabled(
                 not self._quitting
+                and (self._audio_import is None or not self._audio_import.busy)
                 and status.state
                 not in (ApplicationState.STOPPING, ApplicationState.STARTING)
                 and (status.state is not ApplicationState.RUNNING or self._audio_ready)
@@ -1285,6 +1305,37 @@ class ControlWindow(QWidget):
     def _show_error(self, error: Exception) -> None:
         self.feedback_label.setText(_friendly_error(error, self._translations.text))
 
+    def _show_audio_import_message(self, message: str) -> None:
+        self.feedback_label.setText(message)
+
+    def _browse_audio_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Choose audio file", "", "Audio files (*.wav *.mp3 *.m4a *.ogg)"
+        )
+        if filename:
+            self.import_audio_file(Path(filename))
+
+    def paste_audio_file(self) -> None:
+        self.audio_drop_zone.paste_file()
+
+    def import_audio_file(self, path: Path) -> None:
+        if self._audio_import is None or self._settings is None:
+            self._show_audio_import_message("Audio-file input is unavailable")
+            return
+        if self._has_unsaved_changes():
+            self._show_audio_import_message(
+                "Save current settings before importing audio"
+            )
+            return
+        if self._audio_import.submit(path, self._settings):
+            self._show_audio_import_message(f"Processing audio: {path.name}")
+
+    def _audio_import_finished(self, result: AudioImportResult) -> None:
+        self._show_audio_import_message(
+            result.error
+            or "Audio file processed; command result is shown in Diagnostics"
+        )
+
     def _start_power(self, action: PowerAction) -> None:
         self._controller.request_system_action(action)
 
@@ -1298,6 +1349,8 @@ class ControlWindow(QWidget):
         if self._pending_settings is not None:
             self._pending_settings = None
         self._quitting = True
+        if self._audio_import is not None:
+            self._audio_import.cancel()
         if self._pointer_grant_process is not None:
             self._pointer_grant_process.kill()
         if self._scroll_grant_process is not None:

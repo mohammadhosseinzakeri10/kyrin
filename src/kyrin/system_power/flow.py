@@ -63,6 +63,9 @@ _REQUESTS = {
 }
 _AFFIRMATIVE = frozenset({"yes", "بله", "آره"})
 _NEGATIVE = frozenset({"no", "cancel", "نه", "لغو", "خیر"})
+_PERSIAN_COMPUTER_POWER_OFF = re.compile(
+    r"^(?:سیستم|رایانه|کامپیوتر)(?:م| من)?\s+(?:را|رو)\s+خاموش\s+کن(?:ید)?$"
+)
 
 
 def _normalize(text: str) -> str:
@@ -82,6 +85,8 @@ def recognized_power_request(text: str) -> PowerAction | None:
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix) :]
             break
+    if _PERSIAN_COMPUTER_POWER_OFF.fullmatch(normalized):
+        return PowerAction.POWER_OFF
     return _REQUESTS.get(normalized)
 
 

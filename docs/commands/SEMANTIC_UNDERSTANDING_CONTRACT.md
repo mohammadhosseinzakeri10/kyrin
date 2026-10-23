@@ -2,14 +2,14 @@
 
 ## Purpose and current state
 
-The current `CommandInterpreter` and `CommandCoordinator` remain the live
-product path. `DemoCommandInterpreter` recognizes a deliberately small set of
-English/Persian phrases. `src/kyrin/commands/understanding.py` defines a new
-**proposal-only** contract for the next language-understanding engine. The
-separate `target_resolution.py` resolves proposed names without execution. No
-model, translation backend, or runtime adapter has been selected or wired by
-this change. Existing commands, permissions, and system-power behavior remain
-unchanged.
+`CommandInterpreter` and `CommandCoordinator` remain the live product path.
+`DemoCommandInterpreter` handles fast reviewed phrases; when a local Ollama
+model is selected, `ModelAssistedInterpreter` handles unresolved speech.
+`src/kyrin/commands/understanding.py` is its **proposal-only** contract.
+`target_resolution.py` resolves proposed names without execution. The live
+adapter still requires source evidence, a permitted target, and the normal
+action gate. Named controls and focused scrolling have their own fresh-window
+checks; system-power proposals from the model cannot start a power action.
 
 The reference cases in `datasets/commands/semantic_cases.jsonl` define desired
 behavior, not a measured accuracy result. They distinguish owner-verified,
@@ -82,9 +82,10 @@ spoken chat name unchanged and does not establish that the chat exists.
 Negated and non-command input produces no action; ambiguous input clarifies.
 Every proposed system-power step is rejected from this stage because the
 separate source-text recognizer and two-confirmation flow own those actions.
-The result is **not** a `CommandIntent`, and nothing currently connects it to
-the live coordinator or action executor. Resolving a target does not validate
-the model's choice of operation or grant any permission.
+The result is **not** a `CommandIntent`. The live model adapter may convert a
+verified proposal to one only after its source, target, context, and permission
+checks. Resolving a target alone does not validate the model's operation or
+grant any permission.
 
 `SourceTargetGrounder` then independently extracts the app and chat names from
 each source-language clause and compares them with the resolved proposal. It

@@ -21,6 +21,14 @@ const INTERFACE_XML = `<node>
     <method name="CaptureActiveWindow">
       <arg name="app_id" type="s" direction="out"/>
       <arg name="pid" type="u" direction="out"/>
+      <arg name="capture_x" type="i" direction="out"/>
+      <arg name="capture_y" type="i" direction="out"/>
+      <arg name="capture_width" type="i" direction="out"/>
+      <arg name="capture_height" type="i" direction="out"/>
+      <arg name="frame_x" type="i" direction="out"/>
+      <arg name="frame_y" type="i" direction="out"/>
+      <arg name="frame_width" type="i" direction="out"/>
+      <arg name="frame_height" type="i" direction="out"/>
       <arg name="png" type="ay" direction="out"/>
     </method>
   </interface>
@@ -62,7 +70,8 @@ function rememberHash(hash) {
 }
 
 function unavailableCapture(invocation) {
-    invocation.return_value(new GLib.Variant('(suay)', ['', 0, new Uint8Array()]));
+    invocation.return_value(new GLib.Variant(
+        '(suiiiiiiiiay)', ['', 0, 0, 0, 0, 0, 0, 0, 0, 0, new Uint8Array()]));
 }
 
 export default class KyrinWindowCapturePrototype extends Extension {
@@ -292,13 +301,14 @@ export default class KyrinWindowCapturePrototype extends Extension {
     }
 
     _capture(window, appId, pid, invocation) {
+        const frame = window.get_frame_rect();
         let focusChanged = false;
         let completed = false;
         let timedOut = false;
         const focusSignal = global.display.connect('notify::focus-window', () => {
             focusChanged = true;
         });
-        const finish = bytes => {
+        const finish = (bytes, area = null) => {
             if (completed)
                 return;
             completed = true;
@@ -306,14 +316,29 @@ export default class KyrinWindowCapturePrototype extends Extension {
             if (!timedOut)
                 GLib.source_remove(timeoutId);
             this._capturePending = null;
-            if (bytes === null || focusChanged ||
+            let frameUnchanged = false;
+            try {
+                const currentFrame = window.get_frame_rect();
+                frameUnchanged = currentFrame.x === frame.x &&
+                    currentFrame.y === frame.y &&
+                    currentFrame.width === frame.width &&
+                    currentFrame.height === frame.height;
+            } catch (_error) {
+                // A destroyed window cannot remain an action target.
+            }
+            if (bytes === null || !area || focusChanged || !frameUnchanged ||
                 invocation.get_sender() !== this._sessionSender ||
                 global.display.get_focus_window() !== window ||
+                ![area.x, area.y, area.width, area.height].every(Number.isInteger) ||
+                area.width <= 0 || area.height <= 0 ||
                 bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) {
                 unavailableCapture(invocation);
                 return;
             }
-            invocation.return_value(new GLib.Variant('(suay)', [appId, pid, bytes]));
+            invocation.return_value(new GLib.Variant('(suiiiiiiiiay)', [
+                appId, pid, area.x, area.y, area.width, area.height,
+                frame.x, frame.y, frame.width, frame.height, bytes,
+            ]));
         };
         const timeoutId = GLib.timeout_add(
             GLib.PRIORITY_DEFAULT, CAPTURE_TIMEOUT_MS, () => {
@@ -326,16 +351,19 @@ export default class KyrinWindowCapturePrototype extends Extension {
         const image = Gio.MemoryOutputStream.new_resizable();
         const screenshot = new Shell.Screenshot();
         try {
-            screenshot.screenshot_window(false, false, image, (_source, result) => {
+            // Click coordinates use Meta.Window.get_frame_rect(); capture the
+            // same frame so OCR coordinates share that origin and size.
+            screenshot.screenshot_window(true, false, image, (_source, result) => {
                 try {
                     const outcome = screenshot.screenshot_window_finish(result);
-                    const succeeded = Array.isArray(outcome) ? outcome[0] : outcome;
-                    if (!succeeded) {
+                    const succeeded = Array.isArray(outcome) && outcome[0];
+                    const area = Array.isArray(outcome) ? outcome[1] : null;
+                    if (!succeeded || !area) {
                         finish(null);
                         return;
                     }
                     image.close(null);
-                    finish(image.steal_as_bytes().get_data());
+                    finish(image.steal_as_bytes().get_data(), area);
                 } catch (_error) {
                     finish(null);
                 }

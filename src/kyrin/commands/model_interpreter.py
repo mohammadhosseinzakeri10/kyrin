@@ -105,6 +105,63 @@ _VISIBLE_EXCLUDED = re.compile(
     r"don't|dont|not|never|without|instead of)\b|"
     r"(?:اگر|شاید|چطور|چگونه|آیا|نباید|نکن|نمی\s*خواهم|به\s*جای)"
 )
+_SOURCE_NOT_INSTRUCTION = re.compile(
+    r"^(?:what|why|how|who|where|when|the words|it says|this says)\b"
+)
+_SOURCE_QUOTES = re.compile(r'["“”«»]')
+_SOURCE_NEGATION = re.compile(
+    r"\b(?:no|not|never|don't|dont|without)\b|"
+    r"(?:نکن|نمی\s*خواهم|نباید|هرگز)"
+)
+_EN_REQUEST_PREFIX = r"(?:please\s+|could you\s+|can you\s+|would you\s+)*"
+_EN_VISIBLE_REQUEST = re.compile(
+    r"^" + _EN_REQUEST_PREFIX
+    + r"(?:click|tap|press|select|choose|open|show|go to|navigate to|"
+    r"turn on|turn off|switch on|switch off|enable|disable|check|uncheck)\b"
+    r"|^i (?:want|would like)\b.+\b(?:opened|on|off)\b"
+)
+_EN_SCROLL_REQUEST = re.compile(
+    r"^" + _EN_REQUEST_PREFIX + r"scroll\s+(?:up|down)\b"
+)
+_FA_SCROLL_REQUEST = re.compile(
+    r"(?:بالا|پایین).*?(?:برو|اسکرول|پیمایش)|"
+    r"(?:اسکرول|پیمایش).*?(?:بالا|پایین)"
+)
+
+
+def _source_is_instruction(text: str, language: str | None, *, scroll: bool) -> bool:
+    normalized = fold_case(text).strip()
+    code = language.strip().lower().split("-", 1)[0] if language else None
+    if (
+        code not in {"en", "fa"}
+        or _SOURCE_NEGATION.search(normalized)
+        or _SOURCE_QUOTES.search(text)
+        or _SOURCE_NOT_INSTRUCTION.search(normalized)
+    ):
+        return False
+    if code == "en":
+        return bool(
+            (_EN_SCROLL_REQUEST if scroll else _EN_VISIBLE_REQUEST).search(normalized)
+        )
+    return bool(
+        _FA_SCROLL_REQUEST.search(normalized)
+        if scroll
+        else _VISIBLE_ACTION_FA.search(normalized)
+    )
+
+
+_CONFIRMABLE_APP_OPERATIONS = frozenset(
+    {
+        RequestedOperation.OPEN_APP,
+        RequestedOperation.RESTORE_APP,
+        RequestedOperation.MINIMIZE_APP,
+        RequestedOperation.CLOSE_APP_WINDOW,
+        RequestedOperation.MAXIMIZE_APP,
+        RequestedOperation.UNMAXIMIZE_APP,
+        RequestedOperation.FULLSCREEN_APP,
+        RequestedOperation.UNFULLSCREEN_APP,
+    }
+)
 
 
 class VisibleOptionsReader(Protocol):
@@ -113,17 +170,28 @@ class VisibleOptionsReader(Protocol):
     ) -> tuple[VisibleOption, ...]: ...
 
 
-def _visible_request_supported(text: str, target: str, state: bool | None) -> bool:
+def _visible_request_supported(
+    text: str,
+    target: str,
+    state: bool | None,
+    language: str | None,
+    *,
+    require_action_cue: bool = True,
+) -> bool:
     """Check the proposal against the current utterance before UI grounding."""
     normalized = fold_case(text)
     if (
-        not _spoken_target_occurs(text, target)
+        not _source_is_instruction(text, language, scroll=False)
+        or not _spoken_target_occurs(text, target)
         or _VISIBLE_EXCLUDED.search(normalized)
-        or not (
-            _VISIBLE_ACTION_EN.search(normalized)
-            or _VISIBLE_ACTION_FA.search(normalized)
-            or _VISIBLE_ON.search(normalized)
-            or _VISIBLE_OFF.search(normalized)
+        or (
+            require_action_cue
+            and not (
+                _VISIBLE_ACTION_EN.search(normalized)
+                or _VISIBLE_ACTION_FA.search(normalized)
+                or _VISIBLE_ON.search(normalized)
+                or _VISIBLE_OFF.search(normalized)
+            )
         )
     ):
         return False
@@ -131,6 +199,8 @@ def _visible_request_supported(text: str, target: str, state: bool | None) -> bo
     off = bool(_VISIBLE_OFF.search(normalized))
     if on and off:
         return False
+    if not require_action_cue and not (on or off):
+        return True
     return (
         (state is None and not (on or off))
         or (state is True and on)
@@ -153,6 +223,7 @@ class ModelAssistedInterpreter:
         visible_options_reader: VisibleOptionsReader | None = None,
         action_review: Callable[[CommandIntent, CommandContext], Interpretation]
         | None = None,
+        available_operations: tuple[str, ...] | None = None,
     ) -> None:
         self._rules = rules
         self._model = model
@@ -166,8 +237,11 @@ class ModelAssistedInterpreter:
         )
         self._grounder = SourceTargetGrounder(app_names)
         self._action_review = action_review
-        self._allow_visible_control = allow_visible_control
+        self._allow_visible_control = (
+            allow_visible_control and visible_options_reader is not None
+        )
         self._visible_options_reader = visible_options_reader
+        self._available_operations = available_operations
 
     def interpret(
         self,
@@ -209,10 +283,12 @@ class ModelAssistedInterpreter:
                     decision = self._model.classify_confirmation(
                         UnderstandingInput(text, language),
                         question=(
-                            f"Close {pending.candidates[0].display_name}?"
-                            if pending.operation is CommandKind.CLOSE_APP_WINDOW
+                            f"Confirm {pending.operation.value} for "
+                            f"{pending.candidates[0].display_name}?"
+                            if pending.operation is not None
                             else (
-                                f"Is this the {pending.candidates[0].display_name} app?"
+                                f"Is this the "
+                                f"{pending.candidates[0].display_name} app?"
                             )
                         ),
                     )
@@ -242,16 +318,23 @@ class ModelAssistedInterpreter:
         if not text.strip():
             return direct
         source = UnderstandingInput(text, language)
+        context = replace(
+            context,
+            available_apps=self._app_names.model_options(),
+            available_operations=self._available_operations,
+            visible_control_enabled=self._allow_visible_control,
+        )
+        visible_cue = bool(
+            _VISIBLE_ACTION_EN.search(fold_case(text))
+            or _VISIBLE_ACTION_FA.search(fold_case(text))
+            or _VISIBLE_ON.search(fold_case(text))
+            or _VISIBLE_OFF.search(fold_case(text))
+        )
         if (
             self._allow_visible_control
             and self._visible_options_reader is not None
             and context.observed_scroll_app
-            and (
-                _VISIBLE_ACTION_EN.search(fold_case(text))
-                or _VISIBLE_ACTION_FA.search(fold_case(text))
-                or _VISIBLE_ON.search(fold_case(text))
-                or _VISIBLE_OFF.search(fold_case(text))
-            )
+            and visible_cue
         ):
             context = replace(
                 context,
@@ -263,6 +346,55 @@ class ModelAssistedInterpreter:
             proposal = self._model.understand(source, context=context)
         except CommandModelError, ValueError:
             return self._unusable_model_result(direct, source)
+        discovered_visible = False
+        exact_visible_option: VisibleOption | None = None
+        if (
+            not visible_cue
+            and self._allow_visible_control
+            and self._visible_options_reader is not None
+            and context.observed_scroll_app
+            and proposal.status is UnderstandingStatus.READY
+            and len(proposal.candidates[0].steps) == 1
+            and proposal.candidates[0].steps[0].operation
+            is RequestedOperation.VISIBLE_CONTROL
+        ):
+            initial_step = proposal.candidates[0].steps[0]
+            if initial_step.target_phrase is None or not _spoken_target_occurs(
+                text, initial_step.target_phrase
+            ):
+                return UnrecognizedCommand()
+            if initial_step.target_id is not None:
+                return UnrecognizedCommand()
+            context = replace(
+                context,
+                visible_options=self._visible_options_reader.read_options(
+                    context.observed_scroll_app, text
+                ),
+            )
+            exact_matches = tuple(
+                item
+                for item in context.visible_options
+                if _words(item.label) == _words(initial_step.target_phrase)
+            )
+            if len(exact_matches) == 1:
+                exact_visible_option = exact_matches[0]
+            else:
+                try:
+                    proposal = self._model.understand(source, context=context)
+                except CommandModelError, ValueError:
+                    return UnrecognizedCommand()
+                if (
+                    proposal.status is not UnderstandingStatus.READY
+                    or len(proposal.candidates[0].steps) != 1
+                    or proposal.candidates[0].steps[0].operation
+                    is not RequestedOperation.VISIBLE_CONTROL
+                    or _words(proposal.candidates[0].steps[0].target_phrase or "")
+                    != _words(initial_step.target_phrase)
+                    or proposal.candidates[0].steps[0].control_state
+                    is not initial_step.control_state
+                ):
+                    return UnrecognizedCommand()
+            discovered_visible = True
         if proposal.status in {
             UnderstandingStatus.NOT_COMMAND,
             UnderstandingStatus.NEGATED,
@@ -277,6 +409,26 @@ class ModelAssistedInterpreter:
         if proposal.status is not UnderstandingStatus.READY:
             return UnrecognizedCommand()
         steps = proposal.candidates[0].steps
+        if self._available_operations is not None and any(
+            step.operation.value not in self._available_operations for step in steps
+        ):
+            return UnrecognizedCommand()
+        if len(steps) == 1 and steps[0].operation in {
+            RequestedOperation.SCROLL_UP,
+            RequestedOperation.SCROLL_DOWN,
+        }:
+            if context.observed_scroll_app is None or not _source_is_instruction(
+                text, language, scroll=True
+            ):
+                return UnrecognizedCommand()
+            intent = CommandIntent(
+                CommandKind(steps[0].operation.value), context.observed_scroll_app
+            )
+            return (
+                self._action_review(intent, context)
+                if self._action_review is not None
+                else ReadyCommand(intent)
+            )
         if any(step.operation is RequestedOperation.VISIBLE_CONTROL for step in steps):
             if (
                 not self._allow_visible_control
@@ -286,7 +438,7 @@ class ModelAssistedInterpreter:
                 return UnrecognizedCommand()
             visible_step = steps[0]
             target = visible_step.target_phrase
-            option = next(
+            option = exact_visible_option or next(
                 (
                     item
                     for item in context.visible_options
@@ -297,9 +449,14 @@ class ModelAssistedInterpreter:
             if (
                 target is None
                 or option is None
+                or _words(option.label) != _words(target)
                 or (visible_step.control_state is not None and option.checked is None)
                 or not _visible_request_supported(
-                    text, target, visible_step.control_state
+                    text,
+                    target,
+                    visible_step.control_state,
+                    language,
+                    require_action_cue=not discovered_visible,
                 )
             ):
                 return UnrecognizedCommand()
@@ -310,6 +467,7 @@ class ModelAssistedInterpreter:
                     control_state=visible_step.control_state,
                     control_source=option.source,
                     control_anchor=option.anchor,
+                    control_window_app=context.observed_scroll_app,
                 )
             except ValueError:
                 return UnrecognizedCommand()
@@ -343,7 +501,7 @@ class ModelAssistedInterpreter:
         if evidence.reason in {"unsupported_language", "operation_not_explicit"}:
             if _NEGATIVE_REPLY.search(text.casefold()):
                 return UnrecognizedCommand()
-            pending_app = self._uncovered_open_app(source, proposal, context)
+            pending_app = self._uncovered_app_action(source, proposal, context)
             return (
                 NeedsClarification(pending_app)
                 if pending_app
@@ -387,15 +545,15 @@ class ModelAssistedInterpreter:
                     return UnrecognizedCommand()
         return ReadyPlan(CommandPlan(tuple(intents)))
 
-    def _uncovered_open_app(
+    def _uncovered_app_action(
         self,
         source: UnderstandingInput,
         proposal: UnderstandingResult,
         context: CommandContext,
     ) -> PendingAppClarification | None:
-        """For an unreviewed language, request consent instead of execution."""
+        """For an unreviewed language, confirm an exact app action explicitly."""
         steps = proposal.candidates[0].steps
-        if len(steps) != 1 or steps[0].operation is not RequestedOperation.OPEN_APP:
+        if len(steps) != 1 or steps[0].operation not in _CONFIRMABLE_APP_OPERATIONS:
             return None
         target = steps[0].target_phrase
         if target is None or not _spoken_target_occurs(source.text, target):
@@ -406,7 +564,11 @@ class ModelAssistedInterpreter:
         match = self._app_names.resolve(target)
         if not match.exact or len(match.candidates) != 1:
             return None
-        return PendingAppClarification(match.candidates, confirmation=True)
+        return PendingAppClarification(
+            match.candidates,
+            confirmation=True,
+            operation=CommandKind(steps[0].operation.value),
+        )
 
     def _unusable_model_result(
         self, direct: Interpretation, source: UnderstandingInput

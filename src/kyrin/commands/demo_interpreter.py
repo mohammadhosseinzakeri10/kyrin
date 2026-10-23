@@ -61,7 +61,9 @@ _OPEN_NAMED_APP_FA = re.compile(r"^(.+?) (?:را|رو) (?:باز|اجرا) کن$
 _OPEN_APP_SUGGESTION_FA = re.compile(r"^(.+?)(?: را| رو)? باز کن$")
 _UNCERTAIN_OPEN_FA = re.compile(r"^(.+?) (?:را|رو) (.+)$")
 _OPEN_NAMED_APP_EN = re.compile(
-    r"^(?:please )?(?:open|go to|launch|start|switch to) (?:the )?(.+)$"
+    r"^(?:(?:could you|can you|would you|please) )?(?:please )?"
+    r"(?:open|go to|launch|start|switch to) (?:the )?"
+    r"(.+?)(?: for me)?(?: please)?$"
 )
 _OPEN_ASR_SPELLING = re.compile(r"^(اوپن|اپن|أوبین|opend) (.+)$")
 _WINDOW_COMMAND_EN = re.compile(
@@ -327,6 +329,7 @@ class DemoCommandInterpreter:
                         CommandKind.VISIBLE_CONTROL,
                         source_spelling(text, label),
                         control_state=enabled,
+                        control_window_app=context.observed_scroll_app,
                     )
                 )
             click_match = _VISIBLE_CLICK_EN.fullmatch(
@@ -358,7 +361,9 @@ class DemoCommandInterpreter:
                 ):
                     return ReadyCommand(
                         CommandIntent(
-                            CommandKind.VISIBLE_CONTROL, source_spelling(text, label)
+                            CommandKind.VISIBLE_CONTROL,
+                            source_spelling(text, label),
+                            control_window_app=context.observed_scroll_app,
                         )
                     )
 

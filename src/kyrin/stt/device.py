@@ -21,11 +21,12 @@ class ComputeDevice(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SpeechToTextOptions:
-    """Portable session requests; model paths remain backend-specific."""
+    """Portable session requests; finite inputs may skip provisional previews."""
 
     device: DevicePreference = DevicePreference.AUTO
     language_hint: str | None = None
     vocabulary_hints: tuple[str, ...] = ()
+    emit_partials: bool = True
 
     def __post_init__(self) -> None:
         if self.language_hint is not None and not self.language_hint.strip():

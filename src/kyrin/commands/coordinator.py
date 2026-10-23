@@ -296,15 +296,17 @@ class CommandCoordinator:
             elif isinstance(interpretation.pending, PendingAppClarification):
                 candidates = interpretation.pending.candidates
                 confirm = interpretation.pending.confirmation
-                close_app = (
-                    interpretation.pending.operation is CommandKind.CLOSE_APP_WINDOW
-                )
+                operation = interpretation.pending.operation
+                confirm_action = confirm and operation not in {
+                    None,
+                    CommandKind.OPEN_APP,
+                }
                 events.append(
                     ResponseRequest(
                         update.segment_id,
                         (
                             ResponseKind.CONFIRM_ACTION
-                            if close_app and confirm
+                            if confirm_action
                             else ResponseKind.CONFIRM_APP
                             if confirm
                             else ResponseKind.CHOOSE_APP
@@ -318,7 +320,13 @@ class CommandCoordinator:
                             else tuple(item.display_name for item in candidates)
                         ),
                         operation_candidates=(
-                            (CommandKind.CLOSE_APP_WINDOW,) if close_app else ()
+                            (operation,)
+                            if operation is not None
+                            and (
+                                confirm_action
+                                or operation is CommandKind.CLOSE_APP_WINDOW
+                            )
+                            else ()
                         ),
                         language=update.language,
                     )

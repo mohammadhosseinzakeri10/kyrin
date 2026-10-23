@@ -1,12 +1,16 @@
 """The application runtime routes repeated speech without a terminal or microphone."""
 
 from collections.abc import Generator
-from threading import Event
+from threading import Event, Thread
+
+import pytest
 
 from kyrin.actions.gate import ActionGate, ActionPolicy
 from kyrin.actions.models import (
     ActionDecision,
     ActionFeedback,
+    ActionNotice,
+    ActionNoticeReason,
     ActionOutcome,
     ActionRequest,
     ActionResult,
@@ -323,3 +327,144 @@ def test_final_executes_on_worker_without_blocking_speech_consumer() -> None:
     assert len(outputs) == 1
     assert isinstance(outputs[0], ActionFeedback)
     assert outputs[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
+
+
+def test_finite_source_drains_fast_final_commands_without_busy() -> None:
+    first_started = Event()
+    release_first = Event()
+    calls: list[int] = []
+    outputs: list[ActionDecision | ActionFeedback] = []
+    errors: list[Exception] = []
+
+    class SlowFirstExecutor:
+        def execute(self, request: ActionRequest) -> ActionResult:
+            if request.key.segment_id == 0:
+                first_started.set()
+                assert release_first.wait(2)
+            calls.append(request.key.segment_id)
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    controller = FakeController(
+        tuple(
+            TranscriptUpdate(index, "Open Telegram", TranscriptStatus.FINAL, "en")
+            for index in range(8)
+        )
+    )
+    runtime = LiveCommandRuntime(
+        controller,
+        coordinator=CommandCoordinator(DemoCommandInterpreter()),
+        gate=ActionGate(
+            ActionPolicy(
+                allowed_apps=frozenset({"telegram"}),
+                supported_kinds=frozenset({CommandKind.OPEN_APP}),
+            )
+        ),
+        observer=None,
+        executor=SlowFirstExecutor(),
+        on_live_event=lambda event: None,
+        on_command_event=lambda event: None,
+        on_action_output=outputs.append,
+        on_session_end=lambda event: None,
+        finite_source=True,
+    )
+
+    def run() -> None:
+        try:
+            runtime.run()
+        except Exception as exc:
+            errors.append(exc)
+
+    runner = Thread(target=run)
+    runner.start()
+    assert first_started.wait(1)
+    release_first.set()
+    runner.join(3)
+
+    assert not runner.is_alive()
+    assert errors == []
+    assert calls == list(range(8))
+    assert len(outputs) == 8
+    assert all(isinstance(item, ActionFeedback) for item in outputs)
+
+
+@pytest.mark.parametrize("mode", ("standby", "stop"))
+def test_standby_or_stop_invalidates_queued_action_before_stream_ends(
+    mode: str,
+) -> None:
+    first_started = Event()
+    second_decided = Event()
+    cancelled = Event()
+    release_first = Event()
+    release_stream = Event()
+    calls: list[int] = []
+    outputs: list[ActionDecision | ActionFeedback] = []
+    errors: list[Exception] = []
+
+    class HoldingController:
+        def events(self) -> Generator[LiveSpeechEvent | SpeechSessionEnded]:
+            yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
+            yield TranscriptUpdate(1, "Open Telegram", TranscriptStatus.FINAL, "en")
+            assert release_stream.wait(2)
+
+        def stop(self) -> None:
+            release_stream.set()
+
+    class SlowFirstExecutor:
+        def execute(self, request: ActionRequest) -> ActionResult:
+            calls.append(request.key.segment_id)
+            if request.key.segment_id == 0:
+                first_started.set()
+                assert release_first.wait(2)
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    def receive(output: ActionDecision | ActionFeedback) -> None:
+        outputs.append(output)
+        if (
+            isinstance(output, ActionNotice)
+            and output.key.segment_id == 1
+            and output.reason is ActionNoticeReason.CANCELLED
+        ):
+            cancelled.set()
+
+    runtime = LiveCommandRuntime(
+        HoldingController(),
+        coordinator=CommandCoordinator(DemoCommandInterpreter()),
+        gate=ActionGate(
+            ActionPolicy(
+                allowed_apps=frozenset({"telegram"}),
+                supported_kinds=frozenset({CommandKind.OPEN_APP}),
+            )
+        ),
+        observer=None,
+        executor=SlowFirstExecutor(),
+        on_live_event=lambda event: None,
+        on_command_event=lambda event: (
+            second_decided.set() if event.segment_id == 1 else None
+        ),
+        on_action_output=receive,
+        on_session_end=lambda event: None,
+        finite_source=True,
+    )
+
+    def run() -> None:
+        try:
+            runtime.run()
+        except Exception as exc:
+            errors.append(exc)
+
+    runner = Thread(target=run)
+    runner.start()
+    assert first_started.wait(1)
+    assert second_decided.wait(1)
+    if mode == "standby":
+        runtime.set_commands_active(False)
+    else:
+        runtime.stop()
+    assert cancelled.wait(1)
+    release_first.set()
+    release_stream.set()
+    runner.join(3)
+
+    assert not runner.is_alive()
+    assert errors == []
+    assert calls == [0]

@@ -28,7 +28,9 @@ incomplete models cause a visible start error rather than a silent switch.
 ## Decision boundary
 
 Existing fast rules decide simple commands immediately. Unresolved speech is
-sent to the model. A brief direct greeting or question can now produce a
+sent to the model. Common polite English app-opening requests also use the
+fast rules, avoiding both model inference and screen reading. A brief direct
+greeting or question can now produce a
 conversational response in the user's language, with no command intent. The
 response is shown as text with a brief mascot gesture. Product speech output
 is deferred. Reviewed spellings of KYRIN from the owner's speech diagnostics are
@@ -49,14 +51,31 @@ returns canonical operation identifiers while retaining the target as written
 in the original transcript.
 
 For a language without an independently reviewed operation grammar, or speech
-mislabelled as English/Persian whose operation is not recognized, a
-single-app `open_app` proposal can only create a pending confirmation when the
-model's target occurs literally in the transcript and resolves exactly to one
-permitted installed app. A short reply in another language can be classified
-by the local model as yes, no, or unclear; an unclear, incomplete, negative, or
-unavailable classification does not run the action. This is a bounded bridge
-for app opening, not general multilingual action authorization. Other proposed
-operations in uncovered languages remain unexecuted.
+mislabelled as English/Persian whose operation is not recognized, a single-app
+proposal can only create a pending confirmation when the model's target occurs
+literally in the transcript and resolves exactly to one permitted installed
+app. Opening and supported app-window actions name the proposed action in the
+question; the user must explicitly confirm it, and the normal action gate
+checks its permission afterward. A short reply in another language can be
+classified by the local model as yes, no, or unclear; an unclear, incomplete,
+negative, or unavailable classification does not run the action. Chat opening
+and system power do not use this fallback. A focused scroll or named
+visible-control request may use the model when the related Desktop Actions
+permission is enabled. The focused window is observed again before input.
+
+The model receives the original STT text, its advisory language hint, a
+periodically refreshed catalog of installed permitted applications with
+localized and owner aliases, and the operations enabled in the session. Screen
+requests use fresh accessibility controls first and OCR when needed. A unique
+exact visible name uses one model inference; an inexact name needs a second
+inference against current option IDs. The selected control retains the focused
+app ID; the executor rechecks that app, focus, and target before input.
+These paths have deterministic tests but still need a live test with the
+selected STT, command model, and OCR engine.
+Slow model inference (at least two seconds), accessibility scans, and OCR reads
+(at least one second) emit duration-only warnings. They do not log the spoken
+text or visible labels, and allow a live latency report to identify the slow
+stage.
 
 Registered application names with three or more words also receive derived
 short forms. For example, a registered `Visual Studio Code` entry accepts
@@ -73,17 +92,18 @@ independently support the proposed operation and target, the target must resolve
 to exactly one installed and permitted application, and the normal action gate
 must approve it. Negation, uncertainty, unsupported operations, model errors,
 and unverified targets never turn into an action. Existing two-step power
-confirmation remains separate.
+confirmation remains separate. The independent recognizer now accepts the
+owner's colloquial `سیستمم رو خاموش کن`; a model-only power proposal cannot
+start the power dialogue.
 
-This is a usable local integration, not a claim of general multilingual
-understanding. The independent source checks for direct model-proposed actions
-currently cover English and Persian; the reviewed mixed-script `open` spellings
-are narrow additions. The app confirmation question still uses the available
-interface language rather than automatic translation into every spoken
-language. CPU inference may pause command handling while the model runs;
-follow-up responsiveness and real microphone behavior require owner
-validation. Model quality and false-rejection rates must be measured with the
-existing verified speech corpus before choosing a default model.
+This is a usable local integration, not a claim of universal language support.
+Direct app-operation source checks currently cover English and Persian; other
+languages may require explicit operation confirmation. The question still
+uses the available interface language. CPU inference may pause command
+handling while the model runs; follow-up responsiveness and real microphone
+behavior require owner validation. Model quality, false actions and
+false-rejection rates must be measured with verified spoken references before
+choosing a default model.
 
 ## Spoken application choices and window presence
 

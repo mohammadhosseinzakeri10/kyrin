@@ -22,6 +22,7 @@ from kyrin.app.settings import (
     SttSelection,
 )
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
+from kyrin.audio.file_input import FILE_AUDIO_FORMAT, AudioFileInput
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
 from kyrin.commands.models import CommandKind, ResponseKind, ResponseRequest
@@ -324,6 +325,48 @@ def test_dry_run_allows_only_configured_app_without_executing(
         ]
     finally:
         history.close()
+
+
+def test_audio_file_session_uses_file_without_resolving_microphone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FileSpeechController:
+        def __init__(self, create_pipeline):  # type: ignore[no-untyped-def]
+            self.create_pipeline = create_pipeline
+
+        def events(self):  # type: ignore[no-untyped-def]
+            self.create_pipeline()
+            yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
+
+        def stop(self) -> None:
+            pass
+
+    sources: list[object] = []
+
+    def capture_pipeline(source, detector, engine, **kwargs):  # type: ignore[no-untyped-def]
+        sources.append(source)
+        assert source.audio_format == FILE_AUDIO_FORMAT
+        assert kwargs["options"].emit_partials is False
+        return object()
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", FileSpeechController)
+    monkeypatch.setattr(ubuntu, "FileSpeechPipeline", capture_pipeline)
+    microphones = FakeMicrophones()
+    microphones.missing = True
+    audio_file = tmp_path / "speech.wav"
+    audio_file.write_bytes(b"RIFF")
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda event: None,
+        microphones=microphones,
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+    )
+    with factory.for_audio_file(audio_file)(_settings(tmp_path)) as runtime:
+        runtime.run()
+    assert microphones.keys == []
+    assert len(sources) == 1
+    assert isinstance(sources[0], AudioFileInput)
 
 
 def test_scroll_reaches_unselected_focused_app_without_window_controls(

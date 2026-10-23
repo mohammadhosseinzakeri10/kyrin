@@ -1,11 +1,154 @@
 # KYRIN — Project Context
 
 > Engineering handoff for the current repository state.
-> Updated: 2026-10-21.
+> Updated: 2026-10-22.
 >
 > This document records confirmed implementation state, engineering decisions,
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
+
+> **Local audio-file input (2026-10-21, implementation awaiting owner test):**
+> The Qt control window now has a small drop/paste/file-chooser target beneath
+> its status bar. It accepts one local WAV, MP3, M4A, or OGG file. `ffmpeg`, already
+> installed on the owner's machine, streams mono PCM through an ordered finite
+> VAD/STT pipeline and the regular command runtime; the original and decoded
+> audio are not copied. File processing has no real-time playback wait or
+> microphone backlog, so it can finish before the file's playback duration.
+> Whisper file sessions skip provisional preview inference and retain final
+> transcription, reducing redundant work without changing live microphone
+> behavior.
+> The microphone session is stopped during import and restored afterward.
+> Imported final text uses the current permissions and action gate directly;
+> no extra file approval is inserted. The GNOME character has a paste button
+> that signals the Qt process. Direct external file drop onto the GNOME Shell
+> actor is still unsupported by its current drag API; the control-window drop
+> target is the working destination. The repository test suite passes; installed
+> process and owner live validation are pending. See
+> `docs/audio/LOCAL_AUDIO_FILE_INPUT.md`.
+
+> **Multilingual command context (2026-10-21, awaiting live validation):** The
+> selected local command model now receives the original STT text and language
+> hint, a bounded catalog of installed and explicitly bound applications with
+> desktop IDs and localized/owner aliases, the operations enabled in the
+> current session, and fresh focused-window controls when a screen action is
+> requested. The app catalog is refreshed at most once per minute during model
+> use. Existing reviewed English/Persian commands keep their fast rule path.
+> For an unreviewed language, a proposed focused control first checks that its
+> named target occurs in the final utterance; an exact unique current control
+> needs only one model inference, while an inexact name uses a second inference
+> against current option IDs. Both routes retain focus, state, permission and
+> executor checks. A selected control also retains the focused app ID, so a
+> switch to a different app before input stops the click. Common polite English
+> app-opening requests use fast rules without OCR or model inference. A
+> model-proposed focused scroll is allowed only for the
+> freshly observed window and when the scroll operation is enabled. App-window
+> operations in unreviewed languages require an exact spoken app name and an
+> explicit, operation-specific confirmation before the normal permission gate.
+> Chat and power operations do not use that fallback.
+> The owner's colloquial Persian `سیستمم رو خاموش کن` now enters the existing
+> independent two-confirmation power flow. Model-only system-power proposals
+> remain blocked because prior scope benchmarks found unsafe proposals.
+> Synthetic tests pass; model accuracy, spoken-language coverage and live
+> end-to-end latency still require owner testing.
+
+> **Focused-control timing follow-up (2026-10-22):** A visible-control intent
+> now carries the observed focused app ID. The executor refuses input if a
+> different app has focus. Common polite English app-opening requests remain
+> on the fast rule path, without OCR or model inference. Slow local command
+> inference, accessibility inventory, and OCR inventory log duration-only
+> warnings so a live test can identify the expensive stage without storing
+> spoken or screen text. Deterministic tests pass; no owner latency measurement
+> has yet established an end-to-end speed gain.
+
+> **Desktop click portal timing (2026-10-22, awaiting owner retest):** OpenRGB
+> accepted the click permission but twice returned `visible_control_target_changed`
+> for “Apply All Devices”. The generic helper had checked pointer position
+> immediately after `NotifyPointerMotion`, unlike Telegram's helper, which
+> waits briefly. It now polls for up to 300 ms for portal motion to arrive,
+> while rejecting any window-frame change and checking focus before pressing.
+> The diagnostic error code now distinguishes OCR-anchor, frame-size, and
+> pointer/window validation failures without changing the spoken message.
+> Focused deterministic tests pass. The owner retest is still needed to
+> establish whether pointer timing was the live cause.
+
+> **OpenRGB frame mismatch (2026-10-22, awaiting extension reload and owner
+> retest):** The owner retest returned `visible_control_uncertain` twice and
+> `visible_control_target_changed:frame_size` twice. The capture extension used
+> `Shell.Screenshot.screenshot_window(false, false, ...)`, omitting the frame,
+> while click coordinates used `Meta.Window.get_frame_rect()`. For decorated
+> windows these coordinate systems differ. The extension now includes the
+> frame in capture, and its installed local copy was updated. The running
+> GNOME extension must reload before its next capture uses the new flag.
+> A focused extension test asserts frame inclusion; live OpenRGB behavior is
+> not yet confirmed. OCR misses remain possible independently of geometry.
+
+> **OpenRGB capture geometry follow-up (2026-10-22, awaiting owner retest):**
+> The owner still reported `frame_size` after toggling the extension. Subsequent
+> live D-Bus introspection confirmed `CaptureActiveWindow` still returned `suay`:
+> GNOME was running the old module despite the installed file being updated.
+> Therefore those retests did not exercise the geometry changes; the earlier
+> inference that frame inclusion was insufficient was not established.
+> The extension now returns both the exact screenshot area and the
+> focused window's frame rectangle with the image. Qt carries those rectangles
+> through OCR; generic clicks map text coordinates from screenshot-area origin
+> and reject input if the frame moved or the image dimensions disagree with
+> the reported area. The installed local extension copy was updated again.
+> The owner must log out of Ubuntu and log back in to load the new module;
+> disabling/enabling it did not reload its code in this session. Legacy captures
+> with unmatched dimensions now report `visible_control_capture_geometry_required`
+> with session-restart guidance instead of claiming the window moved.
+> The full deterministic suite
+> passed (1331 passed, 3 skipped) before the final cancellation-safety tweak;
+> its focused extension test passed afterward. Live OpenRGB verification is
+> still needed. Generic OCR misses are a separate issue.
+
+> **OpenRGB visible control follow-up (2026-10-22, awaiting retest):** After
+> logout/login, live D-Bus introspection showed the new `suiiiiiiiiay`
+> capture signature, confirming GNOME loaded the geometry-aware extension.
+> The next owner trial no longer returned `frame_size`, but twice returned
+> `visible_control_uncertain` for `Click "Apply All Devices"`. The rule parser
+> preserved those spoken quotation marks. OCR phrase matching already ignored
+> them, but the exact-name AT-SPI fallback did not. The generic executor now
+> removes surrounding quote marks before both target lookup and sensitive-name
+> checks. Focused tests pass. The exact AT-SPI name in the owner's live
+> OpenRGB window still needs read-only inspection if this retest fails.
+
+> **OpenRGB OCR confidence follow-up (2026-10-22, awaiting owner retest):**
+> Both quoted and unquoted `Apply All Devices` still returned
+> `visible_control_uncertain`. Read-only inspection found no named AT-SPI
+> controls in OpenRGB, so this click depends on OCR. The owner's selected
+> Tesseract Best model read the button in a focused OpenRGB capture, but
+> `eng+fas` assigned only 0.37 confidence to `Apply`; the generic executor
+> requires at least 0.65 for every word. The same model with `eng` assigned
+> 0.72 and yielded one exact match. Generic visible-control OCR now chooses
+> English for an ASCII alphabetic requested label when the selected engine
+> supports `eng`; other labels retain the selected multilingual read. This
+> uses the existing replaceable OCR engine and does not hard-code OpenRGB.
+> Focused deterministic tests pass; the owner must restart KYRIN to validate
+> the live action and resulting click.
+
+> **GNOME window-shadow coordinate follow-up (2026-10-22, awaiting owner
+> retest):** The next live click passed OCR and returned `frame_size`, then
+> `image_scale`. Dimension-only diagnostics showed GNOME reported a
+> `899x606` capture area and `949x656` PNG: a symmetric 25-pixel shadow
+> around the frame. The generic desktop helper now derives symmetric shadow
+> padding from each capture's own dimensions and subtracts it when mapping
+> OCR text to screen coordinates. It still requires the same focused app and
+> unchanged frame, rejects out-of-frame targets, and rejects unmatched image
+> sizes. Tests cover different window sizes and shadow widths; a restarted
+> live click then returned `launch_accepted` for `Apply All Devices`, confirming
+> input dispatch through the corrected coordinate path. This status does not
+> verify OpenRGB's resulting device state.
+
+> **Generic short-label OCR follow-up (2026-10-22, awaiting owner retest):**
+> `Click Select All` still returned `visible_control_uncertain` while `Click
+> Mode` dispatched. Tesseract Best with English OCR recognized both `Select`
+> and `All` above 0.9 confidence, but its word boxes overlapped horizontally
+> by 11 pixels. Generic phrase matching previously required a nonnegative
+> gap. It now allows at most a small height-bounded 12-pixel overlap for
+> vertically overlapping adjacent spans. Distant words and larger overlaps
+> still fail. The owner's OpenRGB image now produces one unique target in a
+> direct OCR check; a live click retest is pending.
 
 > **Focused-app visible controls (2026-10-21, awaiting live test):** The owner
 > requested text navigation, clicks, and on/off controls across desktop apps.
