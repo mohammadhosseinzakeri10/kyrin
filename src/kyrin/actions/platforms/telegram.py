@@ -33,6 +33,19 @@ WindowIdentityReader = Callable[[], tuple[str, int] | None]
 
 def _same_search_box(first: ChatSearchMatch, second: ChatSearchMatch) -> bool:
     """Allow minor OCR box jitter while keeping one result and image size fixed."""
+    if (first.geometry is None) != (second.geometry is None):
+        return False
+    if first.geometry is not None and second.geometry is not None:
+        if (
+            first.geometry.window_token != second.geometry.window_token
+            or first.geometry.monitor_id != second.geometry.monitor_id
+            or first.geometry.viewport_rect != second.geometry.viewport_rect
+            or first.geometry.logical_rect != second.geometry.logical_rect
+            or first.geometry.scale_x != second.geometry.scale_x
+            or first.geometry.scale_y != second.geometry.scale_y
+            or first.geometry.padding != second.geometry.padding
+        ):
+            return False
     return (first.image_width, first.image_height) == (
         second.image_width,
         second.image_height,
@@ -403,6 +416,11 @@ class TelegramSavedMessagesExecutor:
                     match.image_height,
                 )
             ),
+            *(
+                ("geometry=" + match.geometry.to_json(),)
+                if match.geometry is not None
+                else ()
+            ),
         )
         if (
             clicked is None
@@ -505,6 +523,11 @@ class TelegramSavedMessagesExecutor:
                         match.image_width,
                         match.image_height,
                     )
+                ),
+                *(
+                    ("geometry=" + match.geometry.to_json(),)
+                    if match.geometry is not None
+                    else ()
                 ),
             )
             marker = "CHAT_RESULT_CLICKED"
@@ -788,6 +811,11 @@ class TelegramSavedMessagesExecutor:
                     match.image_width,
                     match.image_height,
                 )
+            ),
+            *(
+                ("geometry=" + match.geometry.to_json(),)
+                if match.geometry is not None
+                else ()
             ),
         )
         control_seconds = monotonic() - control_started

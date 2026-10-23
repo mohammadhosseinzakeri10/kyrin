@@ -78,7 +78,7 @@ class DesktopControlExecutor:
             return self._delegate.execute(request)
         # STT may quote a spoken control name. Those marks describe the name;
         # they are not part of the accessible control's actual label.
-        label = request.intent.target.strip().strip('"\'“”‘’«»').strip()
+        label = request.intent.target.strip().strip("\"'“”‘’«»").strip()
         if not label:
             return ActionResult(
                 request.key,
@@ -180,6 +180,11 @@ class DesktopControlExecutor:
                         if target is not None
                         and target.capture_rect is not None
                         and target.frame_rect is not None
+                        else []
+                    ),
+                    *(
+                        ["geometry=" + target.geometry.to_json()]
+                        if target is not None and target.geometry is not None
                         else []
                     ),
                 ],

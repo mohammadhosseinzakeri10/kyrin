@@ -1,6 +1,7 @@
 """Bridge Qt's asynchronous screen grant to replaceable, offline OCR."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from struct import unpack_from
 from threading import Thread
 from typing import Literal
@@ -262,6 +263,11 @@ class ScreenTextReader(QObject):
                     original_size,
                     image.capture_rect,
                     image.frame_rect,
+                    replace(
+                        image.geometry,
+                        crop_origin=(left_offset, 0),
+                        ocr_resize=(scale, scale),
+                    ) if image.geometry is not None else None,
                 )
                 events.completed.emit(generation, observation)
             except Exception:

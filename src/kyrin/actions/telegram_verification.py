@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal
 
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.text_reader import IdentifiedWindowText
 from kyrin.vision.text_targets import (
     VisiblePhrase,
@@ -22,6 +23,7 @@ class ChatSearchMatch:
     height: int
     image_width: int
     image_height: int
+    geometry: CaptureGeometry | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +240,10 @@ def assess_visible_chat_choices(
 
     def as_box(match: VisiblePhrase) -> ChatSearchMatch:
         box = match.box
-        return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+        return ChatSearchMatch(
+            box.left, box.top, box.width, box.height, width, height,
+            observation.geometry,
+        )
 
     return VisibleChatAssessment(
         ChatSearchChoices(
@@ -389,7 +394,10 @@ def search_choices(
 
     def as_box(match: VisiblePhrase) -> ChatSearchMatch:
         box = match.box
-        return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+        return ChatSearchMatch(
+            box.left, box.top, box.width, box.height, width, height,
+            observation.geometry,
+        )
 
     return ChatSearchChoices(
         as_box(local_candidates[0]) if local_candidates else None,
@@ -483,7 +491,10 @@ def telegram_left_label(
     if len(matches) != 1:
         return None
     box = matches[0].box
-    return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+    return ChatSearchMatch(
+        box.left, box.top, box.width, box.height, width, height,
+        observation.geometry,
+    )
 
 
 def telegram_menu_item(
@@ -553,7 +564,10 @@ def telegram_settings_item(
     if len(matches) != 1:
         return None
     box = matches[0].box
-    return ChatSearchMatch(box.left, box.top, box.width, box.height, width, height)
+    return ChatSearchMatch(
+        box.left, box.top, box.width, box.height, width, height,
+        observation.geometry,
+    )
 
 
 def telegram_view_title_visible(

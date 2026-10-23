@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.ocr.contracts import OcrEngine, OcrOptions, OcrResult
 from kyrin.vision.screen_capture import ActiveWindowCapture, ScreenCapture
 
@@ -29,6 +30,7 @@ class IdentifiedWindowText:
     image_size: tuple[int, int] | None = None
     capture_rect: tuple[int, int, int, int] | None = None
     frame_rect: tuple[int, int, int, int] | None = None
+    geometry: CaptureGeometry | None = None
 
 
 class ActiveWindowTextReader:
@@ -42,5 +44,8 @@ class ActiveWindowTextReader:
             return None
         result = self._ocr.recognize(captured.image, options)
         return IdentifiedWindowText(
-            captured.platform_app_id, captured.process_id, result
+            captured.platform_app_id,
+            captured.process_id,
+            result,
+            geometry=captured.geometry,
         )

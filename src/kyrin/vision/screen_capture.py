@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from kyrin.vision.capture_geometry import CaptureGeometry
+
 
 class ScreenCapture(Protocol):
     def capture_window(self) -> bytes | None:
@@ -19,6 +21,7 @@ class IdentifiedWindowImage:
     image: bytes
     capture_rect: tuple[int, int, int, int] | None = None
     frame_rect: tuple[int, int, int, int] | None = None
+    geometry: CaptureGeometry | None = None
 
     def __post_init__(self) -> None:
         if (

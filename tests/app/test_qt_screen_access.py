@@ -1,7 +1,9 @@
 """The control-center permission is session-only and rejects malformed images."""
 
+import json
 from collections.abc import Callable
 from pathlib import Path
+from struct import pack
 
 import pytest
 
@@ -78,8 +80,17 @@ def test_session_permission_and_capture_use_the_owned_connection(
             "RequestPersistentSession": _reply(True),
             "RevokeSession": _reply(True),
             "CaptureActiveWindow": _reply(
-                "test.desktop", 123,
-                12, 48, 796, 570, 10, 20, 800, 600, _PNG,
+                "test.desktop",
+                123,
+                12,
+                48,
+                796,
+                570,
+                10,
+                20,
+                800,
+                600,
+                _PNG,
             ),
         }
     )
@@ -134,6 +145,57 @@ def test_unavailable_name_and_temporary_window_fail_closed(
     captured: list[IdentifiedWindowImage | None] = []
     access.capture(captured.append)
     assert captured == [None]
+    access.close()
+
+
+def test_capture_receives_explicit_monitor_geometry_and_window_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert QApplication.instance() or QApplication([])
+    monkeypatch.setattr(
+        "kyrin.app.qt.screen_access.QDBusConnection.sessionBus", lambda: FakeBus()
+    )
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + pack(">II", 1000, 750)
+    metadata = json.dumps(
+        {
+            "monitor_id": 1,
+            "scale_x": 1.25,
+            "scale_y": 1.25,
+            "padding": [0, 0, 0, 0],
+            "window_token": "window-7",
+            "capture_id": "capture-1",
+            "captured_at": 100.0,
+        }
+    )
+    access = StubAccess(
+        {
+            "RequestPersistentSession": _reply(True),
+            "CaptureActiveWindow": _reply(
+                "test.desktop",
+                123,
+                -1200,
+                20,
+                800,
+                600,
+                -1200,
+                20,
+                800,
+                600,
+                metadata,
+                png,
+            ),
+        }
+    )
+    access.request_session()
+    captured: list[IdentifiedWindowImage | None] = []
+    access.capture(captured.append)
+    assert captured[0] is not None
+    assert captured[0].geometry is not None
+    assert captured[0].geometry.monitor_id == 1
+    assert captured[0].geometry.window_token == "window-7"
+    assert captured[0].geometry.logical_rect == (-1200, 20, 800, 600)
     access.close()
 
 
@@ -214,9 +276,7 @@ def test_screen_page_selects_local_ocr_package_without_installing_it(
     assert isinstance(app, QApplication)
     default = tmp_path / "default"
     alternate = tmp_path / "alternate"
-    page = ScreenAccessPage(
-        None, UiTranslations(tmp_path), ocr_default_root=default
-    )
+    page = ScreenAccessPage(None, UiTranslations(tmp_path), ocr_default_root=default)
     try:
         assert page.selection() is None
         page.ocr_path.setText(str(alternate))

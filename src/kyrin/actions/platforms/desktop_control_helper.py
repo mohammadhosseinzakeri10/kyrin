@@ -18,7 +18,9 @@ from kyrin.actions.platforms.telegram_portal_helper import (  # noqa: E402
     OBJECT,
     REMOTE,
     SESSION,
+    _capture_still_current,
     _focused_identity,
+    _focused_window_token,
     _request,
     _wait_for_expected_focus,
     _window_and_pointer,
@@ -27,6 +29,12 @@ from kyrin.app.permission_token import (  # noqa: E402
     permission_token_path,
     read_opaque_token,
     save_opaque_token,
+)
+from kyrin.vision.capture_geometry import (  # noqa: E402
+    MAX_CAPTURE_AGE_S,
+    CaptureGeometry,
+    capture_is_current,
+    coordinate_to_desktop,
 )
 
 TOKEN_PATH = permission_token_path("desktop-control")
@@ -146,7 +154,9 @@ def _click(
     desired: bool | None,
     accessible_only: bool,
     anchor: tuple[int, int] | None,
-    capture_geometry: tuple[int, int, int, int, int, int, int, int] | None = None,
+    capture_geometry: (
+        CaptureGeometry | tuple[int, int, int, int, int, int, int, int] | None
+    ) = None,
 ) -> str:
     left, top, width, height, image_width, image_height = box
     if not accessible_only and (
@@ -161,7 +171,27 @@ def _click(
     if frame is None or frame[:2] != expected:
         return "FOCUS_CHANGED"
     _, _, frame_x, frame_y, frame_w, frame_h, pointer_x, pointer_y = frame
-    if not accessible_only and capture_geometry is not None:
+    if not accessible_only and isinstance(capture_geometry, CaptureGeometry):
+        if not 0 <= monotonic() - capture_geometry.captured_at <= MAX_CAPTURE_AGE_S:
+            return "TARGET_CHANGED:stale_capture"
+        if _focused_window_token() != capture_geometry.window_token:
+            return "TARGET_CHANGED:window_token"
+        if not _capture_still_current(capture_geometry.capture_id):
+            return "TARGET_CHANGED:content"
+        if capture_geometry.viewport_rect != (frame_x, frame_y, frame_w, frame_h):
+            return "TARGET_CHANGED:frame_size"
+        if capture_geometry.image_size != (image_width, image_height):
+            return "TARGET_UNCERTAIN"
+        point = coordinate_to_desktop(
+            capture_geometry,
+            (left + width / 2, top + height / 2),
+            image_pixels=True,
+            target_box=(left, top, width, height),
+        )
+        if point is None:
+            return "TARGET_UNCERTAIN"
+        x, y = point
+    elif not accessible_only and isinstance(capture_geometry, tuple):
         capture_x, capture_y, capture_w, capture_h, *captured_frame = capture_geometry
         if (frame_x, frame_y, frame_w, frame_h) != tuple(captured_frame):
             return "TARGET_CHANGED:frame_size"
@@ -178,9 +208,8 @@ def _click(
             # describes only the frame. The extra border is on every side.
             x = capture_x + left + width // 2 - extra_w // 2
             y = capture_y + top + height // 2 - extra_h // 2
-        elif (
-            abs(extra_w) <= max(4, capture_w // 50)
-            and abs(extra_h) <= max(4, capture_h // 50)
+        elif abs(extra_w) <= max(4, capture_w // 50) and abs(extra_h) <= max(
+            4, capture_h // 50
         ):
             x = capture_x + round((left + width / 2) * capture_w / image_width)
             y = capture_y + round((top + height / 2) * capture_h / image_height)
@@ -233,6 +262,29 @@ def _click(
     )
     if not _wait_for_pointer(frame, x, y):
         return "TARGET_CHANGED:pointer_or_window"
+    final_frame = _window_and_pointer()
+    if (
+        final_frame is None
+        or final_frame[:6] != frame[:6]
+        or final_frame[6:] != (x, y)
+        or not (frame_x <= x < frame_x + frame_w and frame_y <= y < frame_y + frame_h)
+    ):
+        return "TARGET_CHANGED:pointer_or_window"
+    if isinstance(capture_geometry, CaptureGeometry) and not accessible_only:
+        final_point = coordinate_to_desktop(
+            capture_geometry,
+            (left + width / 2, top + height / 2),
+            image_pixels=True,
+            target_box=(left, top, width, height),
+        )
+        if (
+            final_point != (x, y)
+        ):
+            return "TARGET_CHANGED:pointer_or_window"
+        if not capture_is_current(
+            capture_geometry, _focused_window_token(), monotonic()
+        ):
+            return "TARGET_CHANGED:stale_or_window"
     for state in (1, 0):
         connection.call_sync(
             BUS,
@@ -250,28 +302,34 @@ def _click(
 
 def main() -> int:
     grant = sys.argv[1:] == ["grant"]
+    explicit = (
+        CaptureGeometry.from_json(sys.argv[-1].removeprefix("geometry="))
+        if not grant and sys.argv[-1].startswith("geometry=")
+        else None
+    )
+    argv = sys.argv[:-1] if explicit is not None else sys.argv
     expected: tuple[str, int] | None = None
     box: tuple[int, int, int, int, int, int] | None = None
     label = ""
     desired: bool | None = None
     anchor: tuple[int, int] | None = None
     if not grant:
-        if len(sys.argv) not in {12, 14, 20, 22}:
+        if len(argv) not in {12, 14, 20, 22}:
             raise ValueError("expected identity, box, state and label")
-        expected = (sys.argv[1], int(sys.argv[2]))
-        box = tuple(int(part) for part in sys.argv[3:9])  # type: ignore[assignment]
-        desired = {"click": None, "on": True, "off": False}[sys.argv[9]]
-        label = sys.argv[10]
-        if len(sys.argv) in {14, 22}:
-            anchor = (int(sys.argv[12]), int(sys.argv[13]))
+        expected = (argv[1], int(argv[2]))
+        box = tuple(int(part) for part in argv[3:9])  # type: ignore[assignment]
+        desired = {"click": None, "on": True, "off": False}[argv[9]]
+        label = argv[10]
+        if len(argv) in {14, 22}:
+            anchor = (int(argv[12]), int(argv[13]))
             if min(anchor) < 0:
                 raise ValueError("invalid target anchor")
         capture_geometry = (
-            tuple(int(value) for value in sys.argv[14 if anchor else 12 :])
-            if len(sys.argv) in {20, 22}
+            tuple(int(value) for value in argv[14 if anchor else 12 :])
+            if len(argv) in {20, 22}
             else None
         )
-        if sys.argv[11] not in {"visible", "accessible"} or expected[1] <= 0:
+        if argv[11] not in {"visible", "accessible"} or expected[1] <= 0:
             raise ValueError("invalid control arguments")
         if _focused_identity() != expected:
             print("FOCUS_CHANGED", flush=True)
@@ -322,9 +380,9 @@ def main() -> int:
             box,
             label,
             desired,
-            sys.argv[11] == "accessible",
+            argv[11] == "accessible",
             anchor,
-            capture_geometry,  # type: ignore[arg-type]
+            explicit if explicit is not None else capture_geometry,  # type: ignore[arg-type]
         )
         print(result, flush=True)
         return 0 if result in {"CLICK_DISPATCHED", "STATE_ALREADY_SET"} else 2

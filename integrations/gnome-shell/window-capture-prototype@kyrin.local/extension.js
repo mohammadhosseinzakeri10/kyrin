@@ -29,7 +29,12 @@ const INTERFACE_XML = `<node>
       <arg name="frame_y" type="i" direction="out"/>
       <arg name="frame_width" type="i" direction="out"/>
       <arg name="frame_height" type="i" direction="out"/>
+      <arg name="geometry" type="s" direction="out"/>
       <arg name="png" type="ay" direction="out"/>
+    </method>
+    <method name="ValidateCapture">
+      <arg name="capture_id" type="s" direction="in"/>
+      <arg name="current" type="b" direction="out"/>
     </method>
   </interface>
 </node>`;
@@ -71,13 +76,15 @@ function rememberHash(hash) {
 
 function unavailableCapture(invocation) {
     invocation.return_value(new GLib.Variant(
-        '(suiiiiiiiiay)', ['', 0, 0, 0, 0, 0, 0, 0, 0, 0, new Uint8Array()]));
+        '(suiiiiiiiisay)', ['', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', new Uint8Array()]));
 }
 
 export default class KyrinWindowCapturePrototype extends Extension {
     enable() {
         this._enabled = true;
         this._capturePending = null;
+        this._validationPending = null;
+        this._lastCapture = null;
         this._consentPending = null;
         this._pendingSender = null;
         this._sessionSender = null;
@@ -107,6 +114,8 @@ export default class KyrinWindowCapturePrototype extends Extension {
 
     _revoke() {
         this._sessionSender = null;
+        this._lastCapture = null;
+        this._validationPending?.finish(false);
         this._capturePending?.finish(null);
     }
 
@@ -301,7 +310,11 @@ export default class KyrinWindowCapturePrototype extends Extension {
     }
 
     _capture(window, appId, pid, invocation) {
+        this._lastCapture = null;
         const frame = window.get_frame_rect();
+        const monitorId = window.get_monitor();
+        const monitorScale = global.display.get_monitor_scale(monitorId);
+        const windowToken = String(window.get_stable_sequence());
         let focusChanged = false;
         let completed = false;
         let timedOut = false;
@@ -335,9 +348,45 @@ export default class KyrinWindowCapturePrototype extends Extension {
                 unavailableCapture(invocation);
                 return;
             }
-            invocation.return_value(new GLib.Variant('(suiiiiiiiiay)', [
+            // The PNG may include a window shadow. The monitor scale is read
+            // independently, so the remaining pixels are explicit padding.
+            const pngWidth = (bytes[16] * 0x1000000) +
+                (bytes[17] << 16) + (bytes[18] << 8) + bytes[19];
+            const pngHeight = (bytes[20] * 0x1000000) +
+                (bytes[21] << 16) + (bytes[22] << 8) + bytes[23];
+            const extraWidth = pngWidth - Math.round(area.width * monitorScale);
+            const extraHeight = pngHeight - Math.round(area.height * monitorScale);
+            if (bytes.length < 24 || !Number.isFinite(monitorScale) ||
+                monitorScale <= 0 || monitorId < 0 ||
+                extraWidth < 0 || extraHeight < 0 ||
+                extraWidth > 256 || extraHeight > 256) {
+                unavailableCapture(invocation);
+                return;
+            }
+            const captureId = GLib.uuid_string_random();
+            const capturedAt = GLib.get_monotonic_time() / 1000000;
+            const geometry = JSON.stringify({
+                monitor_id: monitorId,
+                scale_x: monitorScale,
+                scale_y: monitorScale,
+                padding: [Math.floor(extraWidth / 2), Math.floor(extraHeight / 2),
+                    Math.ceil(extraWidth / 2), Math.ceil(extraHeight / 2)],
+                window_token: windowToken,
+                capture_id: captureId,
+                captured_at: capturedAt,
+            });
+            this._lastCapture = {
+                id: captureId, at: capturedAt, window, token: windowToken,
+                area: [area.x, area.y, area.width, area.height], bytes,
+            };
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10000, () => {
+                if (this._lastCapture?.id === captureId)
+                    this._lastCapture = null;
+                return GLib.SOURCE_REMOVE;
+            });
+            invocation.return_value(new GLib.Variant('(suiiiiiiiisay)', [
                 appId, pid, area.x, area.y, area.width, area.height,
-                frame.x, frame.y, frame.width, frame.height, bytes,
+                frame.x, frame.y, frame.width, frame.height, geometry, bytes,
             ]));
         };
         const timeoutId = GLib.timeout_add(
@@ -370,6 +419,69 @@ export default class KyrinWindowCapturePrototype extends Extension {
             });
         } catch (_error) {
             finish(null);
+        }
+    }
+
+    ValidateCaptureAsync([captureId], invocation) {
+        const snapshot = this._lastCapture;
+        const window = global.display.get_focus_window();
+        const valid = this._enabled && snapshot !== null &&
+            captureId === snapshot.id &&
+            GLib.get_monotonic_time() / 1000000 - snapshot.at <= 10 &&
+            window === snapshot.window &&
+            String(window.get_stable_sequence()) === snapshot.token &&
+            this._capturePending === null && this._validationPending === null;
+        if (!valid) {
+            invocation.return_value(new GLib.Variant('(b)', [false]));
+            return;
+        }
+        let completed = false;
+        let timedOut = false;
+        const finish = current => {
+            if (completed)
+                return;
+            completed = true;
+            if (!timedOut)
+                GLib.source_remove(timeoutId);
+            this._validationPending = null;
+            invocation.return_value(new GLib.Variant('(b)', [current]));
+        };
+        const timeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT, CAPTURE_TIMEOUT_MS, () => {
+                timedOut = true;
+                finish(false);
+                return GLib.SOURCE_REMOVE;
+            });
+        this._validationPending = {finish};
+        const image = Gio.MemoryOutputStream.new_resizable();
+        const screenshot = new Shell.Screenshot();
+        try {
+            screenshot.screenshot_window(true, false, image, (_source, result) => {
+                try {
+                    const [succeeded, area] = screenshot.screenshot_window_finish(result);
+                    image.close(null);
+                    const bytes = image.steal_as_bytes().get_data();
+                    const original = snapshot.bytes;
+                    let same = succeeded && area && bytes.length === original.length &&
+                        [area.x, area.y, area.width, area.height].every(
+                            (value, index) => value === snapshot.area[index]);
+                    if (same) {
+                        for (let index = 0; index < bytes.length; index++) {
+                            if (bytes[index] !== original[index]) {
+                                same = false;
+                                break;
+                            }
+                        }
+                    }
+                    finish(Boolean(same && this._lastCapture === snapshot &&
+                        global.display.get_focus_window() === window &&
+                        String(window.get_stable_sequence()) === snapshot.token));
+                } catch (_error) {
+                    finish(false);
+                }
+            });
+        } catch (_error) {
+            finish(false);
         }
     }
 }

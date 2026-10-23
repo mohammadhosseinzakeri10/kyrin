@@ -1,6 +1,8 @@
 """Qt-owned access to the optional GNOME capture extension."""
 
+import json
 from collections.abc import Callable
+from struct import unpack_from
 from typing import cast
 
 from PySide6.QtCore import QObject, Signal
@@ -12,6 +14,7 @@ from kyrin.app.permission_token import (
     read_token,
     save_token,
 )
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.screen_capture import IdentifiedWindowImage
 
 SERVICE_NAME = "org.kyrin.Desktop"
@@ -149,12 +152,12 @@ class ScreenAccess(QObject):
                 done(None)
                 return
             arguments = reply.arguments()
-            if len(arguments) not in {3, 11}:
+            if len(arguments) not in {3, 11, 12}:
                 done(None)
                 return
             app_id, pid = arguments[:2]
             raw_image = arguments[-1]
-            geometry = arguments[2:10] if len(arguments) == 11 else None
+            geometry = arguments[2:10] if len(arguments) >= 11 else None
             try:
                 image = bytes(cast("bytes | bytearray", raw_image))
                 if (
@@ -175,6 +178,32 @@ class ScreenAccess(QObject):
                     return
                 capture_rect = tuple(geometry[:4]) if geometry is not None else None
                 frame_rect = tuple(geometry[4:]) if geometry is not None else None
+                explicit = None
+                if len(arguments) == 12:
+                    if not isinstance(arguments[10], str) or len(image) < 24:
+                        done(None)
+                        return
+                    metadata = json.loads(arguments[10])
+                    if not isinstance(metadata, dict) or image[12:16] != b"IHDR":
+                        done(None)
+                        return
+                    image_size = unpack_from(">II", image, 16)
+                    assert capture_rect is not None and frame_rect is not None
+                    explicit = CaptureGeometry(
+                        "logical_desktop",
+                        metadata["monitor_id"],
+                        capture_rect,
+                        image_size,
+                        metadata["scale_x"],
+                        metadata["scale_y"],
+                        tuple(metadata["padding"]),
+                        (0, 0),
+                        (1, 1),
+                        metadata["window_token"],
+                        metadata["capture_id"],
+                        metadata["captured_at"],
+                        frame_rect,
+                    )
                 done(
                     IdentifiedWindowImage(
                         app_id,
@@ -182,9 +211,10 @@ class ScreenAccess(QObject):
                         image,
                         capture_rect,
                         frame_rect,
+                        explicit,
                     )
                 )
-            except TypeError, ValueError:
+            except TypeError, ValueError, KeyError, json.JSONDecodeError:
                 done(None)
 
         self._call("CaptureActiveWindow", 10000, received)

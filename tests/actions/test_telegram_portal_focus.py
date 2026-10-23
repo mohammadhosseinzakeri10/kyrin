@@ -1,6 +1,7 @@
 """The keyboard portal waits for Telegram focus without a fixed ten-second delay."""
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -9,6 +10,7 @@ import pytest
 
 from kyrin.actions.platforms import telegram
 from kyrin.app.permission_token import read_opaque_token, save_opaque_token
+from kyrin.vision.capture_geometry import CaptureGeometry
 
 
 @pytest.fixture
@@ -269,6 +271,123 @@ def test_pointer_does_not_click_when_geometry_differs(
     assert not helper._click_verified_box(
         Bus(), "/session", expected, (70, 220, 90, 24, 1600, 900)
     )
+
+
+def test_telegram_click_uses_shared_capture_geometry(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    frame = (*expected, -1200, 20, 800, 600, -900, 300)
+    geometry = CaptureGeometry(
+        "logical_desktop",
+        1,
+        (-1200, 20, 800, 600),
+        (1020, 770),
+        1.25,
+        1.25,
+        (10, 10, 10, 10),
+        (0, 0),
+        (1, 1),
+        "window-7",
+        "capture-1",
+        100.0,
+        (-1200, 20, 800, 600),
+    )
+    observations = iter([frame, (*frame[:6], -1100, 120)])
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(observations))
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: "window-7")
+    monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
+    monkeypatch.setattr(helper, "_capture_still_current", lambda _id: True)
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    helper.GLib.Variant = lambda _signature, value: value
+    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
+    calls: list[object] = []
+
+    class Bus:
+        def call_sync(self, _bus, _object, _interface, method, arguments, *_rest):
+            calls.append((method, arguments))
+
+    assert helper._click_verified_box(
+        Bus(),
+        "/session",
+        expected,
+        (120, 120, 30, 30, 1020, 770),
+        geometry=geometry,
+    )
+    assert calls[0] == ("NotifyPointerMotion", ("/session", {}, -200.0, -180.0))
+
+
+def test_window_token_is_read_from_user_bus(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, '{"type":"s","data":["17"]}', "")
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    assert helper._focused_window_token() == "17"
+    assert commands[0][:4] == ["busctl", "--user", "--json=short", "call"]
+
+
+def test_capture_validation_uses_capture_id_on_user_bus(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, '{"type":"b","data":[true]}', "")
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    assert helper._capture_still_current("capture-1")
+    assert commands[0][-3:] == ["ValidateCapture", "s", "capture-1"]
+
+
+def test_telegram_rejects_same_pid_new_window_before_button(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    frame = (*expected, 10, 20, 800, 600, 0, 0)
+    geometry = CaptureGeometry(
+        "logical_desktop",
+        0,
+        (10, 20, 800, 600),
+        (800, 600),
+        1,
+        1,
+        (0, 0, 0, 0),
+        (0, 0),
+        (1, 1),
+        "window-7",
+        "capture-1",
+        100.0,
+        (10, 20, 800, 600),
+    )
+    observations = iter([frame, (*frame[:6], 100, 120)])
+    tokens = iter(["window-7", "window-8"])
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(observations))
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: next(tokens))
+    monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
+    monkeypatch.setattr(helper, "_capture_still_current", lambda _id: True)
+    monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
+    helper.GLib.Variant = lambda _signature, value: value
+    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
+    calls: list[str] = []
+
+    class Bus:
+        def call_sync(self, _bus, _object, _interface, method, *_rest):
+            calls.append(method)
+
+    assert not helper._click_verified_box(
+        Bus(),
+        "/session",
+        expected,
+        (70, 90, 40, 20, 800, 600),
+        geometry=geometry,
+    )
+    assert calls == ["NotifyPointerMotion"]
 
 
 def test_pointer_grant_restores_and_rotates_token_when_enabled(

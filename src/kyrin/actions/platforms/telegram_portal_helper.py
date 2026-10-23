@@ -23,6 +23,11 @@ from kyrin.app.permission_token import (  # noqa: E402
     read_opaque_token,
     save_opaque_token,
 )
+from kyrin.vision.capture_geometry import (  # noqa: E402
+    CaptureGeometry,
+    capture_is_current,
+    coordinate_to_desktop,
+)
 
 BUS = "org.freedesktop.portal.Desktop"
 OBJECT = "/org/freedesktop/portal/desktop"
@@ -32,6 +37,8 @@ SESSION = "org.freedesktop.portal.Session"
 SHELL = "org.gnome.Shell"
 SHELL_OBJECT = "/org/kyrin/ActiveApp"
 SHELL_INTERFACE = "org.kyrin.ActiveApp"
+SCREEN_OBJECT = "/org/kyrin/WindowCapturePrototype"
+SCREEN_INTERFACE = "org.kyrin.WindowCapturePrototype"
 CONTROL = 0xFFE3
 ESCAPE = 0xFF1B
 F_KEY = ord("f")
@@ -182,6 +189,59 @@ def _window_and_pointer() -> tuple[str, int, int, int, int, int, int, int] | Non
     )
 
 
+def _focused_window_token() -> str | None:
+    """Read the focused Meta.Window's stable token from GNOME."""
+    try:
+        completed = subprocess.run(
+            [
+                "busctl", "--user", "--json=short", "call",
+                SHELL, SHELL_OBJECT, SHELL_INTERFACE, "GetActiveWindowToken",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        payload = json.loads(completed.stdout)
+    except OSError, subprocess.TimeoutExpired, json.JSONDecodeError:
+        return None
+    values = payload.get("data")
+    if (
+        completed.returncode
+        or payload.get("type") != "s"
+        or not isinstance(values, list)
+        or len(values) != 1
+        or not isinstance(values[0], str)
+        or not values[0]
+    ):
+        return None
+    return values[0]
+
+
+def _capture_still_current(capture_id: str) -> bool:
+    """Ask GNOME to compare a fresh window image with the captured pixels."""
+    try:
+        completed = subprocess.run(
+            [
+                "busctl", "--user", "--json=short", "call",
+                SHELL, SCREEN_OBJECT, SCREEN_INTERFACE,
+                "ValidateCapture", "s", capture_id,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        payload = json.loads(completed.stdout)
+    except OSError, subprocess.TimeoutExpired, json.JSONDecodeError:
+        return False
+    return (
+        completed.returncode == 0
+        and payload.get("type") == "b"
+        and payload.get("data") == [True]
+    )
+
+
 def _wait_for_expected_focus(expected: tuple[str, int], timeout_s: float = 10) -> bool:
     """Proceed promptly after the portal closes, but only for stable Telegram focus."""
     deadline = monotonic() + timeout_s
@@ -270,12 +330,15 @@ def _click_verified_box(
     menu_item: bool = False,
     settings_item: bool = False,
     visible_row: bool = False,
+    geometry: CaptureGeometry | None = None,
 ) -> bool:
     left, top, width, height, image_width, image_height = box
     if (
         min(left, top, width, height, image_width, image_height) < 0
         or width == 0
         or height == 0
+        or left + width > image_width
+        or top + height > image_height
     ):
         return False
     if settings_item:
@@ -285,25 +348,49 @@ def _click_verified_box(
             or not image_height * 0.06 < top < image_height * 0.86
         ):
             return False
-    elif (
-        left + width >= image_width * 0.3
-        or not (
-            0 < top < image_height * 0.075
-            if menu_button
-            else image_height * (0.025 if menu_item else 0.07)
-            < top
-            < image_height * (0.98 if visible_row else 0.75)
-        )
+    elif left + width >= image_width * 0.3 or not (
+        0 < top < image_height * 0.075
+        if menu_button
+        else image_height * (0.025 if menu_item else 0.07)
+        < top
+        < image_height * (0.98 if visible_row else 0.75)
     ):
         return False
     before = _window_and_pointer()
     if before is None or before[:2] != expected:
         return False
     app_id, pid, frame_x, frame_y, frame_w, frame_h, pointer_x, pointer_y = before
-    if abs(frame_w - image_width) > 4 or abs(frame_h - image_height) > 4:
+    if geometry is not None:
+        if not capture_is_current(geometry, _focused_window_token(), monotonic()):
+            return False
+        if not _capture_still_current(geometry.capture_id):
+            return False
+        if geometry.viewport_rect != (
+            frame_x,
+            frame_y,
+            frame_w,
+            frame_h,
+        ) or geometry.image_size != (image_width, image_height):
+            return False
+        point = coordinate_to_desktop(
+            geometry,
+            (left + width / 2, top + height / 2),
+            image_pixels=True,
+            target_box=(left, top, width, height),
+        )
+        if point is None:
+            return False
+        target_x, target_y = point
+    else:
+        if abs(frame_w - image_width) > 4 or abs(frame_h - image_height) > 4:
+            return False
+        target_x = frame_x + left + width // 2
+        target_y = frame_y + top + height // 2
+    if not (
+        frame_x <= target_x < frame_x + frame_w
+        and frame_y <= target_y < frame_y + frame_h
+    ):
         return False
-    target_x = frame_x + left + width // 2
-    target_y = frame_y + top + height // 2
     connection.call_sync(
         BUS,
         OBJECT,
@@ -325,6 +412,12 @@ def _click_verified_box(
         or after[:6] != (app_id, pid, frame_x, frame_y, frame_w, frame_h)
         or abs(after[6] - target_x) > 5
         or abs(after[7] - target_y) > 5
+    ):
+        return False
+    if after[6:] != (target_x, target_y):
+        return False
+    if geometry is not None and not capture_is_current(
+        geometry, _focused_window_token(), monotonic()
     ):
         return False
     for state in (1, 0):
@@ -372,7 +465,7 @@ def main() -> int:
         or (mode == "focus-search" and len(sys.argv) != 4)
         or (
             mode in {"click", "visible-click", "menu-click", "settings-click"}
-            and len(sys.argv) != 10
+            and len(sys.argv) not in {10, 11}
         )
         or (
             mode == "view"
@@ -499,6 +592,13 @@ def main() -> int:
                 return 2
             print("MENU_CLICKED", flush=True)
         else:
+            geometry = (
+                CaptureGeometry.from_json(sys.argv[10].removeprefix("geometry="))
+                if len(sys.argv) == 11 and sys.argv[10].startswith("geometry=")
+                else None
+            )
+            if len(sys.argv) == 11 and geometry is None:
+                raise ValueError("invalid capture geometry")
             box = (
                 int(sys.argv[4]),
                 int(sys.argv[5]),
@@ -515,14 +615,13 @@ def main() -> int:
                 menu_item=mode == "menu-click",
                 settings_item=mode == "settings-click",
                 visible_row=mode == "visible-click",
+                geometry=geometry,
             )
             if not clicked:
                 print("TARGET_CHANGED", flush=True)
                 return 2
             marker = (
-                "SETTING_CLICKED"
-                if mode == "settings-click"
-                else "CHAT_RESULT_CLICKED"
+                "SETTING_CLICKED" if mode == "settings-click" else "CHAT_RESULT_CLICKED"
             )
             print(marker, flush=True)
         return 0

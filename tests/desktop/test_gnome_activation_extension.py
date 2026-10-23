@@ -107,6 +107,8 @@ focus = null;
 if (extension.ActivateExistingApp('telegram.desktop') !== 'multiple_windows')
     throw new Error('ambiguous activation was accepted');
 focus = window;
+if (extension.GetActiveWindowToken() !== '17')
+    throw new Error('focused window token was incorrect');
 if (JSON.stringify(extension.GetActiveWindowAndPointer()) !==
     JSON.stringify(['telegram.desktop', 42, 100, 50, 1600, 900, 500, 300]))
     throw new Error('focused window geometry or pointer was incorrect');

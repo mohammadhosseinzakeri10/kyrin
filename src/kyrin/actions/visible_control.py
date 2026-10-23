@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.text_reader import IdentifiedWindowText
 from kyrin.vision.text_targets import find_literal_phrases
 
@@ -16,6 +17,7 @@ class VisibleControlTarget:
     image_height: int
     capture_rect: tuple[int, int, int, int] | None = None
     frame_rect: tuple[int, int, int, int] | None = None
+    geometry: CaptureGeometry | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,4 +109,5 @@ def unique_visible_target(
         height,
         observation.capture_rect,
         observation.frame_rect,
+        observation.geometry,
     )

@@ -14,6 +14,9 @@ const INTERFACE_XML = `<node>
       <arg name="app_id" type="s" direction="out"/>
       <arg name="pid" type="u" direction="out"/>
     </method>
+    <method name="GetActiveWindowToken">
+      <arg name="window_token" type="s" direction="out"/>
+    </method>
     <method name="GetActiveWindowAndPointer">
       <arg name="app_id" type="s" direction="out"/>
       <arg name="pid" type="u" direction="out"/>
@@ -123,6 +126,11 @@ export default class KyrinActiveAppExtension extends Extension {
         const app = Shell.WindowTracker.get_default().get_window_app(window);
         const pid = window.get_pid();
         return [app?.get_id() ?? '', pid > 0 ? pid : 0];
+    }
+
+    GetActiveWindowToken() {
+        const window = global.display.get_focus_window();
+        return window === null ? '' : String(window.get_stable_sequence());
     }
 
     GetActiveWindowAndPointer() {
