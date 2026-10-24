@@ -7,6 +7,7 @@ import pytest
 
 from kyrin.desktop.app_activation import ActivationAttempt
 from kyrin.desktop.platforms.gnome_activation import GnomeExistingAppActivator
+from tests.desktop.test_backend_protocol import bus_reply
 
 
 def _reply(value: str) -> subprocess.CompletedProcess[str]:
@@ -17,7 +18,7 @@ def test_requests_only_the_bound_desktop_id() -> None:
     activator = GnomeExistingAppActivator({"telegram": "org.telegram.desktop"})
     with patch(
         "kyrin.desktop.platforms.gnome_activation.subprocess.run",
-        return_value=_reply("requested"),
+        side_effect=[bus_reply("ActivateExistingApp"), _reply("requested")],
     ) as run:
         assert (
             activator.activate_existing_app("telegram") is ActivationAttempt.REQUESTED
@@ -49,7 +50,7 @@ def test_only_explicit_no_window_permits_a_launch(
     activator = GnomeExistingAppActivator({"telegram": "org.telegram.desktop"})
     with patch(
         "kyrin.desktop.platforms.gnome_activation.subprocess.run",
-        return_value=result,
+        side_effect=[bus_reply("ActivateExistingApp"), result],
     ):
         assert activator.activate_existing_app("telegram") is expected
 

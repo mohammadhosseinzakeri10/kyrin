@@ -7,6 +7,7 @@ from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.commands.models import CommandKind
 from kyrin.desktop.active_app import ActiveAppObserver
+from kyrin.timing import timed_stage
 
 
 class ObservedAppExecutor:
@@ -41,13 +42,14 @@ class ObservedAppExecutor:
             or result.outcome is not ActionOutcome.LAUNCH_ACCEPTED
         ):
             return result
-        for attempt in range(self._attempts):
-            if attempt:
-                sleep(self._retry_delay_s)
-            if self._observer.observe_active_app() == request.intent.target:
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.CONFIRMED,
-                    observed_active_app=request.intent.target,
-                )
+        with timed_stage("postcondition", key=request.key):
+            for attempt in range(self._attempts):
+                if attempt:
+                    sleep(self._retry_delay_s)
+                if self._observer.observe_active_app() == request.intent.target:
+                    return ActionResult(
+                        request.key,
+                        ActionOutcome.CONFIRMED,
+                        observed_active_app=request.intent.target,
+                    )
         return result

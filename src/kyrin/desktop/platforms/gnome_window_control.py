@@ -4,9 +4,13 @@ import json
 import math
 import subprocess
 from collections.abc import Mapping
+from dataclasses import replace
 from time import sleep
 
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.window_control import WindowControlStatus, WindowOperation
+from kyrin.desktop.window_observation import WindowObservation
+from kyrin.operations import run_process
 
 _BUS_NAME = "org.gnome.Shell"
 _OBJECT_PATH = "/org/kyrin/ActiveApp"
@@ -38,28 +42,32 @@ class GnomeAppWindowController:
         self._timeout_s = timeout_s
         self._attempts = attempts
         self._retry_delay_s = retry_delay_s
+        self.backend_status = BackendStatus(False, "not_probed")
 
     @staticmethod
     def available() -> bool:
-        try:
-            result = subprocess.run(
-                ["busctl", "--user", "introspect", _BUS_NAME, _OBJECT_PATH, _INTERFACE],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=0.5,
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False
-        return (
-            result.returncode == 0
-            and "ControlAppWindow" in result.stdout
-            and "GetAppWindowState" in result.stdout
-        )
+        return probe_gnome(
+            "ActiveApp",
+            {
+                "ControlAppWindow",
+                "GetAppWindowState",
+                "PrepareWindowClose",
+                "CloseConfirmedWindow",
+            },
+            run=subprocess.run,
+        ).ready
 
     def _call(self, method: str, signature: str, *args: str) -> tuple[str, ...] | None:
+        required = {method}
+        if method in {"ControlAppWindow", "PrepareWindowClose", "CloseConfirmedWindow"}:
+            required.add("GetAppWindowState")
+        if method == "PrepareWindowClose":
+            required.add("CloseConfirmedWindow")
+        self.backend_status = probe_gnome("ActiveApp", required, run=run_process)
+        if not self.backend_status.ready:
+            return None
         try:
-            completed = subprocess.run(
+            completed = run_process(
                 [
                     "busctl",
                     "--user",
@@ -97,6 +105,10 @@ class GnomeAppWindowController:
         return tuple(data)
 
     def control(self, app_id: str, operation: WindowOperation) -> WindowControlStatus:
+        if operation is WindowOperation.CLOSE:
+            # Closing must pass the shared per-window confirmation, never an
+            # app-name-only D-Bus call (including on an old loaded extension).
+            return WindowControlStatus.UNAVAILABLE
         desktop_id = self._desktop_ids.get(app_id)
         if desktop_id is None:
             return WindowControlStatus.UNKNOWN
@@ -127,13 +139,11 @@ class GnomeAppWindowController:
             if state_reply is None or len(state_reply) != 1:
                 continue
             state = state_reply[0]
-            if operation is WindowOperation.CLOSE and state == "no_window":
-                return WindowControlStatus.CONFIRMED
             try:
                 observed: object = json.loads(state)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(observed, dict) or operation is WindowOperation.CLOSE:
+            if not isinstance(observed, dict):
                 continue
             field, wanted = expected[operation]
             if observed.get(field) is wanted and (
@@ -141,4 +151,52 @@ class GnomeAppWindowController:
                 or observed.get("fullscreen") is False
             ):
                 return WindowControlStatus.CONFIRMED
+        return WindowControlStatus.UNKNOWN
+
+    def prepare_close(
+        self, app_id: str, window_index: int | None = None
+    ) -> WindowObservation | None:
+        desktop_id = "" if app_id == "desktop" else self._desktop_ids.get(app_id)
+        if desktop_id is None:
+            return None
+        reply = self._call(
+            "PrepareWindowClose", "su", desktop_id, str(window_index or 0)
+        )
+        if reply is None or len(reply) != 1:
+            return None
+        try:
+            observation = WindowObservation.from_json(reply[0])
+        except ValueError, TypeError:
+            return None
+        resolved_app = next(
+            (
+                key
+                for key, value in self._desktop_ids.items()
+                if value == observation.app_id
+            ),
+            None,
+        )
+        if resolved_app is None:
+            return None
+        # Keep platform desktop IDs at the platform boundary; the shared
+        # prompt and allowlist use the same internal app IDs as ActionGate.
+        return replace(observation, app_id=resolved_app)
+
+    def close_confirmed(self, window: WindowObservation) -> WindowControlStatus:
+        desktop_id = self._desktop_ids.get(window.app_id)
+        if desktop_id is None:
+            return WindowControlStatus.UNKNOWN
+        reply = self._call("CloseConfirmedWindow", "s", window.generation)
+        if reply != ("requested",):
+            return WindowControlStatus.UNKNOWN
+        for index in range(self._attempts):
+            if index:
+                sleep(self._retry_delay_s)
+            state = self._call(
+                "GetAppWindowState", "ss", desktop_id, window.window_token
+            )
+            if state == ("no_window",):
+                return WindowControlStatus.CONFIRMED
+        # A save dialog, an ignored request or an uncertain transport is never
+        # permission to force-close, retry close or answer the application's UI.
         return WindowControlStatus.UNKNOWN

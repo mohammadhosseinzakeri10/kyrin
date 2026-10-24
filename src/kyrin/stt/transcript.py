@@ -1,6 +1,6 @@
 """Transcript events shared by streaming and windowed STT backends."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -9,6 +9,13 @@ class TranscriptStatus(StrEnum):
 
     PARTIAL = "partial"
     FINAL = "final"
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptTiming:
+    """Producer times only; absent audio attribution stays unknown."""
+
+    stamps: tuple[tuple[str, int], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +33,8 @@ class TranscriptUpdate:
     text: str
     status: TranscriptStatus
     language: str | None = None
+    emitted_ns: int | None = field(default=None, compare=False)
+    timing: TranscriptTiming | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.segment_id < 0:

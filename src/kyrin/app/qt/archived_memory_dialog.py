@@ -19,18 +19,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from kyrin.memory.history import ArchivedTurn, SqliteConversationHistory
+from kyrin.memory.history import (
+    ArchivedTurn,
+    HistoryRetention,
+    SqliteConversationHistory,
+)
 
 
 class ArchivedMemoryDialog(QDialog):
     def __init__(
-        self, path: Path, text: Callable[[str], str], parent: QWidget | None = None
+        self,
+        path: Path,
+        text: Callable[[str], str],
+        parent: QWidget | None = None,
+        *,
+        retention: HistoryRetention | None = None,
     ) -> None:
         super().__init__(parent)
         self._text = text
-        self._history = SqliteConversationHistory(path)
+        self._history = SqliteConversationHistory(path, retention=retention)
         self._turns: dict[int, ArchivedTurn] = {}
         self._oldest_id: int | None = None
+        self._closed = False
         self.setWindowTitle(text("conversation_memory_review_title"))
         self.setMinimumSize(620, 460)
         layout = QVBoxLayout(self)
@@ -115,6 +125,19 @@ class ArchivedMemoryDialog(QDialog):
             self.restore_button.setEnabled(False)
             self._refresh_count()
 
+    def _dispose_history(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self.preview.clear()
+            self.turn_list.clear()
+            self._turns.clear()
+            self.restore_button.setEnabled(False)
+            self._history.close()
+
+    def done(self, result: int) -> None:
+        self._dispose_history()
+        super().done(result)
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._history.close()
+        self._dispose_history()
         super().closeEvent(event)

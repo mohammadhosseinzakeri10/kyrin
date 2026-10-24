@@ -7,6 +7,8 @@ from typing import Literal
 from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
 from kyrin.commands.visible_options import VisibleOption
+from kyrin.desktop.accessibility_target import AccessibilityTarget
+from kyrin.desktop.window_observation import WindowObservation
 
 
 class CommandKind(StrEnum):
@@ -50,6 +52,9 @@ class CommandIntent:
     control_source: Literal["accessibility", "ocr"] | None = None
     control_anchor: tuple[int, int] | None = None
     control_window_app: str | None = None
+    control_observation: WindowObservation | None = None
+
+    control_accessibility: AccessibilityTarget | None = None
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -92,6 +97,19 @@ class CommandIntent:
             or not self.control_window_app.strip()
         ):
             raise ValueError("only visible controls may name a focused app")
+        if self.control_accessibility is not None and (
+            self.kind is not CommandKind.VISIBLE_CONTROL
+            or self.control_source != "accessibility"
+        ):
+            raise ValueError("only accessible controls may carry structural evidence")
+        if self.control_observation is not None and (
+            self.kind is not CommandKind.VISIBLE_CONTROL
+            or (
+                self.control_window_app is not None
+                and self.control_observation.app_id != self.control_window_app
+            )
+        ):
+            raise ValueError("only visible controls may carry matching window evidence")
         if self.kind is CommandKind.TELEGRAM_VIEW and self.target not in {
             "archive",
             "contacts",

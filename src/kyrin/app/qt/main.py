@@ -28,6 +28,7 @@ from kyrin.app.platforms.xdg_startup import (
 from kyrin.app.qt.audio_file_import import AudioFileImport
 from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.chat_verifier import QtChatVerifier
+from kyrin.app.qt.control_confirmation import QtControlConfirmation
 from kyrin.app.qt.document_text_reader import DocumentTextReader
 from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
@@ -126,7 +127,7 @@ def _announce_power(
     speaker: ResponseSpeaker,
     on_error: Callable[[SpeechSynthesisError], None],
     *,
-    speak: Callable[[str, str], None] | None = None,
+    speak: Callable[[str, str, Callable[[], bool]], None] | None = None,
     still_current: Callable[[], bool] | None = None,
 ) -> None:
     response = PresentedResponse(
@@ -272,7 +273,7 @@ def main() -> int:
         ),
         preview_backend=InertPowerBackend(),
     )
-    power_flow.set_voice_ready(lambda: not speaker.is_active)
+    power_flow.set_voice_ready(lambda: not speaker.is_playing)
 
     def announce_power(prompt: PowerPrompt) -> None:
         def current() -> bool:
@@ -285,12 +286,10 @@ def main() -> int:
             prompt,
             speaker,
             events.publish,
-            speak=(
-                lambda text, language: (
-                    synthesizer.speak_if_current(text, language, current)
-                    if still_current is not None
-                    else None
-                )
+            speak=lambda text, language, valid: (
+                synthesizer.speak_if_current(text, language, valid)
+                if still_current is not None
+                else None
             ),
             still_current=still_current,
         )
@@ -308,8 +307,8 @@ def main() -> int:
                 ResponseChannel.TEXT_AND_VOICE,
                 language,
             ),
-            speak=lambda spoken, spoken_language: synthesizer.speak_preview(
-                spoken, spoken_language, selection
+            speak=lambda spoken, spoken_language, valid: synthesizer.speak_preview(
+                spoken, spoken_language, selection, is_current=valid
             ),
         )
 
@@ -362,25 +361,15 @@ def main() -> int:
     )
     app.aboutToQuit.connect(document_reader.close)
     chat_verifier = QtChatVerifier(screen_access, screen_reader, app)
-    visual_sink = GnomeVisualStatusSink() if GnomeVisualStatusSink.available() else None
-    observer_factory = (
-        _gnome_observer if GnomeShellActiveAppObserver.available() else None
+    control_confirmation = QtControlConfirmation(app)
+    gnome_session = "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(
+        ":"
     )
-    activator_factory = (
-        GnomeExistingAppActivator
-        if observer_factory is not None and GnomeExistingAppActivator.available()
-        else None
-    )
-    window_controller_factory = (
-        GnomeAppWindowController if GnomeAppWindowController.available() else None
-    )
-    # The Shell extension can load after KYRIN starts at login. A GNOME
-    # session keeps the adapter and its read calls fail safely until ready.
-    window_presence_factory = (
-        GnomeAppWindowPresence
-        if "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
-        else None
-    )
+    visual_sink = GnomeVisualStatusSink() if gnome_session else None
+    observer_factory = _gnome_observer if gnome_session else None
+    activator_factory = GnomeExistingAppActivator if gnome_session else None
+    window_controller_factory = GnomeAppWindowController if gnome_session else None
+    window_presence_factory = GnomeAppWindowPresence if gnome_session else None
     factory = UbuntuSessionFactory(
         stt_openers=standard_stt_openers(
             whisper_server_path=server,
@@ -395,6 +384,7 @@ def main() -> int:
         observer_factory=observer_factory,
         activator_factory=activator_factory,
         chat_verifier=chat_verifier,
+        control_confirmation=control_confirmation.confirm,
         focused_window=focused_window,
         system_power=power_flow,
         response_speaker=speaker,
@@ -426,6 +416,7 @@ def main() -> int:
             linux_model_library_path().parent / "tts",
         ),
         configure_tts=configure_tts,
+        interrupt_speech=speaker.interrupt,
         preview_tts=preview_tts,
         load_error=load_error,
         ui_translations=UiTranslations(linux_settings_path().parent),

@@ -1,6 +1,47 @@
 # Conversation memory
 
-KYRIN stores only finalized speech text, its reported language, a UTC time,
+<div dir="rtl" lang="fa">
+
+**قرارداد فعلی ــ ۲۰۲۶/۱۰/۲۴، F17:** با تصمیم مالک، ذخیره در نصب تازه
+خاموش است. تنظیمات نسخهٔ ۱۵ و قدیمی‌تر هنگام خواندن، رفتار روشن قبلی را حفظ
+می‌کنند؛ فایل تنظیمات صرفاً با خواندن بازنویسی نمی‌شود. سقف پیش‌فرض فعال
+۲۰۰۰ متن، بدون انقضای زمانی، و بایگانی بدون سقف یا انقضای خودکار باقی می‌ماند.
+هیچ محدودیت مخرب تازه‌ای بر دادهٔ موجود تحمیل نشده است.
+
+در ترجیحات، ذخیره و چهار محدودیت مستقل تعداد/سن فعال و بایگانی قابل تنظیم‌اند.
+صفر در رابط و `null` در تنظیمات یعنی نامحدود. کاهش محدودیت تأیید جداگانه
+می‌خواهد و با دکمهٔ ذخیرهٔ تغییرات اعمال می‌شود. سن از زمان ثبت اولیهٔ متن
+محاسبه می‌شود؛ بایگانی و بازگردانی آن را تازه نمی‌کنند. متن دقیقاً روی مرز سن
+حفظ می‌شود؛ فقط متن قدیمی‌تر حذف می‌شود. سقف تعداد، تازه‌ترین شناسه‌های درج
+را نگه می‌دارد. محدودیت‌ها هنگام شروع نشست دارای ذخیره، درج، خواندن تاریخچه
+و بایگانی/بازگردانی اجرا می‌شوند؛ در زمان بسته‌بودن برنامه زمان‌بند حذف وجود ندارد.
+بازگردانی نباید متن فعال دیگری را کنار بزند یا متن منقضی برای زمینه را زنده کند.
+
+خاموش‌کردن ذخیره، اتصال تاریخچه به نشست میکروفون و فایل را قطع می‌کند:
+نه پایگاه داده ایجاد/باز می‌شود، نه متن قبلی برای مدل خوانده می‌شود و نه متن
+جدید ذخیره می‌شود. دادهٔ موجود حفظ می‌شود. نمایش متن در گزارش عیب‌یابیِ
+حافظه‌ای و زمینهٔ کوتاه‌مدت همان نشست، مستقل از این ذخیرهٔ پایدار است.
+مرور صریح بایگانی همچنان ممکن است و سیاست ذخیره‌شدهٔ نگهداری را رعایت می‌کند.
+
+سه عملیات مستقل رابط عبارت‌اند از «بایگانی و خروج از زمینه»، «حذف فعال» و
+«حذف همهٔ فعال و بایگانی این پایگاه داده». هر سه تأیید جداگانه دارند؛ بایگانی
+با رعایت سیاست نگهداری قابل بازگردانی است و دو حذف برگشت‌پذیر نیستند.
+برای جلوگیری از ثبت دوبارهٔ متن در حین عملیات، ابتدا باید میکروفون کاملاً
+متوقف و پردازش فایل تمام یا لغو شود. پس از موفقیت، گزارش عیب‌یابی، فهرست و
+پیش‌نمایش باز بایگانی پاک می‌شوند. `clear()` قرارداد قدیمیِ حذف فعال را حفظ
+می‌کند؛ دامنهٔ صریح با `clear_active()` و `clear_all()` مشخص است.
+حذف همه شامل نسخه‌های پشتیبان، snapshotهای جداگانه یا فایل‌های صوتی منبع نیست؛
+حذف سطرهای SQLite تضمین پاک‌سازی فیزیکی رسانه نیست.
+
+آزمون‌ها فقط پایگاه دادهٔ موقت را باز می‌کنند و ساعت تزریقی، مرز سن، سقف مستقل،
+بازگردانی، مهاجرت غیرمخرب تنظیمات، خاموش‌بودن ذخیره برای میکروفون و فایل،
+تأیید و پاک‌سازی رابط را پوشش می‌دهند. پایگاه دادهٔ شخصی برای این اصلاح باز
+نشده و آزمون زندهٔ برنامه انجام نشده است.
+
+</div>
+
+When persistence is enabled, KYRIN stores only finalized speech text, its reported
+language, a UTC time,
 and session/stream/segment identifiers. Partial STT text and audio are not
 saved. The SQLite database is created at the standard XDG data path
 `~/.local/share/kyrin/memory/conversation.sqlite3`. On the owner's Ubuntu
@@ -9,8 +50,9 @@ machine this directory points to
 Other platforms can supply their own data directory without changing the
 history interface.
 
-The database retains at most 2,000 active finalized turns; archived turns are
-preserved outside that active limit. The interpreter sees no more than six
+By default, the database retains at most 2,000 active finalized turns; archived
+turns are preserved outside that active limit. Both limits and optional ages
+can now be configured as described above. The interpreter sees no more than six
 active recent turns, shortened to 240 characters each, and only on a final
 transcript. These are background context for the local command model;
 the current utterance still has to independently support any executable
@@ -24,7 +66,7 @@ answer, system-power dialogue, or stream restart discards that fragment. A
 language-label change alone does not discard it because multilingual STT labels
 can vary between segments.
 
-Preferences provides **Clear conversation memory…** with a separate
+Preferences provides **Clear active conversation memory…** with a separate
 confirmation. It clears active turns only; archived historical rows remain
 available for separate review. **Review archived speech transcripts…** opens
 a paged local list only when requested. Selecting a row reveals its full text;

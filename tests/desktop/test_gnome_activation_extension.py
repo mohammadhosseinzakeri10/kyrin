@@ -78,7 +78,16 @@ const Shell = {
 const Gio = {DBus: {session: {}}, DBusExportedObject: {
     wrapJSObject: () => ({export: () => {}, unexport: () => {}}),
 }};
+let clock = 1000000;
+let generation = 0;
+let focusChanged = () => {};
+const GLib = {
+    get_monotonic_time: () => clock,
+    uuid_string_random: () => String(++generation),
+};
 const global = {display: {
+    connect: (_signal, callback) => { focusChanged = callback; return 1; },
+    disconnect: () => {},
     get_current_time_roundtrip: () => 456,
     get_focus_window: () => focus,
 }, get_pointer: () => [500, 300, 0]};
@@ -137,13 +146,14 @@ if (extension.ControlAppWindow('telegram.desktop', 'fullscreen')[0] !== 'request
     throw new Error('window did not exit fullscreen');
 windows = 2;
 focus = null;
-if (extension.ControlAppWindow('telegram.desktop', 'close')[0] !== 'multiple_windows')
+if (extension.PrepareWindowClose('telegram.desktop', 0) !== '')
     throw new Error('ambiguous close was accepted');
 focus = window;
-if (extension.ControlAppWindow('telegram.desktop', 'close')[0] !== 'requested'
+const close = JSON.parse(extension.PrepareWindowClose('telegram.desktop', 0));
+if (extension.CloseConfirmedWindow(close.generation) !== 'requested'
     || extension.GetAppWindowState('telegram.desktop', '17') !== 'no_window')
     throw new Error('window was not closed');
-if (extension.ControlAppWindow('../telegram.desktop', 'close')[0] !== 'unknown')
+if (extension.PrepareWindowClose('../telegram.desktop', 0) !== '')
     throw new Error('invalid app was controlled');
 if (extension.ShowAppWindows('telegram.desktop') !== 'unknown')
     throw new Error('unrelated app was shown');
@@ -207,3 +217,147 @@ def test_extension_activates_only_an_existing_registered_window() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "existing-window activation: passed" in result.stdout
+
+
+_CLOSE_CASES = {
+    "focus_round_trip": """
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        focus = {};
+        focusChanged();
+        focus = window;
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('focus round trip revived an invalidated decision');
+    """,
+    "focus_changed": """
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        focus = {};
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('switched focus consumed confirmation');
+        focus = window;
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale')
+            throw new Error('bad consumption did not burn confirmation');
+    """,
+    "same_pid_replacement": """
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        const replacement = {...window, get_stable_sequence: () => 18};
+        app.get_windows = () => [replacement];
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('replacement window consumed confirmation');
+    """,
+    "expiry": """
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        clock += 10000000;
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('expired confirmation closed a window');
+    """,
+    "expiry_before_dispatch": """
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        global.display.get_current_time_roundtrip = () => {
+            clock += 10000000;
+            return 456;
+        };
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('expiry during timestamp read still sent close');
+    """,
+    "old_generation": """
+        const old = JSON.parse(extension.PrepareWindowClose('telegram.desktop', 0));
+        const fresh = JSON.parse(extension.PrepareWindowClose('telegram.desktop', 0));
+        if (extension.CloseConfirmedWindow(old.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('old dialog consumed a fresh request');
+        if (extension.CloseConfirmedWindow(fresh.generation) !== 'stale')
+            throw new Error('mismatched consumption did not burn confirmation');
+    """,
+    "save_dialog_and_replay": """
+        let saveDialog = false;
+        let closes = 0;
+        window.delete = () => { closes++; saveDialog = true; };
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'requested'
+            || !saveDialog || windows !== 1 || closes !== 1)
+            throw new Error('normal application close/save dialog was bypassed');
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || closes !== 1)
+            throw new Error('confirmation was reused');
+    """,
+    "picker_replaced": """
+        extension.ShowOpenWindows(['telegram.desktop']);
+        const prepared = JSON.parse(extension.PrepareWindowClose('', 1));
+        if (extension._picker !== null)
+            throw new Error('Shell modal grab was retained');
+        extension.ShowOpenWindows(['telegram.desktop']);
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale'
+            || windows !== 1)
+            throw new Error('new picker consumed old close decision');
+    """,
+    "terminal_numbered": """
+        Object.assign(terminalSecond, {get_pid: () => 99, can_close: () => true});
+        let closed = 0;
+        terminalSecond.delete = () => { closed++; };
+        extension.ShowAppWindows('org.gnome.Ptyxis.desktop');
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('org.gnome.Ptyxis.desktop', 2));
+        if (prepared.window_token !== '22' || prepared.process_id !== 99
+            || closed !== 0)
+            throw new Error('numbered terminal target was not observed before close');
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'requested'
+            || closed !== 1)
+            throw new Error('confirmed terminal window did not close normally');
+    """,
+    "legacy_bypass": """
+        extension.ShowOpenWindows(['telegram.desktop']);
+        if (extension.ControlAppWindow('telegram.desktop', 'close')[0] !==
+                'confirmation_required'
+            || extension.CloseShownOpenWindow(1, ['telegram.desktop']) !==
+                'confirmation_required'
+            || extension.CloseShownAppWindow('org.gnome.Ptyxis.desktop', 1) !==
+                'confirmation_required'
+            || windows !== 1)
+            throw new Error('legacy API bypassed confirmation');
+    """,
+}
+
+
+@pytest.mark.parametrize("case", _CLOSE_CASES)
+def test_extension_close_is_atomic_bound_and_single_use(case: str) -> None:
+    gjs = shutil.which("gjs")
+    if gjs is None:
+        pytest.skip("GJS is not installed")
+    source = "\n".join(
+        line
+        for line in _EXTENSION.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("import ")
+    ).replace(
+        "export default class KyrinActiveAppExtension",
+        "globalThis.KyrinActiveAppExtension = class KyrinActiveAppExtension",
+    )
+    result = subprocess.run(
+        [
+            gjs,
+            "-c",
+            _HARNESS
+            + source
+            + """
+        const extension = new KyrinActiveAppExtension();
+        extension.enable();
+        """
+            + _CLOSE_CASES[case]
+            + "\nprint('bound close passed');",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

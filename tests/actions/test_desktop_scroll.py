@@ -24,7 +24,7 @@ def test_scroll_dispatch_uses_focused_allowed_app(
         commands.append(args)
         return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
 
-    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    monkeypatch.setattr(desktop_scroll, "run_process", run)
     executor = desktop_scroll.DesktopScrollExecutor(
         Delegate(), desktop_ids={"telegram": "org.telegram.desktop"},
         identity_reader=lambda: ("org.telegram.desktop", 42),
@@ -43,7 +43,7 @@ def test_scroll_rejects_changed_focus_without_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_scroll.subprocess, "run",
+        desktop_scroll, "run_process",
         lambda *_args, **_kwargs: pytest.fail("scroll must not dispatch"),
     )
     executor = desktop_scroll.DesktopScrollExecutor(
@@ -67,7 +67,7 @@ def test_other_app_scroll_still_targets_window_center(
         commands.append(args)
         return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
 
-    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    monkeypatch.setattr(desktop_scroll, "run_process", run)
     executor = desktop_scroll.DesktopScrollExecutor(
         Delegate(), desktop_ids={"firefox": "firefox.desktop"},
         identity_reader=lambda: ("firefox.desktop", 21),
@@ -88,7 +88,7 @@ def test_scroll_amount_reaches_bounded_helper(
         commands.append(args)
         return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
 
-    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    monkeypatch.setattr(desktop_scroll, "run_process", run)
     executor = desktop_scroll.DesktopScrollExecutor(
         Delegate(), desktop_ids={"telegram": "org.telegram.desktop"},
         identity_reader=lambda: ("org.telegram.desktop", 42),
@@ -110,7 +110,7 @@ def test_telegram_open_chat_scroll_targets_right_pane(
         commands.append(args)
         return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
 
-    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    monkeypatch.setattr(desktop_scroll, "run_process", run)
     executor = desktop_scroll.DesktopScrollExecutor(
         Delegate(), desktop_ids={"telegram": "org.telegram.desktop"},
         identity_reader=lambda: ("org.telegram.desktop", 42),
@@ -129,7 +129,7 @@ def test_chat_area_cannot_be_sent_to_another_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_scroll.subprocess, "run",
+        desktop_scroll, "run_process",
         lambda *_args, **_kwargs: pytest.fail("scroll must not dispatch"),
     )
     executor = desktop_scroll.DesktopScrollExecutor(
@@ -152,7 +152,7 @@ def test_global_scroll_dispatches_for_unselected_focused_app(
         commands.append(args)
         return subprocess.CompletedProcess(args, 0, "SCROLL_DISPATCHED", "")
 
-    monkeypatch.setattr(desktop_scroll.subprocess, "run", run)
+    monkeypatch.setattr(desktop_scroll, "run_process", run)
     executor = desktop_scroll.DesktopScrollExecutor(
         Delegate(),
         desktop_ids={},

@@ -24,30 +24,52 @@ class AudioFramer:
         full windows until it actually ends.
         """
         pending = bytearray()
+        pending_start_ns: int | None = None
 
         for chunk in chunks:
             if chunk.audio_format != self.audio_format:
                 raise ValueError("audio chunk format changed during framing")
 
             data = chunk.data
+            consumed = 0
             if not data:
                 continue
 
             if pending:
                 missing = self._bytes_per_window - len(pending)
                 pending.extend(data[:missing])
+                consumed = min(missing, len(data))
                 data = data[missing:]
                 if len(pending) == self._bytes_per_window:
-                    yield AudioData(bytes(pending), self.audio_format)
+                    yield AudioData(bytes(pending), self.audio_format, pending_start_ns)
                     pending.clear()
 
             complete_windows = len(data) // self._bytes_per_window
             complete_bytes = complete_windows * self._bytes_per_window
             for start in range(0, complete_bytes, self._bytes_per_window):
                 window = data[start : start + self._bytes_per_window]
-                yield AudioData(window, self.audio_format)
+                start_ns = (
+                    chunk.capture_start_ns
+                    + (consumed + start)
+                    * 1_000_000_000
+                    // self.audio_format.bytes_per_frame
+                    // self.audio_format.sample_rate
+                    if chunk.capture_start_ns is not None
+                    else None
+                )
+                yield AudioData(window, self.audio_format, start_ns)
 
+            if not pending:
+                pending_start_ns = (
+                    chunk.capture_start_ns
+                    + (consumed + complete_bytes)
+                    * 1_000_000_000
+                    // self.audio_format.bytes_per_frame
+                    // self.audio_format.sample_rate
+                    if chunk.capture_start_ns is not None
+                    else None
+                )
             pending.extend(data[complete_bytes:])
 
         if pending:
-            yield AudioData(bytes(pending), self.audio_format)
+            yield AudioData(bytes(pending), self.audio_format, pending_start_ns)

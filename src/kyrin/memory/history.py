@@ -2,8 +2,9 @@
 
 import os
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
@@ -33,6 +34,60 @@ class ConversationHistory(Protocol):
     def recent(self, *, limit: int = 8) -> tuple[ConversationTurn, ...]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryRetention:
+    """Independent limits; None preserves text without an automatic limit.
+
+    Age is measured from the original recorded_at, including after archive
+    and restore. Count retains newest insertion IDs, matching recent().
+    """
+
+    active_max_turns: int | None = 2000
+    active_max_age_days: int | None = None
+    archived_max_turns: int | None = None
+    archived_max_age_days: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.active_max_turns,
+            self.active_max_age_days,
+            self.archived_max_turns,
+            self.archived_max_age_days,
+        ):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError("history limits must be positive integers or null")
+        for days in (self.active_max_age_days, self.archived_max_age_days):
+            if days is not None and days > 365000:
+                raise ValueError("history age limit must not exceed 365000 days")
+        for count in (self.active_max_turns, self.archived_max_turns):
+            if count is not None and count > 2147483647:
+                raise ValueError("history count limit must not exceed 2147483647")
+
+    def is_stricter_than(self, previous: HistoryRetention) -> bool:
+        return any(
+            new is not None and (old is None or new < old)
+            for new, old in zip(
+                (
+                    self.active_max_turns,
+                    self.active_max_age_days,
+                    self.archived_max_turns,
+                    self.archived_max_age_days,
+                ),
+                (
+                    previous.active_max_turns,
+                    previous.active_max_age_days,
+                    previous.archived_max_turns,
+                    previous.archived_max_age_days,
+                ),
+                strict=True,
+            )
+        )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def default_history_path() -> Path:
     """Use XDG data storage; the owner's XDG directory links to AI-Projects."""
     configured = os.environ.get("XDG_DATA_HOME")
@@ -45,11 +100,21 @@ def default_history_path() -> Path:
 class SqliteConversationHistory:
     """Persist finalized text only; reads are ordered and explicitly bounded."""
 
-    def __init__(self, path: Path, *, max_turns: int = 2000) -> None:
-        if max_turns < 1:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        max_turns: int = 2000,
+        retention: HistoryRetention | None = None,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        if type(max_turns) is not int or max_turns < 1:
             raise ValueError("max_turns must be positive")
+        if retention is not None and max_turns != 2000:
+            raise ValueError("supply retention or max_turns, not both")
         self._path = path
-        self._max_turns = max_turns
+        self._retention = retention or HistoryRetention(active_max_turns=max_turns)
+        self._clock = clock
         self._lock = Lock()
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if path.is_symlink():
@@ -102,16 +167,43 @@ class SqliteConversationHistory:
                     turn.segment_id,
                 ),
             )
-            self._connection.execute(
-                "DELETE FROM turns WHERE archived = 0 AND id NOT IN "
-                "(SELECT id FROM turns WHERE archived = 0 ORDER BY id DESC LIMIT ?)",
-                (self._max_turns,),
-            )
+            self._prune_locked()
+
+    def apply_retention(self) -> None:
+        """Apply explicitly selected policy; opening/migrating alone never prunes."""
+        with self._lock, self._connection:
+            self._prune_locked()
+
+    def _prune_locked(self) -> None:
+        now = self._clock().astimezone(UTC)
+        for archived, count, days in (
+            (0, self._retention.active_max_turns, self._retention.active_max_age_days),
+            (
+                1,
+                self._retention.archived_max_turns,
+                self._retention.archived_max_age_days,
+            ),
+        ):
+            if days is not None:
+                # Compare normalized UTC timestamps without rounding to seconds.
+                cutoff = (now - timedelta(days=days)).isoformat()
+                self._connection.execute(
+                    "DELETE FROM turns WHERE archived = ? AND recorded_at < ?",
+                    (archived, cutoff),
+                )
+            if count is not None:
+                self._connection.execute(
+                    "DELETE FROM turns WHERE archived = ? AND id NOT IN "
+                    "(SELECT id FROM turns WHERE archived = ? "
+                    "ORDER BY id DESC LIMIT ?)",
+                    (archived, archived, count),
+                )
 
     def recent(self, *, limit: int = 8) -> tuple[ConversationTurn, ...]:
         if limit < 0 or limit > 50:
             raise ValueError("limit must be between 0 and 50")
-        with self._lock:
+        with self._lock, self._connection:
+            self._prune_locked()
             rows = self._connection.execute(
                 """SELECT text, language, recorded_at, session_id, stream_id, segment_id
                    FROM turns WHERE archived = 0 ORDER BY id DESC LIMIT ?""",
@@ -133,27 +225,33 @@ class SqliteConversationHistory:
         return tuple(turns)
 
     def archive_active(self) -> int:
-        """Exclude existing turns from context without deleting their text."""
+        """Move text out of context, subject to the selected archive retention."""
         with self._lock, self._connection:
             cursor = self._connection.execute(
                 "UPDATE turns SET archived = 1 WHERE archived = 0"
             )
-            return cursor.rowcount
+            changed = cursor.rowcount
+            self._prune_locked()
+            return changed
 
     def restore_archived(self) -> int:
         """Make archived turns available to bounded recent reads again."""
         with self._lock, self._connection:
+            self._prune_locked()
             total = self._connection.execute("SELECT COUNT(*) FROM turns").fetchone()
             assert total is not None
-            if total[0] > self._max_turns:
+            limit = self._retention.active_max_turns
+            if limit is not None and total[0] > limit:
                 raise ValueError("restoring archived turns exceeds the active limit")
+            self._check_restore_age()
             cursor = self._connection.execute(
                 "UPDATE turns SET archived = 0 WHERE archived = 1"
             )
             return cursor.rowcount
 
     def archived_count(self) -> int:
-        with self._lock:
+        with self._lock, self._connection:
+            self._prune_locked()
             row = self._connection.execute(
                 "SELECT COUNT(*) FROM turns WHERE archived = 1"
             ).fetchone()
@@ -168,7 +266,8 @@ class SqliteConversationHistory:
             raise ValueError("limit must be between 1 and 50")
         if before_id is not None and before_id < 1:
             raise ValueError("before_id must be positive")
-        with self._lock:
+        with self._lock, self._connection:
+            self._prune_locked()
             rows = self._connection.execute(
                 """SELECT id, text, language, recorded_at FROM turns
                    WHERE archived = 1 AND (? IS NULL OR id < ?)
@@ -185,21 +284,46 @@ class SqliteConversationHistory:
         if turn_id < 1:
             raise ValueError("turn_id must be positive")
         with self._lock, self._connection:
+            self._prune_locked()
             active = self._connection.execute(
                 "SELECT COUNT(*) FROM turns WHERE archived = 0"
             ).fetchone()
             assert active is not None
-            if active[0] >= self._max_turns:
+            limit = self._retention.active_max_turns
+            if limit is not None and active[0] >= limit:
                 raise ValueError("restoring archived turn exceeds the active limit")
+            self._check_restore_age(turn_id)
             cursor = self._connection.execute(
                 "UPDATE turns SET archived = 0 WHERE archived = 1 AND id = ?",
                 (turn_id,),
             )
             return cursor.rowcount == 1
 
-    def clear(self) -> None:
+    def _check_restore_age(self, turn_id: int | None = None) -> None:
+        days = self._retention.active_max_age_days
+        if days is not None:
+            cutoff = (self._clock().astimezone(UTC) - timedelta(days=days)).isoformat()
+            expired = self._connection.execute(
+                "SELECT 1 FROM turns WHERE archived = 1 AND recorded_at < ? "
+                "AND (? IS NULL OR id = ?) LIMIT 1",
+                (cutoff, turn_id, turn_id),
+            ).fetchone()
+            if expired is not None:
+                raise ValueError("archived text exceeds the active age limit")
+
+    def clear_active(self) -> None:
+        """Delete active text only; unlike archiving, this is irreversible."""
         with self._lock, self._connection:
             self._connection.execute("DELETE FROM turns WHERE archived = 0")
+
+    def clear(self) -> None:
+        """Compatibility alias retaining the historical active-only contract."""
+        self.clear_active()
+
+    def clear_all(self) -> None:
+        """Delete active and archived rows in this database, not external snapshots."""
+        with self._lock, self._connection:
+            self._connection.execute("DELETE FROM turns")
 
     def close(self) -> None:
         with self._lock:

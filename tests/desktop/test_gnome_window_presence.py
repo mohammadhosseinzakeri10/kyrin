@@ -6,6 +6,7 @@ import subprocess
 from kyrin.desktop.platforms import gnome_window_presence
 from kyrin.desktop.platforms.gnome_window_presence import GnomeAppWindowPresence
 from kyrin.desktop.window_presence import WindowPresence
+from tests.desktop.test_backend_protocol import bus_reply
 
 
 def test_window_probe_uses_only_a_bound_desktop_id(monkeypatch) -> None:
@@ -13,6 +14,8 @@ def test_window_probe_uses_only_a_bound_desktop_id(monkeypatch) -> None:
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
+        if args[-1] == "GetCapabilities":
+            return bus_reply("HasAppWindow")
         return subprocess.CompletedProcess(
             args, 0, json.dumps({"type": "s", "data": ["open"]}), ""
         )
@@ -21,12 +24,14 @@ def test_window_probe_uses_only_a_bound_desktop_id(monkeypatch) -> None:
     probe = GnomeAppWindowPresence({"terminal": "org.gnome.Ptyxis.desktop"})
     assert probe.observe("terminal") is WindowPresence.OPEN
     assert probe.observe("unbound") is WindowPresence.UNKNOWN
-    assert len(calls) == 1
-    assert calls[0][-2:] == ["s", "org.gnome.Ptyxis.desktop"]
+    assert len(calls) == 2
+    assert calls[1][-2:] == ["s", "org.gnome.Ptyxis.desktop"]
 
 
 def test_window_probe_treats_bad_bus_reply_as_unknown(monkeypatch) -> None:
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[-1] == "GetCapabilities":
+            return bus_reply("HasAppWindow")
         return subprocess.CompletedProcess(args, 0, '{"data":["surprise"]}', "")
 
     monkeypatch.setattr(gnome_window_presence.subprocess, "run", run)
@@ -44,6 +49,8 @@ def test_window_count_is_fresh_and_validated(monkeypatch) -> None:
     )
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[-1] == "GetCapabilities":
+            return bus_reply("CountAppWindows")
         assert args[-3] == "CountAppWindows"
         return subprocess.CompletedProcess(args, 0, next(replies), "")
 

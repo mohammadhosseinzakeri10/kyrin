@@ -1,5 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GdkPixbuf from 'gi://GdkPixbuf';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -8,6 +9,9 @@ import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 
 const INTERFACE_XML = `<node>
   <interface name="org.kyrin.WindowCapturePrototype">
+    <method name="GetCapabilities">
+      <arg name="manifest" type="s" direction="out"/>
+    </method>
     <method name="RequestSession">
       <arg name="granted" type="b" direction="out"/>
     </method>
@@ -31,6 +35,11 @@ const INTERFACE_XML = `<node>
       <arg name="frame_height" type="i" direction="out"/>
       <arg name="geometry" type="s" direction="out"/>
       <arg name="png" type="ay" direction="out"/>
+    </method>
+    <method name="ValidateCaptureRegions">
+      <arg name="capture_id" type="s" direction="in"/>
+      <arg name="regions" type="a(iiii)" direction="in"/>
+      <arg name="current" type="b" direction="out"/>
     </method>
     <method name="ValidateCapture">
       <arg name="capture_id" type="s" direction="in"/>
@@ -79,7 +88,83 @@ function unavailableCapture(invocation) {
         '(suiiiiiiiisay)', ['', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', new Uint8Array()]));
 }
 
+function decodedPng(bytes) {
+    const loader = GdkPixbuf.PixbufLoader.new_with_type('png');
+    try {
+        loader.write(bytes);
+    } finally {
+        loader.close();
+    }
+    // Normalize RGB and RGBA PNGs to the same 8-bit RGBA representation.
+    return loader.get_pixbuf().add_alpha(false, 0, 0, 0);
+}
+
+function samePngPixels(first, second, regions = null) {
+    if (!first.length || !second.length ||
+        first.length > MAX_IMAGE_BYTES || second.length > MAX_IMAGE_BYTES)
+        return false;
+    const original = decodedPng(first);
+    const current = decodedPng(second);
+    const width = original.get_width();
+    const height = original.get_height();
+    if (width !== current.get_width() || height !== current.get_height())
+        return false;
+    const originalPixels = original.read_pixel_bytes().get_data();
+    const currentPixels = current.read_pixel_bytes().get_data();
+    const originalStride = original.get_rowstride();
+    const currentStride = current.get_rowstride();
+    // Half-open rectangles in the original PNG's pixel coordinates, including
+    // shadow padding. No OCR resize, desktop conversion, clipping or tolerance.
+    const evidence = regions ?? [[0, 0, width, height]];
+    if (!Array.isArray(evidence) || evidence.length === 0 ||
+        !evidence.every(rect => Array.isArray(rect) && rect.length === 4 &&
+            rect.every(Number.isInteger) && rect[0] >= 0 && rect[1] >= 0 &&
+            rect[2] > 0 && rect[3] > 0 && rect[0] + rect[2] <= width &&
+            rect[1] + rect[3] <= height))
+        return false;
+    // Row padding is not image content; the last row may have no padding.
+    for (const [left, top, regionWidth, regionHeight] of evidence) {
+        for (let y = top; y < top + regionHeight; y++) {
+            for (let x = left * 4; x < (left + regionWidth) * 4; x++) {
+                if (originalPixels[y * originalStride + x] !==
+                    currentPixels[y * currentStride + x])
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+function imageBounds(window) {
+    // GNOME 50 screenshot_window returns the frame rect but encodes
+    // WindowActor.get_image(NULL). Its texture/offscreen bounds may include
+    // asymmetric client shadows. Require both paths to describe the same
+    // logical extent; never infer an origin from PNG dimension differences.
+    const buffer = window.get_buffer_rect();
+    const actor = window.get_compositor_private();
+    if (!actor)
+        return null;
+    const [x, y] = actor.get_position();
+    const [width, height] = actor.get_size();
+    const rect = [buffer.x, buffer.y, buffer.width, buffer.height];
+    if (!rect.every(Number.isInteger) || buffer.width <= 0 || buffer.height <= 0 ||
+        x !== buffer.x || y !== buffer.y ||
+        width !== buffer.width || height !== buffer.height)
+        return null;
+    return rect;
+}
+
+function sameBounds(first, second) {
+    return first !== null && second !== null &&
+        first.every((value, index) => value === second[index]);
+}
+
 export default class KyrinWindowCapturePrototype extends Extension {
+    // This literal belongs to the loaded module; metadata on disk may be newer.
+    GetCapabilities() {
+        return JSON.stringify({"protocol_version": 1, "build_id": "window-capture-prototype@kyrin.local-2026-10-24-f20", "capabilities": ["RequestSession", "RequestPersistentSession", "RevokeSession", "CaptureActiveWindow", "ValidateCaptureRegions", "ValidateCapture", "capture-geometry-v1"]});
+    }
+
     enable() {
         this._enabled = true;
         this._capturePending = null;
@@ -313,7 +398,16 @@ export default class KyrinWindowCapturePrototype extends Extension {
         this._lastCapture = null;
         const frame = window.get_frame_rect();
         const monitorId = window.get_monitor();
-        const monitorScale = global.display.get_monitor_scale(monitorId);
+        let bounds;
+        try {
+            bounds = imageBounds(window);
+        } catch (_error) {
+            bounds = null;
+        }
+        if (bounds === null || monitorId < 0) {
+            unavailableCapture(invocation);
+            return;
+        }
         const windowToken = String(window.get_stable_sequence());
         let focusChanged = false;
         let completed = false;
@@ -335,7 +429,9 @@ export default class KyrinWindowCapturePrototype extends Extension {
                 frameUnchanged = currentFrame.x === frame.x &&
                     currentFrame.y === frame.y &&
                     currentFrame.width === frame.width &&
-                    currentFrame.height === frame.height;
+                    currentFrame.height === frame.height &&
+                    window.get_monitor() === monitorId &&
+                    sameBounds(bounds, imageBounds(window));
             } catch (_error) {
                 // A destroyed window cannot remain an action target.
             }
@@ -348,29 +444,36 @@ export default class KyrinWindowCapturePrototype extends Extension {
                 unavailableCapture(invocation);
                 return;
             }
-            // The PNG may include a window shadow. The monitor scale is read
-            // independently, so the remaining pixels are explicit padding.
+            // The actual encoded pixel extent determines image scale, not the
+            // monitor setting (which may differ for XWayland or mixed DPI).
             const pngWidth = (bytes[16] * 0x1000000) +
                 (bytes[17] << 16) + (bytes[18] << 8) + bytes[19];
             const pngHeight = (bytes[20] * 0x1000000) +
                 (bytes[21] << 16) + (bytes[22] << 8) + bytes[23];
-            const extraWidth = pngWidth - Math.round(area.width * monitorScale);
-            const extraHeight = pngHeight - Math.round(area.height * monitorScale);
-            if (bytes.length < 24 || !Number.isFinite(monitorScale) ||
-                monitorScale <= 0 || monitorId < 0 ||
-                extraWidth < 0 || extraHeight < 0 ||
-                extraWidth > 256 || extraHeight > 256) {
+            const scaleX = pngWidth / bounds[2];
+            const scaleY = pngHeight / bounds[3];
+            if (bytes.length < 24 || pngWidth <= 0 || pngHeight <= 0 ||
+                // Allow at most one pixel of raster rounding, not arbitrary
+                // distortion or an unaccounted image extent.
+                Math.abs(scaleX - scaleY) > 1 / Math.min(bounds[2], bounds[3]) ||
+                area.x !== frame.x || area.y !== frame.y ||
+                area.width !== frame.width || area.height !== frame.height ||
+                frame.x < bounds[0] || frame.y < bounds[1] ||
+                frame.x + frame.width > bounds[0] + bounds[2] ||
+                frame.y + frame.height > bounds[1] + bounds[3]) {
                 unavailableCapture(invocation);
                 return;
             }
             const captureId = GLib.uuid_string_random();
             const capturedAt = GLib.get_monotonic_time() / 1000000;
             const geometry = JSON.stringify({
+                coordinate_space: 'logical_desktop',
+                image_coordinate_space: 'source_png_pixels',
+                mapping_source: 'gnome-buffer-actor-v1',
                 monitor_id: monitorId,
-                scale_x: monitorScale,
-                scale_y: monitorScale,
-                padding: [Math.floor(extraWidth / 2), Math.floor(extraHeight / 2),
-                    Math.ceil(extraWidth / 2), Math.ceil(extraHeight / 2)],
+                scale_x: scaleX,
+                scale_y: scaleY,
+                padding: [0, 0, 0, 0],
                 window_token: windowToken,
                 capture_id: captureId,
                 captured_at: capturedAt,
@@ -378,6 +481,8 @@ export default class KyrinWindowCapturePrototype extends Extension {
             this._lastCapture = {
                 id: captureId, at: capturedAt, window, token: windowToken,
                 area: [area.x, area.y, area.width, area.height], bytes,
+                bounds, monitorId,
+                frame: [frame.x, frame.y, frame.width, frame.height],
             };
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 10000, () => {
                 if (this._lastCapture?.id === captureId)
@@ -385,7 +490,7 @@ export default class KyrinWindowCapturePrototype extends Extension {
                 return GLib.SOURCE_REMOVE;
             });
             invocation.return_value(new GLib.Variant('(suiiiiiiiisay)', [
-                appId, pid, area.x, area.y, area.width, area.height,
+                appId, pid, ...bounds,
                 frame.x, frame.y, frame.width, frame.height, geometry, bytes,
             ]));
         };
@@ -400,8 +505,7 @@ export default class KyrinWindowCapturePrototype extends Extension {
         const image = Gio.MemoryOutputStream.new_resizable();
         const screenshot = new Shell.Screenshot();
         try {
-            // Click coordinates use Meta.Window.get_frame_rect(); capture the
-            // same frame so OCR coordinates share that origin and size.
+            // Shell's area describes the frame; imageBounds describes the PNG.
             screenshot.screenshot_window(true, false, image, (_source, result) => {
                 try {
                     const outcome = screenshot.screenshot_window_finish(result);
@@ -423,13 +527,39 @@ export default class KyrinWindowCapturePrototype extends Extension {
     }
 
     ValidateCaptureAsync([captureId], invocation) {
+        this._validateCapture(captureId, null, invocation);
+    }
+
+    ValidateCaptureRegionsAsync([captureId, regions], invocation) {
+        if (!Array.isArray(regions) || regions.length === 0) {
+            invocation.return_value(new GLib.Variant('(b)', [false]));
+            return;
+        }
+        this._validateCapture(captureId, regions, invocation);
+    }
+
+    _validateCapture(captureId, regions, invocation) {
         const snapshot = this._lastCapture;
         const window = global.display.get_focus_window();
-        const valid = this._enabled && snapshot !== null &&
-            captureId === snapshot.id &&
-            GLib.get_monotonic_time() / 1000000 - snapshot.at <= 10 &&
-            window === snapshot.window &&
-            String(window.get_stable_sequence()) === snapshot.token &&
+        const stillCurrent = () => {
+            if (!this._enabled || !snapshot || this._lastCapture !== snapshot ||
+                captureId !== snapshot.id || window !== snapshot.window ||
+                global.display.get_focus_window() !== window)
+                return false;
+            const age = GLib.get_monotonic_time() / 1000000 - snapshot.at;
+            try {
+                const frame = window.get_frame_rect();
+                return age >= 0 && age <= 10 &&
+                    String(window.get_stable_sequence()) === snapshot.token &&
+                    window.get_monitor() === snapshot.monitorId &&
+                    sameBounds(snapshot.bounds, imageBounds(window)) &&
+                    [frame.x, frame.y, frame.width, frame.height].every(
+                        (value, index) => value === snapshot.frame[index]);
+            } catch (_error) {
+                return false; // The target window may have been destroyed.
+            }
+        };
+        const valid = stillCurrent() &&
             this._capturePending === null && this._validationPending === null;
         if (!valid) {
             invocation.return_value(new GLib.Variant('(b)', [false]));
@@ -437,10 +567,15 @@ export default class KyrinWindowCapturePrototype extends Extension {
         }
         let completed = false;
         let timedOut = false;
+        let focusChanged = false;
+        const focusSignal = global.display.connect('notify::focus-window', () => {
+            focusChanged = true;
+        });
         const finish = current => {
             if (completed)
                 return;
             completed = true;
+            global.display.disconnect(focusSignal);
             if (!timedOut)
                 GLib.source_remove(timeoutId);
             this._validationPending = null;
@@ -461,21 +596,11 @@ export default class KyrinWindowCapturePrototype extends Extension {
                     const [succeeded, area] = screenshot.screenshot_window_finish(result);
                     image.close(null);
                     const bytes = image.steal_as_bytes().get_data();
-                    const original = snapshot.bytes;
-                    let same = succeeded && area && bytes.length === original.length &&
+                    const same = succeeded && area &&
                         [area.x, area.y, area.width, area.height].every(
-                            (value, index) => value === snapshot.area[index]);
-                    if (same) {
-                        for (let index = 0; index < bytes.length; index++) {
-                            if (bytes[index] !== original[index]) {
-                                same = false;
-                                break;
-                            }
-                        }
-                    }
-                    finish(Boolean(same && this._lastCapture === snapshot &&
-                        global.display.get_focus_window() === window &&
-                        String(window.get_stable_sequence()) === snapshot.token));
+                            (value, index) => value === snapshot.area[index]) &&
+                        samePngPixels(snapshot.bytes, bytes, regions);
+                    finish(Boolean(same && !focusChanged && stillCurrent()));
                 } catch (_error) {
                     finish(false);
                 }

@@ -53,7 +53,10 @@ class FakeExecutor:
                 else None
             )
             return ActionResult(request.key, outcome, observed_active_app=active_app)
-        if outcome is ActionOutcome.LAUNCH_ACCEPTED:
+        if outcome in (
+            ActionOutcome.LAUNCH_ACCEPTED,
+            ActionOutcome.DISPATCHED_UNVERIFIED,
+        ):
             return ActionResult(request.key, outcome)
         return ActionResult(request.key, outcome, error_code="test_failure")
 
@@ -85,10 +88,12 @@ def test_executor_exception_stops_plan_with_unknown_outcome() -> None:
         )
     )
 
-    assert len(result) == 1
+    assert len(result) == 2
     assert isinstance(result[0], ActionFeedback)
     assert result[0].outcome is ActionOutcome.UNKNOWN
     assert result[0].error_code == "executor_exception"
+    assert isinstance(result[1], ActionNotice)
+    assert result[1].reason is ActionNoticeReason.DEPENDENCY_UNVERIFIED
 
 
 def test_first_step_is_executed_then_unsupported_chat_is_explained() -> None:
@@ -126,9 +131,11 @@ def test_failed_first_step_stops_the_plan() -> None:
         PLAN
     )
     assert len(executor.calls) == 1
-    assert len(events) == 1
+    assert len(events) == 2
     assert isinstance(events[0], ActionFeedback)
     assert events[0].outcome is ActionOutcome.FAILED
+    assert isinstance(events[1], ActionNotice)
+    assert events[1].reason is ActionNoticeReason.UNSUPPORTED
 
 
 def test_unverified_launch_cannot_be_followed_by_supported_chat_navigation() -> None:
@@ -207,6 +214,53 @@ def test_independent_open_app_steps_can_continue_after_launch_accepted() -> None
     assert len(executor.calls) == 2
 
 
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        ActionOutcome.LAUNCH_ACCEPTED,
+        ActionOutcome.DISPATCHED_UNVERIFIED,
+        ActionOutcome.UNKNOWN,
+        ActionOutcome.FAILED,
+    ],
+)
+def test_unverified_control_blocks_dependency_but_allows_independent_launch(
+    outcome: ActionOutcome,
+) -> None:
+    control = CommandIntent(CommandKind.VISIBLE_CONTROL, "Settings")
+    dependent = CommandIntent(CommandKind.VISIBLE_CONTROL, "Advanced")
+    browser = CommandIntent(CommandKind.OPEN_APP, "browser")
+    gate = ActionGate(
+        ActionPolicy(
+            allow_focused_control=True,
+            allowed_apps=frozenset({"browser"}),
+            supported_kinds=frozenset(
+                {CommandKind.VISIBLE_CONTROL, CommandKind.OPEN_APP}
+            ),
+        )
+    )
+    executor = FakeExecutor((outcome, ActionOutcome.CONFIRMED))
+    events = ActionPlanRunner(gate, executor).run(
+        CommandPlanResolution(
+            7,
+            CommandPlan((control, dependent, browser)),
+            language="en",
+        )
+    )
+    assert [call.intent for call in executor.calls] == [control, browser]
+    assert isinstance(events[1], ActionNotice)
+    assert events[1].reason is ActionNoticeReason.DEPENDENCY_UNVERIFIED
+
+
+def test_unknown_dispatch_cannot_blindly_repeat_same_step() -> None:
+    executor = FakeExecutor((ActionOutcome.LAUNCH_ACCEPTED,))
+    events = ActionPlanRunner(ActionGate(policy(chats_supported=False)), executor).run(
+        CommandPlanResolution(8, CommandPlan((OPEN_TELEGRAM, OPEN_TELEGRAM)))
+    )
+    assert len(executor.calls) == 1
+    assert isinstance(events[1], ActionNotice)
+    assert events[1].reason is ActionNoticeReason.DEPENDENCY_UNVERIFIED
+
+
 def test_linux_launcher_accepts_first_step_without_attempting_chat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -241,3 +295,14 @@ def test_linux_launcher_accepts_first_step_without_attempting_chat(
     assert events[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
     assert isinstance(events[1], ActionNotice)
     assert events[1].reason is ActionNoticeReason.UNSUPPORTED
+
+
+def test_fresh_foreground_state_can_satisfy_launch_dependency() -> None:
+    executor = FakeExecutor((ActionOutcome.LAUNCH_ACCEPTED, ActionOutcome.CONFIRMED))
+    events = ActionPlanRunner(
+        ActionGate(policy(chats_supported=True)),
+        executor,
+        observe_active_app=lambda: "telegram",
+    ).run(PLAN)
+    assert len(executor.calls) == 2
+    assert all(isinstance(event, ActionFeedback) for event in events)

@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from kyrin.memory.history import HistoryRetention
 from kyrin.stt.device import DevicePreference
 from kyrin.tts.models import (
     TtsLanguageRoute as TtsLanguageRoute,
@@ -175,8 +176,14 @@ class AppSettings:
     allowed_close_apps: tuple[str, ...] = ()
     wake_aliases: tuple[str, ...] = ()
     app_spoken_aliases: tuple[AppSpokenAliases, ...] = ()
+    history_enabled: bool = False
+    history_retention: HistoryRetention = HistoryRetention()
 
     def __post_init__(self) -> None:
+        if type(self.history_enabled) is not bool:
+            raise ValueError("history_enabled must be a boolean")
+        if not isinstance(self.history_retention, HistoryRetention):
+            raise ValueError("history_retention must be a HistoryRetention policy")
         if type(self.listening_enabled) is not bool:
             raise ValueError("listening_enabled must be a boolean")
         if type(self.start_at_login) is not bool:

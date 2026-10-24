@@ -3,7 +3,7 @@
 # ruff: noqa: E402
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from threading import Event, Thread
@@ -22,8 +22,18 @@ from PySide6.QtWidgets import (  # noqa: E402
     QScrollArea,
 )
 
-from kyrin.actions.models import ActionKey, ActionNotice, ActionNoticeReason
-from kyrin.app.controller import ApplicationController, ApplicationState
+from kyrin.actions.gate import ActionGate, ActionPolicy
+from kyrin.actions.models import (
+    ActionDecision,
+    ActionFeedback,
+    ActionKey,
+    ActionNotice,
+    ActionNoticeReason,
+    ActionOutcome,
+    ActionRequest,
+    ActionResult,
+)
+from kyrin.app.controller import ApplicationController, ApplicationState, RuntimeSession
 from kyrin.app.events import AudioCaptureReady, SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
 from kyrin.app.permission_token import permission_token_path, save_opaque_token
@@ -41,6 +51,8 @@ from kyrin.app.settings import (
 from kyrin.app.settings_store import JsonSettingsStore, SettingsError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.microphone.devices import MicrophoneConfiguration, MicrophoneDevice
+from kyrin.commands.coordinator import CommandCoordinator
+from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
@@ -51,6 +63,8 @@ from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.runtime.command_runtime import LiveCommandRuntime
+from kyrin.runtime.speech_sessions import SpeechRuntimeEvent
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
 from kyrin.stt.backends.omnilingual import CHECKPOINT_BYTES, TOKENIZER_NAME
 from kyrin.stt.device import ComputeDevice, DevicePreference
@@ -175,6 +189,73 @@ def test_preferences_can_clear_local_text_history(
         window.close()
 
 
+@pytest.mark.parametrize("operation", ["archive", "all", "active"])
+@pytest.mark.parametrize("confirm", [True, False])
+def test_memory_ui_scopes_confirmation_and_cleans_visible_private_text(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    confirm: bool,
+) -> None:
+    from datetime import UTC, datetime
+
+    path = tmp_path / "history.sqlite3"
+    history = SqliteConversationHistory(path)
+    history.append(
+        ConversationTurn("archived private", "fa", datetime.now(UTC), "s", 0, 0)
+    )
+    history.archive_active()
+    history.append(
+        ConversationTurn("active private", "fa", datetime.now(UTC), "s", 0, 1)
+    )
+    history.close()
+    monkeypatch.setattr("kyrin.app.qt.window.default_history_path", lambda: path)
+    prompts: list[str] = []
+
+    def answer(*args: object) -> QMessageBox.StandardButton:
+        prompts.append(str(args[2]))
+        return (
+            QMessageBox.StandardButton.Yes if confirm else QMessageBox.StandardButton.No
+        )
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    window = _window(
+        AppSettings(), JsonSettingsStore(tmp_path / "settings.json"), _controller([])
+    )
+    try:
+        window.review_memory_button.click()
+        dialog = window._memory_dialog
+        assert dialog is not None
+        dialog.turn_list.setCurrentRow(0)
+        window.diagnostics_output.appendPlainText("active private")
+        button = {
+            "archive": window.preferences_page.archive_memory_button,
+            "all": window.preferences_page.clear_all_memory_button,
+            "active": window.clear_memory_button,
+        }[operation]
+        button.click()
+        reopened = SqliteConversationHistory(path)
+        try:
+            assert len(prompts) == 1
+            assert len(reopened.recent()) == (0 if confirm else 1)
+            expected = 2 if operation == "archive" else (0 if operation == "all" else 1)
+            assert reopened.archived_count() == (expected if confirm else 1)
+        finally:
+            reopened.close()
+        if confirm:
+            assert window.diagnostics_output.toPlainText() == ""
+            assert dialog.preview.toPlainText() == ""
+            assert dialog.turn_list.count() == 0
+            assert window._memory_dialog is None
+        else:
+            assert dialog.preview.toPlainText() == "archived private"
+    finally:
+        if window._memory_dialog is not None:
+            window._memory_dialog.close()
+        window.close()
+
+
 def test_preferences_review_and_restore_selected_archived_turn(
     application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -210,6 +291,83 @@ def test_preferences_review_and_restore_selected_archived_turn(
     finally:
         if window._memory_dialog is not None:
             window._memory_dialog.close()
+        window.close()
+
+
+@pytest.mark.parametrize("confirm", [True, False])
+def test_tighter_history_limits_require_confirmation_and_off_preserves_database(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    confirm: bool,
+) -> None:
+    path = tmp_path / "history.sqlite3"
+    history = SqliteConversationHistory(path)
+    history.close()
+    before = path.read_bytes()
+    monkeypatch.setattr("kyrin.app.qt.window.default_history_path", lambda: path)
+    prompts: list[str] = []
+
+    def answer(*args: object) -> QMessageBox.StandardButton:
+        prompts.append(str(args[2]))
+        return (
+            QMessageBox.StandardButton.Yes if confirm else QMessageBox.StandardButton.No
+        )
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    initial = AppSettings(history_enabled=True)
+    store.save(initial)
+    window = _window(initial, store, _controller([]))
+    try:
+        page = window.preferences_page
+        assert page.history_enabled_checkbox.isChecked()
+        assert page.retention_fields["active_max_turns"].value() == 2000
+        assert page.retention_fields["archived_max_turns"].value() == 0
+        page.history_enabled_checkbox.setChecked(False)
+        page.retention_fields["archived_max_age_days"].setValue(180)
+        window.apply_button.click()
+        assert len(prompts) == 1
+        loaded = store.load()
+        assert loaded.history_enabled is (not confirm)
+        assert loaded.history_retention.archived_max_age_days == (
+            180 if confirm else None
+        )
+        assert path.read_bytes() == before
+    finally:
+        window.close()
+
+
+def test_history_mutation_waits_for_producer_shutdown(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    settings = AppSettings(stt=SttSelection("vosk", model, "en"))
+    sessions: list[FakeSession] = []
+    controller = _controller(sessions)
+    window = _window(
+        settings, JsonSettingsStore(tmp_path / "settings.json"), controller
+    )
+    try:
+        window.start_initial_session()
+        _pump_until(
+            application, lambda: bool(sessions) and sessions[0].running.is_set()
+        )
+
+        def forbidden_path() -> Path:
+            pytest.fail("a live producer must block database mutation")
+
+        monkeypatch.setattr("kyrin.app.qt.window.default_history_path", forbidden_path)
+        window.clear_memory_button.click()
+        assert window.feedback_label.text() == window._translations.text(
+            "history_stop_first"
+        )
+    finally:
+        controller.request_stop()
+        assert controller.wait_until_stopped(2)
         window.close()
 
 
@@ -261,8 +419,10 @@ def test_power_buttons_work_without_microphone_session(
         window.actions_page.power_buttons[PowerAction.POWER_OFF].click()
         _pump_until(
             application,
-            lambda: window._power_prompt is not None
-            and window._power_prompt.stage is PowerStage.FIRST,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.FIRST
+            ),
         )
         assert backend.requests == []
         assert window.power_dialog.isVisible()
@@ -273,8 +433,10 @@ def test_power_buttons_work_without_microphone_session(
         window.power_dialog.confirm_button.click()
         _pump_until(
             application,
-            lambda: window._power_prompt is not None
-            and window._power_prompt.stage is PowerStage.SECOND,
+            lambda: (
+                window._power_prompt is not None
+                and window._power_prompt.stage is PowerStage.SECOND
+            ),
         )
         assert "Power off" in window.power_dialog.confirm_button.text()
         assert window.power_dialog.stage_label.text() == "Final confirmation 2 of 2"
@@ -796,8 +958,7 @@ def test_listening_switch_enters_standby_and_full_off_stops_session(
         window.listening_button.click()
         _pump_until(
             application,
-            lambda: bool(sessions)
-            and sessions[0].running.is_set(),
+            lambda: bool(sessions) and sessions[0].running.is_set(),
         )
         window._on_event(AudioCaptureReady())
         assert store.load().listening_enabled
@@ -1592,3 +1753,115 @@ def test_action_permission_change_restarts_running_session(
         window._timer.stop()
         window.deleteLater()
         application.processEvents()
+
+
+def test_permission_revocation_cancels_next_step_of_active_plan(
+    application: QApplication, tmp_path: Path
+) -> None:
+    started = Event()
+    release = Event()
+    stopped = Event()
+    calls: list[int] = []
+    outputs: list[ActionDecision | ActionFeedback] = []
+    model = tmp_path / "model"
+    model.mkdir()
+    settings = AppSettings(
+        stt=SttSelection("vosk", model, "en"),
+        action_execution_enabled=True,
+        allowed_apps=(AllowedApp("telegram", "telegram.desktop"),),
+    )
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+
+    class Source:
+        def events(self) -> Generator[SpeechRuntimeEvent]:
+            yield TranscriptUpdate(
+                0, "Open Telegram and open Telegram", TranscriptStatus.FINAL, "en"
+            )
+            assert stopped.wait(3)
+
+        def stop(self) -> None:
+            stopped.set()
+
+    class Executor:
+        def execute(self, request: ActionRequest) -> ActionResult:
+            calls.append(request.key.step_index)
+            if request.key.step_index == 0:
+                started.set()
+                assert release.wait(3)
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    @contextmanager
+    def factory(candidate: AppSettings) -> Iterator[RuntimeSession]:
+        if not candidate.action_execution_enabled:
+            yield FakeSession()
+            return
+        yield LiveCommandRuntime(
+            Source(),
+            coordinator=CommandCoordinator(DemoCommandInterpreter()),
+            gate=ActionGate(ActionPolicy(allowed_apps=frozenset({"telegram"}))),
+            observer=None,
+            executor=Executor(),
+            on_live_event=lambda _: None,
+            on_command_event=lambda _: None,
+            on_action_output=outputs.append,
+            on_session_end=lambda _: None,
+        )
+
+    controller = ApplicationController(factory)
+    window = _window(settings, store, controller)
+    try:
+        window.start_initial_session()
+        _pump_until(application, started.is_set)
+        window.actions_page.enabled_checkbox.setChecked(False)
+        window.apply_button.click()
+        _pump_until(application, stopped.is_set)
+        release.set()
+        _pump_until(application, lambda: len(outputs) == 2)
+        _pump_until(application, lambda: not store.load().action_execution_enabled)
+        assert calls == [0]
+        assert isinstance(outputs[0], ActionFeedback)
+        assert outputs[0].outcome is ActionOutcome.LAUNCH_ACCEPTED
+        assert isinstance(outputs[1], ActionNotice)
+        assert outputs[1].reason is ActionNoticeReason.CANCELLED
+        assert outputs[1].key.step_index == 1
+    finally:
+        release.set()
+        controller.request_stop()
+        controller.wait_until_stopped(3)
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_manual_voice_stop_is_independent_of_microphone_and_actions(
+    application: QApplication,
+    tmp_path: Path,
+) -> None:
+    from kyrin.app.events import AudioDuplexChanged
+
+    settings = AppSettings()
+    controller = _controller([])
+    interrupts: list[bool] = []
+    window = ControlWindow(
+        settings,
+        JsonSettingsStore(tmp_path / "settings.json"),
+        controller,
+        FakeMicrophones(),
+        EventBridge(),
+        whisper_server_available=False,
+        ui_translations=UiTranslations(tmp_path / "ui", system_locale="en_US"),
+        interrupt_speech=lambda: interrupts.append(True),
+    )
+    try:
+        before = controller.status()
+        assert window.stop_speech_button.isEnabled()
+        window.stop_speech_button.click()
+        assert interrupts == [True]
+        assert controller.status() == before
+        window._on_event(AudioDuplexChanged(False))
+        assert window.duplex_label.text() == ENGLISH["audio_half_duplex"]
+        window._on_event(AudioDuplexChanged(True))
+        assert window.duplex_label.text() == ENGLISH["audio_aec"]
+    finally:
+        window.deleteLater()

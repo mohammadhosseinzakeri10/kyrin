@@ -127,3 +127,23 @@ def test_observation_limits_are_validated() -> None:
         ObservedAppExecutor(FakeExecutor(ACCEPTED), observer, attempts=0)
     with pytest.raises(ValueError, match="retry_delay_s"):
         ObservedAppExecutor(FakeExecutor(ACCEPTED), observer, retry_delay_s=-1)
+
+
+def test_postcondition_wait_records_its_own_boundary_and_action_key() -> None:
+    from kyrin.timing import TimingEvent, TimingScope, timing_scope
+
+    events: list[TimingEvent] = []
+    times = iter((1_000_000_000, 1_200_000_000))
+    with timing_scope(
+        TimingScope("session", REQUEST.key, events.append, lambda: next(times))
+    ):
+        result = ObservedAppExecutor(
+            FakeExecutor(ACCEPTED), FakeObserver(("telegram",))
+        ).execute(REQUEST)
+    assert result.outcome is ActionOutcome.CONFIRMED
+    assert [event.stage for event in events] == [
+        "postcondition_started",
+        "postcondition_finished",
+    ]
+    assert [event.at_ns for event in events] == [1_000_000_000, 1_200_000_000]
+    assert all(event.key == REQUEST.key for event in events)

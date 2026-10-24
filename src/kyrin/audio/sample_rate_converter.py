@@ -45,6 +45,21 @@ class SampleRateConverter:
                 quality="MQ",
             )
 
+        origin_ns: int | None = None
+        output_frames = 0
+        seen_input = False
+
+        def timed_audio(data: bytes) -> AudioData:
+            nonlocal output_frames
+            start_ns = (
+                origin_ns
+                + output_frames * 1_000_000_000 // self.output_format.sample_rate
+                if origin_ns is not None
+                else None
+            )
+            output_frames += len(data) // self.output_format.bytes_per_frame
+            return AudioData(data, self.output_format, start_ns)
+
         for chunk in chunks:
             if chunk.audio_format != self.input_format:
                 raise ValueError("audio chunk format changed during conversion")
@@ -55,12 +70,15 @@ class SampleRateConverter:
                 yield chunk
                 continue
 
+            if not seen_input:
+                origin_ns = chunk.capture_start_ns
+                seen_input = True
             samples = np.frombuffer(chunk.data, dtype=np.int16)
             converted = resampler.resample_chunk(samples)
             if converted.size:
-                yield AudioData(converted.tobytes(), self.output_format)
+                yield timed_audio(converted.tobytes())
 
         if resampler is not None:
             tail = resampler.resample_chunk(np.empty(0, dtype=np.int16), last=True)
             if tail.size:
-                yield AudioData(tail.tobytes(), self.output_format)
+                yield timed_audio(tail.tobytes())

@@ -4,6 +4,7 @@ import subprocess
 from queue import Empty, Full, Queue
 from threading import Thread
 
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.responses.visual_status import VisualPresentation
 
 
@@ -12,27 +13,12 @@ class GnomeVisualStatusSink:
 
     @staticmethod
     def available() -> bool:
-        """Check the optional D-Bus endpoint once before a session starts."""
-        try:
-            result = subprocess.run(
-                [
-                    "busctl",
-                    "--user",
-                    "introspect",
-                    "org.gnome.Shell",
-                    "/org/kyrin/VisualStatus",
-                    "org.kyrin.VisualStatus",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=0.5,
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False
-        return result.returncode == 0
+        return probe_gnome(
+            "VisualStatus", {"SetPresentation"}, run=subprocess.run
+        ).ready
 
     def __init__(self) -> None:
+        self.backend_status = BackendStatus(False, "not_probed")
         self._updates: Queue[VisualPresentation] = Queue(maxsize=8)
         self._thread = Thread(target=self._run, name="kyrin-visual", daemon=True)
         self._thread.start()
@@ -53,8 +39,13 @@ class GnomeVisualStatusSink:
     def _run(self) -> None:
         while True:
             presentation = self._updates.get()
+            self.backend_status = probe_gnome(
+                "VisualStatus", {"SetPresentation"}, run=subprocess.run
+            )
+            if not self.backend_status.ready:
+                continue
             try:
-                result = subprocess.run(
+                subprocess.run(
                     [
                         "busctl",
                         "--user",
@@ -72,26 +63,6 @@ class GnomeVisualStatusSink:
                     check=False,
                     timeout=0.5,
                 )
-                if result.returncode != 0:
-                    # The active Shell may still cache the previous extension
-                    # until the next login. Keep its status-only API working.
-                    subprocess.run(
-                        [
-                            "busctl",
-                            "--user",
-                            "call",
-                            "org.gnome.Shell",
-                            "/org/kyrin/VisualStatus",
-                            "org.kyrin.VisualStatus",
-                            "SetStatus",
-                            "s",
-                            presentation.status.value,
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                        timeout=0.5,
-                    )
             except OSError, subprocess.TimeoutExpired:
                 # Visual feedback is optional; text feedback remains available.
                 pass

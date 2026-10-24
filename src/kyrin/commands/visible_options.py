@@ -3,6 +3,9 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from kyrin.desktop.accessibility_target import AccessibilityTarget
+from kyrin.desktop.window_observation import WindowObservation
+
 
 @dataclass(frozen=True, slots=True)
 class VisibleOption:
@@ -12,6 +15,9 @@ class VisibleOption:
     role: str | None = None
     checked: bool | None = None
     anchor: tuple[int, int] | None = None
+    observation: WindowObservation | None = None
+
+    accessibility: AccessibilityTarget | None = None
 
     def __post_init__(self) -> None:
         if not self.option_id.isdecimal() or not 1 <= len(self.label.strip()) <= 80:

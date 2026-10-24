@@ -200,9 +200,16 @@ def test_page_lists_complete_document_models_separately(
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
     assert app is not None
+    from dataclasses import replace
+    from hashlib import sha256
+
+    from kyrin.vision.ocr.backends import document_trust
+    from tests.vision.test_document_protection_fixtures import CONFIG, approve_fixture
+
+    approvals = {}
     models = tmp_path / "models"
     runtimes = tmp_path / "runtimes"
-    for _backend, folder, runtime, weights in (
+    for backend, folder, runtime, weights in (
         ("surya", "surya/surya-ocr-2", "document-vlm5", ("model.safetensors",)),
         ("glm", "glm-ocr/bf16", "document-vlm5", ("model.safetensors",)),
         (
@@ -219,12 +226,21 @@ def test_page_lists_complete_document_models_separately(
     ):
         model = models / folder
         model.mkdir(parents=True)
-        for name in ("config.json", *weights):
+        (model / "config.json").write_bytes(CONFIG)
+        for name in weights:
             (model / name).write_bytes(b"ready")
+        approvals[backend] = replace(
+            approve_fixture()["surya"],
+            files=(
+                ("config.json", sha256(CONFIG).hexdigest()),
+                *((name, sha256(b"ready").hexdigest()) for name in weights),
+            ),
+        )
         python = runtimes / runtime / "bin/python"
         python.parent.mkdir(parents=True, exist_ok=True)
         python.write_text("#!/bin/sh\n", encoding="utf-8")
         python.chmod(0o700)
+    monkeypatch.setattr(document_trust, "APPROVED_MODELS", approvals)
     page = ScreenAccessPage(
         None,
         UiTranslations(tmp_path),
@@ -316,3 +332,36 @@ def test_document_page_shows_elapsed_time_and_timeout(
         assert "GPU ran out of memory" in page.document_status.text()
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("factory_failure", [False, True])
+def test_document_protection_failure_is_not_reported_as_missing_gpu(
+    monkeypatch: pytest.MonkeyPatch, factory_failure: bool
+) -> None:
+    from kyrin.vision.ocr.backends.document_trust import DocumentOcrProtectionError
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = cast(QApplication, QApplication.instance() or QApplication([]))
+    access = FakeAccess()
+
+    class ProtectedEngine:
+        backend = "surya"
+
+        def read_text(self, *_args: object) -> DocumentOcrResult:
+            raise DocumentOcrProtectionError("namespace unavailable")
+
+    def factory(_backend: str) -> DocumentOcrEngine:
+        if factory_failure:
+            raise DocumentOcrProtectionError("unapproved manifest")
+        return cast(DocumentOcrEngine, ProtectedEngine())
+
+    reader = DocumentTextReader(
+        cast(ScreenAccess, access), factory, lambda: ("telegram.desktop", 123)
+    )
+    failures: list[str] = []
+    reader.failed.connect(failures.append)
+    assert reader.read("surya") is not factory_failure
+    _until(app, lambda: bool(failures))
+    assert failures == ["ocr_protection_unavailable"]
+    assert not reader.busy
+    reader.close()

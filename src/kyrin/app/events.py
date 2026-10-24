@@ -11,6 +11,7 @@ from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.runtime.voice_control import VoiceModeChanged
 from kyrin.stt.device import ComputeDevice
 from kyrin.system_power.flow import PowerPrompt
+from kyrin.timing import TimingEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,8 +26,16 @@ class AudioCaptureReady:
     """The selected microphone has supplied its first audio chunk."""
 
 
+@dataclass(frozen=True, slots=True)
+class AudioDuplexChanged:
+    """AEC routing is available, or conservative half-duplex is in use."""
+
+    echo_cancelled: bool
+
+
 ApplicationEvent = (
-    LiveSpeechEvent
+    TimingEvent
+    | LiveSpeechEvent
     | CommandEvent
     | ActionDecision
     | ActionFeedback
@@ -35,6 +44,7 @@ ApplicationEvent = (
     | SpeechSynthesisError
     | SttDeviceReady
     | AudioCaptureReady
+    | AudioDuplexChanged
     | PowerPrompt
     | VoiceModeChanged
 )

@@ -102,6 +102,8 @@ quote-style = "double"
 python_version = "3.14"
 strict = true
 warn_unused_configs = true
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 
 
 # ---------------------------------------------------------------------------

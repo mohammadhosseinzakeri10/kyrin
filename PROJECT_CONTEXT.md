@@ -1,5 +1,45 @@
 # KYRIN — Project Context
 
+
+<div dir="rtl" lang="fa">
+
+**استخراج محدود F22 — ۲۰۲۶/۱۰/۲۴:** مسئولیت ساخت `IdentifiedWindowText`
+از capture و OCR در `from_capture` مشترک شد؛ مسیر مستقل اکنون اندازهٔ تصویر
+و مستطیل‌ها را نیز حمل می‌کند. Qt همین سازنده را پس از تبدیل مختصات مصرف
+می‌کند و سازندهٔ مستقیم سازگار مانده است. سایر استخراج‌های توابع بزرگ،
+نام‌گذاری و قالب‌بندی عمومی F22 باقی‌اند؛ رفع کامل ادعا نمی‌شود.
+آزمون زنده انجام نشده است. [قرارداد](docs/vision/OCR_ARCHITECTURE.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**حفاظت مدل سند — ۲۰۲۶/۱۰/۲۴، F21:** بارگذاری به منشأ/revision و manifest
+مستقلِ بازبینی‌شده با SHA-256 همهٔ فایل‌ها وابسته شد؛ فهرست تأیید فعلاً خالی
+است و از وزن‌های نصب‌شده تأیید ساختگی تولید نشده است. کپیِ بررسی‌شدهٔ مدل
+فقط در پروفایل محدود CPU و پس از probe موفق bubblewrap اجرا می‌شود؛ نبود
+حفاظت موجب توقف است. محیط و cache نشست ارث نمی‌رسند؛ دسترسی GPU غیرفعال
+است. این قرارداد، دسترس‌پذیری و مشاهدات تاریخی مدل‌های سند/GPU را مشروط می‌کند.
+آزمون‌های بی‌خطر تغییر artifact، مدل نامعتبر، timeout و خروج/فرزند worker را
+پوشش می‌دهند. در محیط بررسی namespace رد شد؛ اجرای موفق sandbox، مدل واقعی
+و آزمون زنده انجام نشده‌اند و اعتماد کامل ادعا نمی‌شود.
+[قرارداد و محدودیت‌ها](docs/vision/DOCUMENT_MODEL_PROTECTION.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**نصب و بررسی خودکار — ۲۰۲۶/۱۰/۲۴، بخش دوم F20:** نسخه‌های حل‌شدهٔ هسته،
+ابزار ساخت، توسعه و آزمون Qt جدا در `requirements/` ثبت شده‌اند؛ `pip` و
+`setuptools` حفظ شدند. بررسی‌گر مشترک محلی/CI، نحو، lint، نوع‌های سخت‌گیرانه
+و کل آزمون‌ها را با خانهٔ موقت و بدون اتصال به نشست شخصی اجرا می‌کند؛ شکست
+هیچ مرحله‌ای مخفی نمی‌شود. نصب تازه بدون مدل خارجی یا دادهٔ شخصی تأیید شد؛
+خطاهای نوع موجود مانع سبزشدن کل بررسی‌اند. اجرای واقعی GitHub Actions و
+آزمون زنده انجام نشده‌اند. این یادداشت، گزارش تاریخی بررسی‌های بخش ۹ را
+تکمیل می‌کند. [روش اجرا، نتایج و محدودیت‌ها](docs/development/QUALITY_CHECKS.md).
+
+</div>
+
 > Engineering handoff for the current repository state.
 > Updated: 2026-10-22.
 >
@@ -7,6 +47,246 @@
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
 
+<div dir="rtl" lang="fa">
+
+**کشف backend — ۲۰۲۶/۱۰/۲۴، F20:** هر سه افزونهٔ GNOME نسخه، شناسهٔ ساخت
+کد واقعاً بارشده و قابلیت‌ها را از `GetCapabilities` اعلام می‌کنند؛ نصب یا
+introspection جای handshake نیست. مبدل‌های نشست برای سرویس دیررس باقی
+می‌مانند؛ probe بدون ورودی حداکثر سه تلاش دارد و درخواست بعدی دوباره بررسی
+می‌کند. ناسازگاری، نبود handshake و قابلیت ناقص علت مشخص دارند؛ خود عمل
+تکرار نمی‌شود. helperهای ورودی پیش از اجرا با `--capabilities` بررسی می‌شوند.
+تصویر legacy فقط با گزینهٔ سازگاری صریح پذیرفته می‌شود و در ترکیب عادی
+خاموش است. آزمون‌های قطعی بدون GNOME زنده اجرا می‌شوند؛ افزونهٔ نصب‌شده یا
+نشست مالک تغییر نکرده و آزمون زنده انجام نشده است.
+[قرارداد و محدودیت‌ها](docs/desktop/BACKEND_PROTOCOL.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**نگهداری تاریخچه ــ ۲۰۲۶/۱۰/۲۴، F17:** با تأیید مالک، ذخیره در نصب تازه
+خاموش است و تنظیمات قدیمی رفتار روشن قبلی را حفظ می‌کنند. پیش‌فرض فعال
+۲۰۰۰ متن بدون انقضای زمانی و بایگانی نامحدود حفظ شده است. سقف تعداد/سن هر
+بخش جدا تنظیم می‌شود؛ کاهش سقف تأیید می‌خواهد. خاموش‌بودن ذخیره، خواندن و
+نوشتن تاریخچهٔ نشست میکروفون/فایل را قطع می‌کند و دادهٔ قبلی را نگه می‌دارد.
+بایگانی و خروج از زمینه، حذف فعال و حذف همهٔ فعال/بایگانی پایگاه داده از هم
+جدا هستند؛ نسخه‌های پشتیبان جدا حذف نمی‌شوند. آزمون با پایگاه دادهٔ موقت،
+ساعت تزریقی و رابط بدون نمایش انجام شده؛ دیتابیس شخصی باز نشده و آزمون زنده
+انجام نشده است. این قرارداد توضیح تاریخی بخش‌های ۱۱۲ و ۱۱۳ را تکمیل می‌کند.
+[جزئیات نگهداری و دامنهٔ حذف](docs/commands/CONVERSATION_MEMORY.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**منابع مدل و بودجهٔ فرمان — ۲۰۲۶/۱۰/۲۴، F19:** پذیرش مشترک مدل‌ها در
+ترکیب Ubuntu، اولویت STT/فرمان، صف محدود، اقامت STT تا پایان نشست و تخلیهٔ
+مدل فرمان/TTS پس از استفاده پیاده شده‌اند. peak وزن فرض نمی‌شود؛ سقف صریح
+به پروفایل اندازه‌گیری‌شده نیاز دارد و حالت بدون پروفایل تضمین OOM نمی‌دهد.
+context با توکن‌سازی GGUF منتخب و قالب کامل Ollama، بودجهٔ پاسخ و relevance
+بسته می‌شود؛ شواهد عملیات/مجوز و متن تأیید حذف نمی‌شوند. API رندر نسخه‌وابسته
+و نبود توکن‌ساز موجب رد محافظه‌کارانهٔ مسیر مدل است. آزمون‌های ساختگی پوشش
+دارند؛ baseline، peak واقعی و آزمون زنده انجام نشده و بهبود سرعت/حافظه ادعا
+نمی‌شود. جزئیات، کلیدهای پروفایل و محدودیت پیش‌دستی در
+[قرارداد منابع مدل](docs/app/MODEL_RESOURCE_POLICY.md) آمده است.
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**وقفهٔ صوتی ــ ۲۰۲۶/۱۰/۲۴، F16:** مسیر AEC اکنون هویت واقعی میکروفون
+حل‌شده را بررسی و فقط نگاشت یکتا و اتصال میکروفون/مرجع بلندگو را می‌پذیرد؛
+ورودی پشتیبانی‌نشده به حالت نیمه‌دوطرفه می‌رود. شروع تأییدشدهٔ گفتار در
+مسیر AEC پاسخ صوتی و صوت دیررس را باطل می‌کند و همهٔ صوت آغاز گفتار به
+STT می‌رسد. صف/تولید مدل از پخش و محافظ پژواک جداست. توقف دستی پاسخ در
+رابط، مستقل از میکروفون و لغو عملیات است؛ VAD مجوز عمل نمی‌دهد. backend
+سیستم با اتصال محلی SSIP فقط پیام خودش را لغو می‌کند. تولید درون‌پردازه‌ای
+ممکن است تا پایان فراخوانی ادامه یابد؛ خروجی دیررس پخش نمی‌شود. این وضعیت
+توضیح تاریخی بخش‌های ۴۹ و ۱۲۴ تا ۱۲۷ را تکمیل می‌کند. آزمون‌های ساختگی
+پوشش دارند؛ کیفیت پژواک، قطع گفتار واقعی و سازگاری سرویس نصب‌شده هنوز با
+آزمون زندهٔ سخت‌افزار تأیید نشده‌اند.
+[قرارداد، مسیرهای پشتیبانی‌شده و محدودیت‌ها](docs/responses/OFFLINE_SPEECH_OUTPUT.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**سنجش تأخیر — ۲۰۲۶/۱۰/۲۴، F18:** زمان‌های تولیدکننده با شناسهٔ یکتای نشست،
+جریان، قطعه و مرحله ثبت می‌شوند؛ اولین نتیجهٔ مرحله از پایان پردازش طرح جداست.
+زمان دریافت صوت از صف و تبدیل عبور می‌کند و انتساب نامطمئنِ backend جریانی
+نامعلوم می‌ماند. صف، فراخوانی مدل، executor و مرزهای موجود پس‌شرط جدا ثبت
+می‌شوند؛ مدت executor شامل بررسی‌های درونی است. گزارش محدود و بدون محتوای
+خصوصی، صدک‌های ۵۰/۹۵ را فقط با حداقل ۲۰ نمونهٔ معتبر در هر مسیر/شرایط منتشر
+می‌کند؛ سرد/گرم از ترتیب اجرا حدس زده نمی‌شود. آزمون‌های قطعی جای اندازه‌گیری
+زنده را نمی‌گیرند. آزمون زنده و بنچمارک واقعی سرد/گرم انجام نشده‌اند.
+این قرارداد، شرح تاریخی بخش ۱۱۳ را تکمیل می‌کند.
+[قرارداد و ابزار اندازه‌گیری](docs/app/COMMAND_LATENCY.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**ناوبری و تایپ Telegram ــ ۲۰۲۶/۱۰/۲۴، F10:** کلیک ثابت منو حذف شد؛
+کنترل یکتای زندهٔ دسترس‌پذیری با نقش، نام، ancestry، وضعیت، هندسه و token
+پنجره حل می‌شود. مسیر دو Escape معتبر قبلی حفظ شده، اما تمرکز روی Search
+معنایی است؛ Ctrl+A و تایپ سراسری نام حذف شده‌اند. متن در بخش‌های حداکثر
+چهارنویسه‌ای مستقیماً به همان شیء EditableText می‌رود؛ بین بخش‌ها تمرکز،
+هویت و متن بررسی و مالک/لغو/مجوز مشترک پیش از هر تغییر کنترل می‌شوند.
+token اولیهٔ پنجره پیش از portal گرفته می‌شود. نبود قابلیت AT-SPI، برچسب
+شناخته‌شده یا شاهد یکتا اجرای منو/جست‌وجو را متوقف می‌کند؛ fallback مختصاتی
+یا تایپ کور وجود ندارد. تشخیص OCR سطرها و مقصدها همچنان محافظه‌کارانه و
+وابسته به چیدمان پشتیبانی‌شده است. آزمون‌های ساختگی تغییر focus، پنجره،
+اندازه، sidebar و RTL را پوشش می‌دهند؛ سازگاری نسخهٔ نصب‌شده، برچسب‌های
+محلی و اجرای زندهٔ Telegram/AT-SPI/portal هنوز تأیید نشده‌اند.
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**زنجیرهٔ هندسهٔ تصویر — ۲۰۲۶/۱۰/۲۴، F13:** فرض تقارن سایه و برابری مقیاس
+مانیتور/PNG در تولیدکننده حذف شد. محدودهٔ بافر باید با actor تطبیق کند؛
+نسبت PNG به بافر مقیاس را تعیین می‌کند و قاب، محدودهٔ مجاز تعامل است.
+فرادادهٔ نسخه‌دار فضاهای مختصات را صریح می‌کند؛ Qt نسخهٔ قدیمی را رد می‌کند.
+مسیر قدیمی برای اختلاف ابعاد، دیگر سایه یا مقیاس حدس نمی‌زند. تبدیل
+برش/بزرگ‌نمایی در Qt یک‌بار انجام می‌شود و هر دو actuator پیکسل تصویر اصلی
+را مصرف می‌کنند. آزمون قطعی از GJS تا Qt و ورودی، سایهٔ نامتقارن، مقیاس‌های
+۱/۱٫۲۵/۱٫۵/۲، مبدأ منفی و حرکت پنجره را پوشش می‌دهد. این وضعیت جایگزین
+فرض تاریخیِ سایهٔ متقارن در یادداشت ۲۰۲۶/۱۰/۲۲ است. نصب/بارگذاری افزونه و
+آزمون زندهٔ mixed-DPI، Wayland و XWayland هنوز انجام نشده‌اند.
+[قرارداد و محدودیت‌ها](docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md).
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**یکسان‌سازی عبارت OCR — ۲۰۲۶/۱۰/۲۴، F12:** فهرست OCR و مکان‌یاب اکنون
+از `assemble_phrases` و `normalize_phrase` مشترک در `text_targets.py`
+استفاده می‌کنند؛ ترتیب خواندن backend، عبارت‌های تک‌span/چندspan فارسی،
+انگلیسی و ترکیبی و ابهام تکرارها حفظ می‌شوند. پالایش confidence پس از
+ساخت عبارت است و مقدار ناموجود همچنان نامعلوم می‌ماند. قواعد هم‌سطری،
+فاصله و overlap محدود مشترک‌اند؛ زبان هدف و آستانهٔ ۰٫۶۵ تغییر نکرده‌اند.
+این وضعیت جایگزین گروه‌بندی جداگانهٔ چهارکلمه‌ای inventory می‌شود.
+آزمون‌های رگرسیون قطعی اضافه شده‌اند؛ آزمون زنده انجام نشده است.
+[قرارداد OCR](docs/vision/OCR_ARCHITECTURE.md).
+
+</div>
+
+<div dir="rtl">
+
+**تأیید مشترک بستن پنجره — ۲۰۲۶/۱۰/۲۴، F11:** بستن مستقیم و شماره‌ای، برای Terminal و برنامه‌های معمولی، اکنون علاوه بر مجوز برنامه به تأیید دکمه‌ای مشترک همان عمل/درخواست/پنجره نیاز دارد. گفت‌وگوی قبلیِ تشخیص نام یا انتخاب عمل به‌تنهایی مجوز بستن نیست. تصمیم به PID، token و نسل مشاهده و مهلت ثابت ده‌ثانیه‌ای متصل است؛ GNOME پیش از بستن، هدف را در همان نوبت اجرا دوباره حل و تصمیم را یک‌بار مصرف می‌کند. تغییر تمرکز حتی با بازگشت، تغییر پنجره یا فهرست انتخاب و پاسخ قدیمی رد می‌شوند. درخواست معمول بستن حفظ شده و dialog ذخیره‌سازی پاسخ داده نمی‌شود. مسیر مستقل دو تأیید power تغییر نکرده است. افزونهٔ به‌روز باید نصب و بارگذاری شود؛ آزمون زنده انجام نشده است. این قرارداد توضیح‌های تاریخیِ تأیید نام/عمل در بخش‌های ۱۰۱ و ۱۲۳ را تکمیل می‌کند. [قرارداد فعلی](docs/desktop/ACTIVE_APP_OBSERVATION.md).
+
+</div>
+
+<div dir="rtl">
+
+**سیاست کنترل مبتنی بر قابلیت — ۲۰۲۶/۱۰/۲۴، F02:** ناوبری مرورشدهٔ چندزبانه اکنون به قابلیت ابزار متصل است؛ کنترل ناشناخته فقط با مشاهدهٔ مستقل و تأیید صریح همان عملیات/هدف/پنجره/وضعیت مطلوب اجرا می‌شود. تصمیم یک‌بارمصرف است، مهلت اولیهٔ مشاهده را تمدید نمی‌کند و پس از dialog هدف دوباره حل می‌شود. تغییر ساختار، موقعیت، وضعیت یا پنجره مانع اجراست. ارسال/حذف/پرداخت با تأیید عمومی آزاد نشده‌اند؛ ابزار و مجوز اختصاصی لازم دارند. مرز مدل و آستانهٔ OCR تغییر نکرده‌اند. رابط دکمه‌ای Qt به نشست Ubuntu متصل شده؛ آزمون‌های قطعی موفق‌اند و آزمون زندهٔ GNOME/AT-SPI/portal انجام نشده است. این وضعیت جایگزین توضیح تاریخیِ «سیاست F02 تغییر نکرده» در یادداشت‌های پیشین است. [قرارداد فعلی](docs/actions/CONTROL_POLICY.md).
+
+</div>
+
+<div dir="rtl">
+
+**پس‌شرط ابزارها — ۲۰۲۶/۱۰/۲۴، F03:** کنترل عمومی و ورودی تلگرام اکنون نتیجهٔ `DISPATCHED_UNVERIFIED` را از تأیید وضعیت و پاسخ انتقال نامعلوم جدا می‌کنند. dialog فعال با عنوان دقیق، وضعیت boolean همان node و header/عنوان مقصد تلگرام، شاهدهای محدودِ تأیید هستند؛ عنوان تکراری چت هویت دقیق تولید نمی‌کند. بازخوانی محدود برای نتیجهٔ کند اضافه شده و پاسخ نامعلوم موجب کلیک جایگزین نمی‌شود. کلیک دوم خودکارِ منوی مشاهده‌نشده حذف شده است؛ درخواست تازه ابتدا وضعیت را می‌خواند. مرحلهٔ وابسته بدون تأیید اجرا نمی‌شود، ولی راه‌اندازی برنامهٔ متفاوت مستقل می‌تواند ادامه یابد. سیاست F02 تغییر نکرده و آزمون زنده انجام نشده است. شرح تاریخیِ dispatch در بخش‌های قدیمی با [قرارداد فعلی](docs/actions/ACTION_POSTCONDITIONS.md) تکمیل می‌شود.
+
+</div>
+
+<div dir="rtl">
+
+**استقلال مسیر AT-SPI از OCR ــ ۲۰۲۶/۱۰/۲۴، F04:** فهرست‌سازی، قابلیت نشست و اجرای کنترل استاندارد اکنون بدون سرویس OCR، مجوز تصویر یا screenshot کار می‌کنند؛ مجوز مستقل کنترل دسکتاپ همچنان لازم است. نقش و زنجیرهٔ والدهای گزینه تا فرمان حفظ می‌شود. حل مجدد کنترل به پنجرهٔ فعال یکتا، token اولیه، هندسه، ancestry و وضعیت visible/showing/enabled/sensitive وابسته است؛ hidden/defunct/stale، ابهام و تغییر پنجره رد می‌شوند. helper عمل واقعی Action را با نام و شمارهٔ اعلام‌شده فراخوانی می‌کند و پیش از آن مالک ورودی و مجوز را بررسی می‌کند. فراخوانی عادی فقط پذیرفته‌شدن اجراست؛ تأیید تغییر boolean نیازمند بازخوانی وضعیت است. fallback مختصاتی فقط برای نبود قابلیت Action باقی است و همان مالک مشترک ورودی و بررسی دوباره پیش از فشردن را دارد. سیاست فعلی پیامد و محدودیت toggleهای عمومی مربوط به F02 تغییر نکرده است. آزمون‌های قطعی اضافه شده‌اند؛ آزمون زندهٔ GNOME/AT-SPI انجام نشده است.
+
+</div>
+
+> **Initial visible-control window evidence (2026-10-24, F14):** The existing
+> GNOME stable window token is now recorded before final interpretation and
+> carried with app/PID, observation generation and the existing ten-second
+> absolute deadline through options, intent/request and OCR/accessibility input.
+> Fresh locating does not authorize another same-process window or renew the
+> original deadline. Missing/expired initial evidence requests a new command;
+> helpers check after portal consent and immediately before pressing. AT-SPI
+> traverses only one active top-level window, failing closed on ambiguity.
+> Deterministic regressions cover switching during inference and portal consent,
+> missing identity and expiry. Live GNOME/AT-SPI validation remains pending.
+> See `docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md`.
+>
+> **Desktop operation lifetime (2026-10-24, P09 / F08):** Absolute operation
+> budgets now cross input admission, Telegram settle/scan and selection/paging,
+> Qt capture/OCR/fallback, focus identity reads, owned processes and portal calls.
+> Caller timeout cancels its request; late callbacks cannot start fallback.
+> Input helpers check cancellation generation with their owner and the local
+> permission-token epoch immediately before each Notify call. Revocation during
+> Start cannot restore the token. Request/Session cleanup and terminate/kill/reap
+> retain process ownership. Built-in OCR is killable; in-process native plugins
+> retain busy ownership until actual completion. No timeout was increased and
+> portal reuse remains separate. Deterministic tests cover fake clocks/processes,
+> late results, cancellation, revocation and resource cleanup; live GNOME input
+> validation is pending. See `docs/actions/DESKTOP_OPERATION_LIFECYCLE.md`.
+>
+> **Shared desktop-input ownership (2026-10-24, F06):** Ubuntu sessions now
+> inject one FIFO `DesktopInputBroker` into the outer action executor and
+> Telegram's selection/paging entry points. Whole compound operations retain
+> ownership through helper completion and verification; nested delegation on
+> the owning thread reuses it. Independent observation remains outside this
+> admission boundary. Queue-generation cancellation travels in `ActionRequest`
+> and cancels input waiters before dispatch, releasing gate capacity. Selection
+> and paging waiters also honor their existing cancellation events. Session
+> cleanup rejects waiting/new input and waits for its active owner; timeout
+> retains that owner and blocks a subsequent session, including audio-file
+> clones, until it finishes. Active helper termination and portal-session reuse
+> remain separate lifecycle work (P09); no live portal test was performed.
+> Fake-transport and barrier regressions cover routing, ordering, cancellation,
+> nested delegation, exceptions and shutdown.
+
+> **Action-plan cancellation (2026-10-24, part of F05):** The action
+> queue now carries one cancellation context and generation through final-command
+> dispatch and plan execution. Stop, standby/Pause, session invalidation and the
+> existing stop-before-permission-settings-change path prevent subsequent steps
+> and executor calls that have not started. Capacity waiters keep their original
+> generation, including callers that omit an explicit generation. Non-draining
+> close and drain timeout invalidate active plans; normal finite-file EOF and
+> successful drain remain authorized. A cancelled, issued-but-unsent request
+> releases gate capacity. Results of already dispatched steps remain actual
+> feedback, never rollback claims. Deterministic barrier tests cover these paths,
+> including permission revocation through the Qt settings flow. Active executors
+> and helpers cannot yet be forcibly stopped or prevented from sending their
+> remaining internal input; that platform lifecycle work remains P09. Live
+> microphone/portal validation of this change has not been performed.
+>
+> **Target-region capture validation (2026-10-24, P06 / second part of F01):**
+> `ValidateCaptureRegions` now checks exact RGBA pixels in original-PNG target
+> and supporting evidence boxes; unrelated animation outside those boxes is
+> accepted. Generic controls send their label box; Telegram carries the actual
+> time/preview, query, section and menu/settings anchors used by its locator.
+> Boxes use half-open integer source-pixel coordinates with zero extra margin;
+> incomplete/out-of-bounds evidence fails rather than being clipped. Capture
+> ID/token, focus, frame/area, dimensions and the existing ten-second lifetime
+> remain required; age is also checked after screenshot completion. Legacy
+> callers without evidence retain whole-image validation. Updated source must
+> be installed/loaded before using the new D-Bus method; an older extension
+> fails closed. Deterministic regression and isolated D-Bus tests cover this
+> path; live GNOME validation is pending. See
+> `docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md`.
+>
+> **Capture metadata validation (2026-10-24, P05 / first part of F01):**
+> `ValidateCapture` now compares decoded whole-window RGBA pixels through
+> GNOME 50's existing GdkPixbuf API rather than compressed PNG bytes. Metadata
+> and compression differences are ignored; changed pixels/alpha or dimensions
+> still fail. Capture identity, freshness, focus, geometry, timeout and single
+> reply guards remain. GJS regression tests exercise real PNG decoding with
+> simulated screenshots. Live GNOME validation is pending. Unrelated animation
+> still fails the whole-window comparison; target-region validation is not
+> implemented by this change.
+>
+> **Ordered command understanding (2026-10-24, deterministic validation):**
+> `LiveCommandRuntime` now owns a separate understanding worker: four waiting
+> updates plus one in flight, accepted finals in FIFO order, expendable queued
+> previews, and an existing repeat-command response on live overload. Exact
+> listening controls bypass inference. Stop, standby, and STT stream changes
+> invalidate queued work and late results; coordinator snapshots prevent stale
+> dialogue mutations. File input waits for both queues and drains understanding
+> before actions at normal EOF (up to 60 seconds per worker). Stop gives
+> understanding a one-second join budget and reports a timeout if still alive;
+> invalidation does not kill a thread or guarantee computation stopped. Existing
+> partial/model guards were preserved. Live microphone/model validation is pending.
+>
 > **Local audio-file input (2026-10-21, implementation awaiting owner test):**
 > The Qt control window now has a small drop/paste/file-chooser target beneath
 > its status bar. It accepts one local WAV, MP3, M4A, or OGG file. `ffmpeg`, already
@@ -41,7 +321,11 @@
 > switch to a different app before input stops the click. Common polite English
 > app-opening requests use fast rules without OCR or model inference. A
 > model-proposed focused scroll is allowed only for the
-> freshly observed window and when the scroll operation is enabled. App-window
+> freshly observed window and when the scroll operation is enabled. It also
+> requires a complete bounded English/Persian request with an independently
+> extracted direction matching the model proposal; ambiguity, negation, quotes,
+> conditions, and languages without a direction grammar do not authorize it.
+> App-window
 > operations in unreviewed languages require an exact spoken app name and an
 > explicit, operation-specific confirmation before the normal permission gate.
 > Chat and power operations do not use that fallback.
@@ -2214,6 +2498,9 @@ Later partials may replace or retract it. A final
 transcript produces `CommandResolution` for the same `(stream_id, segment_id)`.
 Candidates are advisory and never authorize execution by themselves. Later
 partial changes can retract a candidate; final resolution supersedes it.
+The model-assisted interpreter also returns only the fast-rule result for
+partial text, before model confirmation, app-catalog refresh, or control
+inventory/OCR. These heavier paths remain available for final text.
 Repeated final updates for the same segment are ignored. VAD pauses do not
 clear dialogue state. `start_new_stream()` increments the stream ID and resets
 segment IDs after an STT restart while keeping an outstanding clarification.

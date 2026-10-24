@@ -3,11 +3,13 @@
 import json
 import math
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.app_catalog import AppCatalog
 from kyrin.desktop.app_identity import AppIdentityResolver
+from kyrin.operations import current_operation, run_process
 
 _BUS_NAME = "org.gnome.Shell"
 _OBJECT_PATH = "/org/kyrin/ActiveApp"
@@ -25,25 +27,7 @@ class GnomeShellActiveAppObserver:
 
     @staticmethod
     def available() -> bool:
-        """Check the optional Shell endpoint once, before starting live audio."""
-        try:
-            result = subprocess.run(
-                [
-                    "busctl",
-                    "--user",
-                    "introspect",
-                    _BUS_NAME,
-                    _OBJECT_PATH,
-                    _INTERFACE,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=0.5,
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False
-        return result.returncode == 0
+        return probe_gnome("ActiveApp", {"GetActiveApp"}, run=subprocess.run).ready
 
     def __init__(
         self,
@@ -56,6 +40,7 @@ class GnomeShellActiveAppObserver:
             raise ValueError("timeout_s must be finite and positive")
         self._identity = AppIdentityResolver(app_ids, catalog)
         self._timeout_s = timeout_s
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def observe_active_app(self) -> str | None:
         """Return only a configured app; never reuse an earlier observation."""
@@ -64,6 +49,13 @@ class GnomeShellActiveAppObserver:
 
     def read_active_app_id(self) -> str | None:
         """Return the Shell's current desktop ID, or None if unavailable."""
+        self.backend_status = probe_gnome(
+            "ActiveApp",
+            {"GetActiveApp"},
+            run=subprocess.run if current_operation() is None else run_process,
+        )
+        if not self.backend_status.ready:
+            return None
         try:
             completed = subprocess.run(
                 [
@@ -100,8 +92,18 @@ class GnomeShellActiveAppObserver:
 
     def read_active_window_identity(self) -> ActiveWindowIdentity | None:
         """Read the focused desktop ID and PID together, when supported."""
+        self.backend_status = probe_gnome(
+            "ActiveApp",
+            {"GetActiveWindow"},
+            run=subprocess.run if current_operation() is None else run_process,
+        )
+        if not self.backend_status.ready:
+            return None
         try:
-            completed = subprocess.run(
+            # Desktop actions and OCR share their caller's remaining budget;
+            # unrelated observation keeps its existing transport contract.
+            run = subprocess.run if current_operation() is None else run_process
+            completed = run(
                 [
                     "busctl",
                     "--user",
@@ -118,13 +120,13 @@ class GnomeShellActiveAppObserver:
                 check=False,
                 timeout=self._timeout_s,
             )
-        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
+        except FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError:
             return None
         if completed.returncode != 0:
             return None
         try:
             reply: object = json.loads(completed.stdout)
-        except (json.JSONDecodeError, UnicodeError):
+        except json.JSONDecodeError, UnicodeError:
             return None
         if not isinstance(reply, dict) or reply.get("type") != "su":
             return None
@@ -141,3 +143,45 @@ class GnomeShellActiveAppObserver:
         ):
             return None
         return ActiveWindowIdentity(app_id, pid)
+
+
+def read_active_window_token(
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = run_process,
+) -> str | None:
+    """Read the focused Meta.Window's stable token from GNOME."""
+    if not probe_gnome("ActiveApp", {"GetActiveWindowToken"}, run=run).ready:
+        return None
+    try:
+        completed = run(
+            [
+                "busctl",
+                "--user",
+                "--json=short",
+                "call",
+                _BUS_NAME,
+                _OBJECT_PATH,
+                _INTERFACE,
+                "GetActiveWindowToken",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        payload = json.loads(completed.stdout)
+    except OSError, subprocess.TimeoutExpired, json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    values = payload.get("data")
+    if (
+        completed.returncode
+        or payload.get("type") != "s"
+        or not isinstance(values, list)
+        or len(values) != 1
+        or not isinstance(values[0], str)
+        or not values[0]
+    ):
+        return None
+    return values[0]

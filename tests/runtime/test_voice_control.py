@@ -1,5 +1,8 @@
 """Voice standby ignores ordinary speech and only exact controls change mode."""
 
+from collections.abc import Generator
+from threading import Event
+
 from kyrin.actions.gate import ActionGate, ActionPolicy
 from kyrin.actions.models import ActionDecision, ActionFeedback, ActionRequest
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
@@ -7,6 +10,7 @@ from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.models import CommandEvent, CommandKind
 from kyrin.runtime.command_runtime import LiveCommandRuntime
+from kyrin.runtime.speech_sessions import SpeechRuntimeEvent
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged, control_phrase
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
@@ -14,9 +18,10 @@ from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 def test_control_phrases_are_exact_and_case_insensitive() -> None:
     assert control_phrase("Start Listening!", active=False) is VoiceMode.ACTIVE
     assert control_phrase("Stop listening.", active=True) is VoiceMode.STANDBY
-    assert control_phrase(
-        "Turn off the microphone completely.", active=True
-    ) is VoiceMode.OFF
+    assert (
+        control_phrase("Turn off the microphone completely.", active=True)
+        is VoiceMode.OFF
+    )
     assert control_phrase("Turn microphone off.", active=True) is VoiceMode.OFF
     assert control_phrase("Turn microphone off.", active=False) is VoiceMode.OFF
     assert control_phrase("میکروفن را کامل خاموش کن", active=False) is VoiceMode.OFF
@@ -41,9 +46,14 @@ def test_standby_filters_speech_and_full_off_request() -> None:
         )
     )
 
+    completed = Event()
+
     class Source:
-        def events(self):
-            yield from transcript
+        def events(self) -> Generator[SpeechRuntimeEvent]:
+            for event in transcript:
+                yield event
+                if event.segment_id == 2:
+                    assert completed.wait(2)
 
         def stop(self) -> None:
             pass
@@ -52,6 +62,11 @@ def test_standby_filters_speech_and_full_off_request() -> None:
     commands: list[CommandEvent] = []
     actions: list[ActionDecision | ActionFeedback] = []
     modes: list[VoiceModeChanged] = []
+
+    def receive(output: ActionDecision | ActionFeedback) -> None:
+        actions.append(output)
+        completed.set()
+
     runtime = LiveCommandRuntime(
         Source(),
         coordinator=CommandCoordinator(DemoCommandInterpreter()),
@@ -65,23 +80,27 @@ def test_standby_filters_speech_and_full_off_request() -> None:
         executor=None,
         on_live_event=live.append,
         on_command_event=commands.append,
-        on_action_output=actions.append,
+        on_action_output=receive,
         on_session_end=lambda _event: None,
         voice_standby=True,
         on_voice_mode=modes.append,
     )
     runtime.run()
     assert [event.mode for event in modes] == [
-        VoiceMode.ACTIVE, VoiceMode.STANDBY, VoiceMode.ACTIVE, VoiceMode.OFF
+        VoiceMode.ACTIVE,
+        VoiceMode.STANDBY,
+        VoiceMode.ACTIVE,
+        VoiceMode.OFF,
     ]
     assert [event.text for event in live if isinstance(event, TranscriptUpdate)] == [
-        "Start listening", "Open Telegram", "Stop listening",
-        "Start listening", "Turn off microphone completely",
+        "Start listening",
+        "Open Telegram",
+        "Stop listening",
+        "Start listening",
+        "Turn off microphone completely",
     ]
     assert [
-        action.intent.target
-        for action in actions
-        if isinstance(action, ActionRequest)
+        action.intent.target for action in actions if isinstance(action, ActionRequest)
     ] == ["telegram"]
 
 

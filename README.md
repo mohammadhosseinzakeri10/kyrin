@@ -63,6 +63,11 @@ See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md),
 
 ## Development entry point
 
+For pinned check-environment dependencies and the shared local/CI quality gate,
+see [quality checks](docs/development/QUALITY_CHECKS.md). These checks need no
+external model weights or personal data; existing type-check failures remain
+visible and fail the gate.
+
 Python 3.14 or newer is required by the current package. From a configured
 development environment, inspect the microphone diagnostic options with:
 

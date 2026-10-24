@@ -5,6 +5,7 @@ from time import sleep
 
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.backend_protocol import backend_error
 from kyrin.commands.models import CommandKind
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.app_activation import ActivationAttempt, ExistingAppActivator
@@ -47,7 +48,9 @@ class ActivateOrLaunchExecutor:
             )
         if attempt is ActivationAttempt.UNKNOWN:
             return ActionResult(
-                request.key, ActionOutcome.UNKNOWN, error_code="activation_unknown"
+                request.key,
+                ActionOutcome.UNKNOWN,
+                error_code=backend_error(self._activator) or "activation_unknown",
             )
 
         for index in range(self._attempts):
@@ -60,5 +63,7 @@ class ActivateOrLaunchExecutor:
                     observed_active_app=request.intent.target,
                 )
         return ActionResult(
-            request.key, ActionOutcome.UNKNOWN, error_code="activation_unverified"
+            request.key,
+            ActionOutcome.UNKNOWN,
+            error_code=backend_error(self._observer) or "activation_unverified",
         )

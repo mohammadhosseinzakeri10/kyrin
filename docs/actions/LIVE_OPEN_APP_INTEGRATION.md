@@ -76,7 +76,36 @@ gate and executor, so the audio event consumer does not wait for `gio launch`.
 Queued commands keep their order; when the diagnostic ends, queued work that
 has not started receives a cancelled notice, while the active action is
 allowed a bounded time to finish. For an ordered plan, steps run in order and
-stop after a block, failure, or uncertain result. With `Open Telegram and open
+stop after cancellation, a block, failure, or uncertain result. The queue carries
+a cancellation context for its session generation through final-command dispatch
+and each plan step. Stop, standby/Pause and session invalidation cancel that
+context; applying permission changes already stops the old session first.
+Cancellation is checked before a step and immediately before calling its
+executor. Issued requests cancelled before dispatch release their gate capacity.
+Resuming commands creates a new generation and does not revive the old plan.
+Non-draining close and a drain timeout also cancel active plans; normal finite
+file EOF drains understanding and actions without cancelling valid steps.
+
+Ubuntu composition additionally wraps the entire action executor chain in one
+FIFO `DesktopInputBroker`, shared with Telegram's independently threaded chat
+selection and paging. Ownership covers compound keyboard/pointer operations,
+including their revalidation and helper calls; nested delegation reuses the
+same ownership. Focus-changing application/window actions also enter this
+boundary. Read-only observation can proceed independently. Requests waiting
+for ownership check their queue-generation context or selection cancellation
+event; cancellation before input returns a cancelled notice and releases gate
+capacity. Session cleanup rejects waiting/new input and waits for the active
+owner. A timeout leaves ownership intact and prevents a subsequent session,
+including an audio-file session, from overlapping that old operation.
+
+An executor already running may still finish and send internal input. Its actual
+result is retained; cancellation of the next step does not claim to roll back
+earlier effects. Stopping active subprocess helpers and their remaining input
+is still pending in P09. The new cancellation paths have deterministic barrier
+coverage, including the Qt permission-settings flow; live microphone/portal
+validation has not been performed.
+
+With `Open Telegram and open
 Alice chat`, the first step may submit a Telegram launch and the second step
 reports that chat navigation is unsupported. Earlier accepted steps are not
 rolled back. The response for `LAUNCH_ACCEPTED` states that completion has not

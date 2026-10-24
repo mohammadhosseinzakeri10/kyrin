@@ -1,6 +1,5 @@
 """Offline voice output follows the response channel without blocking capture."""
 
-import subprocess
 from pathlib import Path
 from runpy import run_path
 from threading import Event
@@ -150,7 +149,9 @@ def test_preview_speaks_with_its_own_selection_without_changing_normal_voice() -
     try:
         assert speaker.submit(
             response,
-            speak=lambda text, language: preview_calls.append((text, language)),
+            speak=lambda text, language, valid: (
+                preview_calls.append((text, language)) if valid() else None
+            ),
         )
         assert speaker.wait_until_idle(2)
         assert preview_calls == [("Preview", "en")]
@@ -162,27 +163,39 @@ def test_preview_speaks_with_its_own_selection_without_changing_normal_voice() -
 def test_local_backend_waits_for_offline_speech_and_propagates_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[list[str]] = []
+    from kyrin.responses import speech
 
-    def fake_run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, "", "")
+    calls: list[tuple[str, str, int, str]] = []
+    closed: list[bool] = []
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    class Connection:
+        output_uncertain = False
+
+        def __init__(self, timeout_s: float) -> None:
+            assert timeout_s == 15
+
+        def speak(self, text, language, rate, voice, cancelled, valid, playing):
+            assert valid()
+            calls.append((text, language, rate, voice))
+            playing(True)
+            assert backend.is_playing
+            playing(False)
+
+        def close(self) -> None:
+            closed.append(True)
+
+    monkeypatch.setattr(speech, "LocalSpeechConnection", Connection)
     backend = SpeechDispatcherSynthesizer("/usr/bin/spd-say")
     backend.speak("متوجه نشدم.", "fa-IR")
-    assert calls[0][-2:] == ["fa", "متوجه نشدم."]
-    assert "--wait" in calls[0]
-    assert calls[0][calls[0].index("--output-module") + 1] == "espeak-ng"
+    assert calls == [("متوجه نشدم.", "fa", 0, "default")]
+    assert closed == [True]
+    assert not backend.is_playing
+    assert backend.last_playback_end > 0
 
-    def failing_run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 1, "", "unavailable")
+    def unavailable(timeout_s: float) -> None:
+        raise PermissionError("unavailable")
 
-    monkeypatch.setattr(subprocess, "run", failing_run)
+    monkeypatch.setattr(speech, "LocalSpeechConnection", unavailable)
     with pytest.raises(SpeechSynthesisError):
         backend.speak("Please repeat.", "en")
 
@@ -206,4 +219,65 @@ def test_unclear_final_command_is_displayed_without_voice(
         assert "Please repeat the command." in capsys.readouterr().out
     finally:
         backend.release.set()
+        speaker.close()
+
+
+def test_queue_and_synthesis_do_not_mask_input_but_playback_does() -> None:
+    class Generating(BlockingSynthesizer):
+        is_playing = False
+        last_playback_end = 0.0
+
+    backend = Generating()
+    speaker = ResponseSpeaker(backend, on_error=lambda exc: None, tail_s=0)
+    response = PresentedResponse(
+        None, None, "Hello", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+    try:
+        assert speaker.submit(response)
+        assert backend.started.wait(2)
+        assert speaker.is_active
+        assert not speaker.is_playing
+        assert speaker.submit(response)
+        backend.is_playing = True
+        assert speaker.is_playing
+        backend.is_playing = False
+        assert not speaker.is_playing
+        speaker.interrupt()
+        backend.release.set()
+        assert speaker.wait_until_idle(2)
+        assert backend.calls == [("Hello", "en")]
+    finally:
+        backend.release.set()
+        speaker.close()
+
+
+def test_interrupt_clears_full_queue_and_rejects_late_custom_synthesis() -> None:
+    backend = BlockingSynthesizer()
+    entered, release = Event(), Event()
+    heard: list[str] = []
+    response = PresentedResponse(
+        None, None, "old", ResponseChannel.TEXT_AND_VOICE, "en"
+    )
+
+    def custom(text, language, valid):
+        entered.set()
+        assert release.wait(2)
+        if valid():
+            heard.append(text)
+
+    speaker = ResponseSpeaker(
+        backend, on_error=lambda exc: None, max_pending=1, tail_s=0
+    )
+    try:
+        assert speaker.submit(response, speak=custom)
+        assert entered.wait(2)
+        assert speaker.submit(response)
+        assert not speaker.submit(response)
+        speaker.interrupt()
+        release.set()
+        assert speaker.wait_until_idle(2)
+        assert heard == []
+        assert backend.calls == []
+    finally:
+        release.set()
         speaker.close()

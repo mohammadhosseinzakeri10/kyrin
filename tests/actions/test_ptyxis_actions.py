@@ -9,6 +9,7 @@ from kyrin.actions.platforms import ptyxis
 from kyrin.actions.platforms.ptyxis import PtyxisActionExecutor
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.desktop.window_presence import WindowPresence
+from tests.desktop.test_backend_protocol import bus_reply
 
 
 class Fallback:
@@ -33,6 +34,12 @@ def test_fixed_new_window_command(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[-1] == "GetCapabilities":
+            return bus_reply(
+                "ShowOpenWindows", "ActivateShownOpenWindow", "ActivateShownOpenApp",
+                "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow",
+                "HideAppWindows", "ShowAllWindows",
+            )
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -95,6 +102,12 @@ def test_numbered_picker_uses_only_bound_terminal_and_reports_stale(
     replies = iter(("requested", "stale"))
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[-1] == "GetCapabilities":
+            return bus_reply(
+                "ShowOpenWindows", "ActivateShownOpenWindow", "ActivateShownOpenApp",
+                "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow",
+                "HideAppWindows", "ShowAllWindows",
+            )
         calls.append(args)
         return subprocess.CompletedProcess(
             args, 0, json.dumps({"type": "s", "data": [next(replies)]}), ""
@@ -120,7 +133,7 @@ def test_numbered_picker_uses_only_bound_terminal_and_reports_stale(
     assert calls[1][-3:] == ["su", "org.gnome.Ptyxis.desktop", "2"]
 
 
-def test_numbered_terminal_close_requires_displayed_picker(
+def test_numbered_terminal_close_cannot_bypass_shared_confirmation(
     monkeypatch, tmp_path: Path
 ) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
@@ -128,6 +141,12 @@ def test_numbered_terminal_close_requires_displayed_picker(
     calls: list[list[str]] = []
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[-1] == "GetCapabilities":
+            return bus_reply(
+                "ShowOpenWindows", "ActivateShownOpenWindow", "ActivateShownOpenApp",
+                "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow",
+                "HideAppWindows", "ShowAllWindows",
+            )
         calls.append(args)
         return subprocess.CompletedProcess(
             args, 0, json.dumps({"data": ["requested"]}), ""
@@ -144,5 +163,5 @@ def test_numbered_terminal_close_requires_displayed_picker(
     ))
     assert executor.execute(
         ActionRequest(ActionKey(0, 2), close)
-    ).outcome is ActionOutcome.LAUNCH_ACCEPTED
-    assert calls[1][-3:] == ["su", "org.gnome.Ptyxis.desktop", "2"]
+    ).outcome is ActionOutcome.FAILED
+    assert len(calls) == 1

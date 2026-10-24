@@ -1,0 +1,10 @@
+# Resolved on CPython 3.14.4, Ubuntu x86_64; see docs/development/QUALITY_CHECKS.md.
+cffi==2.1.1
+flatbuffers==25.12.19
+numpy==2.5.3
+onnxruntime==1.30.0
+packaging==26.3
+protobuf==7.36.2
+pycparser==3.0
+sounddevice==0.5.6
+soxr==1.1.0

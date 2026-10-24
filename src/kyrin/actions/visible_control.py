@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.text_reader import IdentifiedWindowText
-from kyrin.vision.text_targets import find_literal_phrases
+from kyrin.vision.text_targets import assemble_phrases, find_literal_phrases
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,7 @@ class VisibleControlTarget:
 class VisibleTextOption:
     label: str
     anchor: tuple[int, int]
+    geometry: CaptureGeometry | None = None
 
 
 def visible_ocr_labels(
@@ -36,46 +37,20 @@ def visible_ocr_labels(
     """
     if (observation.platform_app_id, observation.process_id) != (app_id, pid):
         return ()
-    spans = [
-        span
-        for span in observation.result.spans
-        if span.confidence is not None
-        and span.confidence >= 0.65
-        and 1 <= len(span.text.strip()) <= 80
-    ]
-    labels: list[VisibleTextOption] = []
-    for index, span in enumerate(spans):
-        labels.append(
-            VisibleTextOption(
-                span.text.strip(),
-                (
-                    span.box.left + span.box.width // 2,
-                    span.box.top + span.box.height // 2,
-                ),
-            )
+    return tuple(
+        VisibleTextOption(
+            phrase.text,
+            (
+                phrase.box.left + phrase.box.width // 2,
+                phrase.box.top + phrase.box.height // 2,
+            ),
+            observation.geometry,
         )
-        # Tesseract emits words while other engines often emit whole lines.
-        # Include nearby words so a label such as "Sound Settings" is usable.
-        group = [span]
-        for next_span in spans[index + 1 : index + 4]:
-            previous = group[-1]
-            if (
-                abs(next_span.box.top - previous.box.top) > 8
-                or next_span.box.left < previous.box.left
-                or next_span.box.left - (previous.box.left + previous.box.width) > 20
-            ):
-                break
-            group.append(next_span)
-            label = " ".join(item.text.strip() for item in group)
-            if len(label) <= 80:
-                left = min(item.box.left for item in group)
-                right = max(item.box.left + item.box.width for item in group)
-                top = min(item.box.top for item in group)
-                bottom = max(item.box.top + item.box.height for item in group)
-                labels.append(
-                    VisibleTextOption(label, ((left + right) // 2, (top + bottom) // 2))
-                )
-    return tuple(labels)
+        for phrase in assemble_phrases(observation.result, max_characters=80)
+        if phrase.lowest_confidence is not None
+        and phrase.lowest_confidence >= 0.65
+        and len(phrase.text) <= 80
+    )
 
 
 def unique_visible_target(

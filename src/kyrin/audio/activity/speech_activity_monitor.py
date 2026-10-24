@@ -1,7 +1,7 @@
 """Smooth VAD decisions while forwarding every audio window immediately."""
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
@@ -30,6 +30,8 @@ class SpeechActivityFrame:
     detected_speech: bool | None
     state: SpeechState
     transition: SpeechTransition | None
+    speech_started_ns: int | None = field(default=None, compare=False)
+    speech_ended_ns: int | None = field(default=None, compare=False)
 
 
 class SpeechActivityMonitor:
@@ -81,6 +83,8 @@ class SpeechActivityMonitor:
         self._speech_run = 0
         self._silence_run = 0
         self._saw_partial = False
+        self._speech_started_ns: int | None = None
+        self._speech_ended_ns: int | None = None
 
     def process(self, window: AudioData) -> SpeechActivityFrame:
         """Classify one window and return it immediately with its activity state.
@@ -103,6 +107,9 @@ class SpeechActivityMonitor:
         detected_speech = self.detector.detect(window)
         transition = None
         if detected_speech:
+            if self._speech_run == 0 and self._state is SpeechState.LISTENING:
+                self._speech_started_ns = window.capture_start_ns
+            self._speech_ended_ns = window.capture_end_ns
             self._speech_run = min(self._speech_run + 1, self._start_windows)
             self._silence_run = 0
             if (
@@ -121,7 +128,14 @@ class SpeechActivityMonitor:
                 self._state = SpeechState.LISTENING
                 transition = SpeechTransition.PAUSED
 
-        return SpeechActivityFrame(window, detected_speech, self._state, transition)
+        return SpeechActivityFrame(
+            window,
+            detected_speech,
+            self._state,
+            transition,
+            self._speech_started_ns,
+            self._speech_ended_ns,
+        )
 
     def observe(self, windows: Iterable[AudioData]) -> Iterator[SpeechActivityFrame]:
         """Yield one observation per input window without reading ahead."""

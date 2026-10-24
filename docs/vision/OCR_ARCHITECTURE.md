@@ -7,6 +7,21 @@ text, image coordinates, confidence when available, language, engine, and
 actual compute device. Text visible in an image is untrusted observation, not
 an executable instruction or a stable UI selector.
 
+<div dir="rtl" lang="fa">
+
+فهرست برچسب‌های قابل مشاهده و مکان‌یاب از نرمال‌سازی و سازندهٔ عبارت مشترک
+در `text_targets.py` استفاده می‌کنند. ترتیب خواندن خروجی OCR حفظ می‌شود؛
+عبارت فارسی، انگلیسی و ترکیبی، چه در یک span و چه در چند span، با همان
+قواعد هم‌سطری، فاصله و هم‌پوشانی محدود بررسی می‌شود. متن چندخطی یک برچسب
+تک‌خطی نمی‌سازد. حداقل confidence همهٔ spanهای عبارت حفظ می‌شود؛ وجود حتی
+یک مقدار ناموجود، confidence کل عبارت را نامعلوم می‌کند. پالایش پس از
+ساخت عبارت انجام می‌شود تا کلمهٔ کم‌اطمینان حذف و همسایه‌هایش به هم وصل
+نشوند. تکرارهای OCR با همین نرمال‌سازی از فهرست انتخاب یکتا حذف می‌شوند.
+انتخاب زبان هدف و آستانهٔ فعلی ۰٫۶۵ تغییر نکرده‌اند؛ این آستانه ادعای
+کالیبراسیون مشترک میان موتورهای OCR نیست. آزمون زندهٔ این تغییر انجام نشده است.
+
+</div>
+
 ## Ubuntu acquisition
 
 `UbuntuPortalScreenCapture` invokes a short-lived system-Python helper because
@@ -82,9 +97,14 @@ synthetic `سلام مادر` image with a confidence score. PaddleOCR-VL 1.6 re
 `Open Telegram` and a box with unknown confidence. These checks do not establish
 accuracy or responsiveness on full desktop windows.
 
-Surya OCR 2, GLM-OCR, and dots.mocr are available in a **separate read-only
-document comparison** section of Screen Access when their complete local
-checkpoint and isolated runtime are present. This section captures the active
+Surya OCR 2, GLM-OCR, and dots.mocr have a **separate read-only document
+comparison** path. Since 2026-10-24, discovery requires an independently reviewed
+provenance/hash manifest, and execution requires a working Linux bubblewrap
+profile. No document checkpoint is approved yet, so installed files alone do
+not enable this path. Auto currently uses protected CPU; explicit GPU is
+unavailable. See [the protection contract](DOCUMENT_MODEL_PROTECTION.md).
+The GPU and model observations below describe earlier experiments, not current
+approval or successful containment. This section captures the active
 window only after the existing screen grant, runs offline inference in a
 bounded subprocess, and displays text without coordinates. It never feeds
 Telegram verification or clicking. Surya and GLM share the local
@@ -104,8 +124,8 @@ PyTorch runtime returned 682 characters after 80.1 seconds. The UI now shows
 elapsed time during a document read and reports a distinct four-minute timeout.
 This documents CPU latency rather than treating a long run as a frozen UI.
 The model and Auto/CPU/GPU device selection are saved separately from action
-OCR. Auto uses CUDA when the isolated runtime reports it available, otherwise
-CPU. An explicit GPU request fails clearly if CUDA is unavailable and never
+OCR. Before the protection profile above, Auto used CUDA when the isolated
+runtime reported it available, otherwise CPU. An explicit GPU request fails clearly if CUDA is unavailable and never
 silently falls back. The text result reports the device actually used. GPU
 support requires a CUDA-enabled PyTorch installation in each model's isolated
 runtime; selecting GPU alone does not install one.
@@ -151,6 +171,13 @@ OCR must still match both values or the snapshot is discarded. Revoking screen
 access discards any late result. Only one read is in flight, and image bytes
 are never written to disk. The page displays up to 2,000 characters as plain
 text and clears them when access is revoked.
+
+Action-driven reads now carry a shared absolute operation deadline through Qt,
+OCR and fallback. Timeout cancels the request and prevents a late callback from
+starting another pass. Built-in OCR processes are stopped and reaped; a native
+in-process plugin retains busy ownership until it actually finishes, including
+after an engine switch. See [Desktop operation lifetime](../actions/DESKTOP_OPERATION_LIFECYCLE.md)
+for cancellation, cleanup allowances, and live-validation limits.
 
 The Ubuntu Qt composition discovers the default optional Tesseract
 runtime at the user's XDG data location,
@@ -206,3 +233,38 @@ The default output reports only engine, device, and word count. Add
 `--show-text` only when it is acceptable for visible on-screen text to appear
 in terminal output. The diagnostic requests a window through the system
 picker every time and never launches an application.
+
+<div dir="rtl" lang="fa">
+
+**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
+[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
+تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
+سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
+
+</div>
+
+<div dir="rtl" lang="fa">
+
+**بخش محدود F22، ۲۰۲۶/۱۰/۲۴:** ساخت snapshot از تصویر و نتیجهٔ OCR در
+`IdentifiedWindowText.from_capture` مشترک است؛ مسیر مستقل و Qt اندازهٔ PNG،
+مستطیل‌ها و هندسه را از همان capture منتقل می‌کنند. Qt ابتدا مختصات OCR را
+به تصویر اصلی برمی‌گرداند؛ سازنده فقط منشأ برش/بزرگ‌نمایی را ثبت می‌کند و
+مختصات را تغییر نمی‌دهد. ابعاد ناموجود یا خارج از محدوده همچنان نامعلوم
+می‌مانند و مجوز ساخت هدف ایجاد نمی‌کنند. سازندهٔ مستقیم و فیلدهای اختیاری
+برای فراخواننده‌های موجود حفظ شده‌اند. این استخراج فقط مسئولیت ساخت observation
+را پوشش می‌دهد؛ شکستن سایر توابع بزرگ، استخراج validator/handler/lifecycle،
+نام‌گذاری عمومی و قالب‌بندی فایل‌های دیگرِ F22 باقی مانده‌اند؛ از جمله
+`DemoCommandInterpreter.interpret`، `UbuntuSessionFactory.__call__`،
+`CommandCoordinator.observe` و `ModelAssistedInterpreter.interpret`.
+
+دو حالت رگرسیون پیش از اصلاح با نبود اندازه شکست خوردند؛ پس از اصلاح
+۲۲۴ آزمون مرتبط موفق شدند. بررسی نوعِ سه فایل Python تغییرکرده، lint و
+قالب‌بندی دامنه موفق‌اند. بررسی‌گر کامل با `PYTHONPATH=src` و محیط موقت،
+خارج از sandbox محدود، هر ۲۱۷۶ آزمون را موفق اجرا کرد؛ نحو و lint نیز موفق‌اند،
+اما ۴۲۵ خطای نوع در ۵۷ فایل مانع موفقیت کلی است. گزارش‌ها در
+`local-data/quality-f22-unrestricted/` نگه داشته شده‌اند. اجرای داخل sandbox
+۱۸۵ شکست و سه آزمون ردشده داشت؛ زنجیرهٔ هندسه با برداشتن محدودیت محیط
+موفق شد. قرارداد آزمون برای عبور از این شکست‌ها تغییر نکرد.
+آزمون زندهٔ GNOME و OCR واقعی برای این تغییر انجام نشده است.
+
+</div>

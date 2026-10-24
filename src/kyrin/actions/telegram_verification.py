@@ -1,10 +1,11 @@
 """Conservative OCR checks for Telegram chat navigation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import Literal
 
-from kyrin.vision.capture_geometry import CaptureGeometry
+from kyrin.vision.capture_geometry import CaptureGeometry, Rect
+from kyrin.vision.ocr.contracts import TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
 from kyrin.vision.text_targets import (
     VisiblePhrase,
@@ -24,6 +25,13 @@ class ChatSearchMatch:
     image_width: int
     image_height: int
     geometry: CaptureGeometry | None = None
+    # Complete target and structural anchor boxes in original PNG pixels.
+    # None keeps legacy whole-image validation; an empty set is invalid.
+    evidence_regions: tuple[Rect, ...] | None = None
+
+
+def _rect(box: TextBox) -> Rect:
+    return box.left, box.top, box.width, box.height
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +130,7 @@ def assess_visible_chat_choices(
             "title_not_in_list" if title_matches else "title_not_read",
         )
     titles = []
+    evidence_by_title: dict[VisiblePhrase, tuple[Rect, ...]] = {}
     low_confidence = 0
     missing_time = 0
     missing_preview = 0
@@ -154,13 +163,15 @@ def assess_visible_chat_choices(
             span.confidence is not None and span.confidence >= 0.55
             for span in aligned_time_spans
         )
-        preview_below = any(
-            span.confidence is not None
+        preview_spans = [
+            span
+            for span in observation.result.spans
+            if span.confidence is not None
             and span.confidence >= 0.55
             and box.top + box.height < span.box.top <= box.top + box.height + 38
             and box.left - 12 <= span.box.left <= box.left + 130
-            for span in observation.result.spans
-        )
+        ]
+        preview_below = bool(preview_spans)
         time_above = any(
             span.confidence is not None
             and span.confidence >= 0.55
@@ -221,6 +232,23 @@ def assess_visible_chat_choices(
             fallback_preview += 1
         if (aligned_right or time_fallback) and (preview_below or preview_fallback):
             titles.append(match)
+            support = [*aligned_time_spans, *preview_spans]
+            if time_fallback:
+                # This fallback uses another candidate's aligned time as layout
+                # evidence, so that time remains part of the validation set.
+                support.extend(
+                    span for span in observation.result.spans
+                    if span.confidence is not None and span.confidence >= 0.55
+                    and width * 0.24 < span.box.left < width * 0.36
+                    and any(
+                        abs(span.box.top - candidate.box.top)
+                        <= max(10, candidate.box.height // 2)
+                        for candidate in candidates
+                    )
+                )
+            evidence_by_title[match] = tuple(dict.fromkeys((
+                _rect(box), *(_rect(span.box) for span in support),
+            )))
     if low_confidence or missing_time or missing_preview:
         if (missing_time or missing_preview) and any(
             match.box.top > height * 0.92 for match in candidates
@@ -243,6 +271,7 @@ def assess_visible_chat_choices(
         return ChatSearchMatch(
             box.left, box.top, box.width, box.height, width, height,
             observation.geometry,
+            evidence_by_title[match],
         )
 
     return VisibleChatAssessment(
@@ -397,6 +426,15 @@ def search_choices(
         return ChatSearchMatch(
             box.left, box.top, box.width, box.height, width, height,
             observation.geometry,
+            tuple(dict.fromkeys((
+                _rect(box),
+                *(_rect(item.box) for item in queries),
+                *(_rect(item.box) for item in section_headers),
+                *(
+                    _rect(item.box) for item in local_candidates
+                    if section_top is None and match in local_candidates
+                ),
+            ))),
         )
 
     return ChatSearchChoices(
@@ -494,6 +532,7 @@ def telegram_left_label(
     return ChatSearchMatch(
         box.left, box.top, box.width, box.height, width, height,
         observation.geometry,
+        (_rect(box),),
     )
 
 
@@ -518,16 +557,20 @@ def telegram_menu_item(
         "Settings",
         "Saved Messages",
     )
-    if not any(
-        telegram_left_label(
+    for anchor in anchors:
+        if anchor == label:
+            continue
+        supporting = telegram_left_label(
             observation, expected_app_id, expected_pid, anchor, menu=True
         )
-        is not None
-        for anchor in anchors
-        if anchor != label
-    ):
-        return None
-    return target
+        if supporting is not None:
+            assert target.evidence_regions is not None
+            assert supporting.evidence_regions is not None
+            return replace(
+                target,
+                evidence_regions=target.evidence_regions + supporting.evidence_regions,
+            )
+    return None
 
 
 def telegram_settings_item(
@@ -567,6 +610,7 @@ def telegram_settings_item(
     return ChatSearchMatch(
         box.left, box.top, box.width, box.height, width, height,
         observation.geometry,
+        (_rect(box), _rect(headings[0].box)),
     )
 
 

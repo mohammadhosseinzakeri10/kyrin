@@ -1,6 +1,7 @@
 """Find exact visible phrases without turning OCR into an action target."""
 
 import unicodedata
+from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -14,22 +15,100 @@ def _word(value: str) -> str:
     return normalized.strip(" \t\r\n.,:;!?()[]{}«»\"'‘’")
 
 
-def _same_line(left: RecognizedText, right: RecognizedText) -> bool:
-    left_box, right_box = left.box, right.box
-    overlaps_vertically = max(left_box.top, right_box.top) < min(
-        left_box.top + left_box.height,
-        right_box.top + right_box.height,
-    )
-    if any(unicodedata.bidirectional(char) in {"R", "AL"} for char in left.text):
-        horizontal_gap = left_box.left - (right_box.left + right_box.width)
-    else:
-        horizontal_gap = right_box.left - (left_box.left + left_box.width)
-    # OCR boxes can slightly overlap even for adjacent words (for example a
-    # button border may be included in one word's box). Keep the allowance
-    # small so two distant or unrelated spans cannot become one phrase.
-    overlap_limit = min(12, max(left_box.height, right_box.height))
-    gap_limit = max(12, 2 * max(left_box.height, right_box.height))
-    return overlaps_vertically and -overlap_limit <= horizontal_gap <= gap_limit
+def normalize_phrase(value: str) -> str:
+    """Compare literal words identically across word- and line-based engines."""
+    words = tuple(_word(part) for part in fold_case(value).split())
+    return " ".join(words) if words and all(words) else ""
+
+
+def _direction(text: str) -> str | None:
+    directions = {
+        "rtl" if direction in {"R", "AL"} else "ltr"
+        for char in text
+        if (direction := unicodedata.bidirectional(char)) in {"R", "AL", "L"}
+    }
+    return next(iter(directions)) if len(directions) == 1 else None
+
+
+def _adjacent(group: list[RecognizedText]) -> bool:
+    # Preserve the backend's logical reading order. Within a single-script
+    # run, require its direction; transitions between scripts may go either
+    # way. Validate physical neighbours separately, since an embedded LTR run
+    # in RTL text can jump over its own later words in logical OCR order.
+    for previous, current in pairwise(group):
+        direction = _direction(previous.text)
+        if direction is not None and direction == _direction(current.text):
+            if direction == "rtl" and current.box.left > previous.box.left:
+                return False
+            if direction == "ltr" and current.box.left < previous.box.left:
+                return False
+    physical = sorted(group, key=lambda span: span.box.left)
+    for left, right in pairwise(physical):
+        gap = right.box.left - (left.box.left + left.box.width)
+        height = max(left.box.height, right.box.height)
+        # Retain the locator's existing bounded gap and overlap allowances.
+        if not -min(12, height) <= gap <= max(12, 2 * height):
+            return False
+    return True
+
+
+@dataclass(frozen=True, slots=True)
+class AssembledPhrase:
+    """A contiguous same-line OCR observation, retaining display spelling."""
+
+    text: str
+    normalized: str
+    box: TextBox
+    lowest_confidence: float | None
+
+
+def assemble_phrases(
+    result: OcrResult,
+    *,
+    max_characters: int | None = None,
+    max_spans: int | None = None,
+) -> Iterator[AssembledPhrase]:
+    """Build logical phrases without skipping spans or inventing confidence.
+
+    Backend reading order is authoritative; this does not repair unordered
+    OCR output or infer a reading order from coordinates. A multiline span
+    cannot provide an exact single-line label box.
+    """
+    for start in range(len(result.spans)):
+        group: list[RecognizedText] = []
+        words: list[str] = []
+        normalized_words: list[str] = []
+        end = len(result.spans) if max_spans is None else start + max_spans
+        for span in result.spans[start:end]:
+            text = span.text.strip()
+            normalized = normalize_phrase(text)
+            if not normalized or "\n" in text or "\r" in text:
+                break
+            group.append(span)
+            words.append(" ".join(text.split()))
+            normalized_words.append(normalized)
+            normalized = " ".join(normalized_words)
+            if max_characters is not None and len(normalized) > max_characters:
+                break
+            top = max(item.box.top for item in group)
+            bottom = min(item.box.top + item.box.height for item in group)
+            if top >= bottom:
+                break
+            if not _adjacent(group):
+                continue
+            left = min(item.box.left for item in group)
+            right = max(item.box.left + item.box.width for item in group)
+            top = min(item.box.top for item in group)
+            bottom = max(item.box.top + item.box.height for item in group)
+            scores = [item.confidence for item in group]
+            yield AssembledPhrase(
+                " ".join(words),
+                normalized,
+                TextBox(left, top, right - left, bottom - top),
+                min(score for score in scores if score is not None)
+                if all(score is not None for score in scores)
+                else None,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,71 +121,30 @@ class VisiblePhrase:
 
 def find_exact_phrases(result: OcrResult, phrase: str) -> tuple[VisiblePhrase, ...]:
     """Return same-line, adjacent exact matches; keep duplicates visible."""
-    query = tuple(_word(part) for part in phrase.split())
-    if not query or any(not part for part in query):
+    query = normalize_phrase(phrase)
+    if not query:
         return ()
-    matches: list[VisiblePhrase] = []
-    spans = result.spans
-    for start in range(len(spans) - len(query) + 1):
-        group = spans[start : start + len(query)]
-        if tuple(_word(span.text) for span in group) != query:
-            continue
-        if any(not _same_line(left, right) for left, right in pairwise(group)):
-            continue
-        left = min(span.box.left for span in group)
-        top = min(span.box.top for span in group)
-        right = max(span.box.left + span.box.width for span in group)
-        bottom = max(span.box.top + span.box.height for span in group)
-        scores = [span.confidence for span in group if span.confidence is not None]
-        matches.append(
-            VisiblePhrase(
-                TextBox(left, top, right - left, bottom - top),
-                min(scores) if len(scores) == len(group) else None,
-            )
-        )
-    return tuple(matches)
+    return tuple(
+        VisiblePhrase(item.box, item.lowest_confidence)
+        for item in assemble_phrases(result, max_characters=len(query))
+        if item.normalized == query
+    )
 
 
 def find_compact_phrases(result: OcrResult, phrase: str) -> tuple[VisiblePhrase, ...]:
-    """Match a whole visible phrase when STT or OCR omitted word spaces.
+    """Match a whole literal phrase when STT or OCR omitted word spaces.
 
     This returns observations only. Callers must still classify the row and
     verify the window before an action; no spelling differences are repaired.
     """
-    query = "".join(_word(part).replace(" ", "") for part in phrase.split())
+    query = normalize_phrase(phrase).replace(" ", "")
     if not query or len(query) > 64:
         return ()
-    matches: list[VisiblePhrase] = []
-    spans = result.spans
-    for start in range(len(spans)):
-        joined = ""
-        group: list[RecognizedText] = []
-        for span in spans[start : start + 8]:
-            if group and not _same_line(group[-1], span):
-                break
-            part = _word(span.text).replace(" ", "")
-            if not part:
-                break
-            joined += part
-            if not query.startswith(joined):
-                break
-            group.append(span)
-            if joined == query:
-                left = min(item.box.left for item in group)
-                top = min(item.box.top for item in group)
-                right = max(item.box.left + item.box.width for item in group)
-                bottom = max(item.box.top + item.box.height for item in group)
-                scores = [item.confidence for item in group]
-                matches.append(
-                    VisiblePhrase(
-                        TextBox(left, top, right - left, bottom - top),
-                        min(score for score in scores if score is not None)
-                        if all(score is not None for score in scores)
-                        else None,
-                    )
-                )
-                break
-    return tuple(matches)
+    return tuple(
+        VisiblePhrase(item.box, item.lowest_confidence)
+        for item in assemble_phrases(result, max_spans=8)
+        if item.normalized.replace(" ", "") == query
+    )
 
 
 def find_literal_phrases(

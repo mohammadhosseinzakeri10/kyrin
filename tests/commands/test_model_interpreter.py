@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from kyrin.actions.gate import ActionGate, ActionPolicy
+from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
@@ -18,6 +20,7 @@ from kyrin.commands.interpreter import (
 )
 from kyrin.commands.model_interpreter import ModelAssistedInterpreter
 from kyrin.commands.models import (
+    CommandCandidateUpdate,
     CommandContext,
     CommandIntent,
     CommandKind,
@@ -39,10 +42,13 @@ from kyrin.commands.understanding import (
     UnderstandingStatus,
 )
 from kyrin.commands.visible_options import VisibleOption
+from kyrin.desktop.accessibility_target import AccessibilityTarget
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.desktop.window_presence import WindowPresence
+from kyrin.model_resources import MemorySnapshot, ModelResources
 from kyrin.responses.presenter import ResponsePresenter
+from kyrin.runtime.command_runtime import dispatch_command_action
 from kyrin.stt.device import DevicePreference
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
@@ -114,8 +120,9 @@ def _interpreter(
         },
         {"telegram": ("تلگرام", "تيليغرام", "ٹیلیگرام")},
     )
+    rules = DemoCommandInterpreter(names)
     return ModelAssistedInterpreter(
-        DemoCommandInterpreter(names),
+        rules,
         model,
         names,
         allowed_apps=frozenset({"telegram", "browser", "visual-studio-code"}),
@@ -125,6 +132,7 @@ def _interpreter(
             FakeVisibleOptionsReader(visible_options) if allow_visible_control else None
         ),
         available_operations=available_operations,
+        action_review=rules.review_model_action,
     )
 
 
@@ -208,7 +216,12 @@ def test_visible_option_id_cannot_change_spoken_target(
 def test_natural_state_request_requires_matching_screen_option_and_direction(
     tmp_path: Path,
 ) -> None:
-    option = VisibleOption("2", "Notifications", "accessibility", "switch", True)
+    structure = AccessibilityTarget(
+        ((0, "FRAME", "Main"), (1, "SWITCH", "Notifications"))
+    )
+    option = VisibleOption(
+        "2", "Notifications", "accessibility", "switch", True, accessibility=structure
+    )
     context = CommandContext(observed_scroll_app="example.desktop")
     model = FakeModel(_visible_ready("Notifications", "2", False))
     interpreter = _interpreter(
@@ -222,6 +235,7 @@ def test_natural_state_request_requires_matching_screen_option_and_direction(
             "Notifications",
             control_state=False,
             control_source="accessibility",
+            control_accessibility=structure,
             control_window_app="example.desktop",
         )
     )
@@ -357,6 +371,114 @@ def test_model_scroll_requires_explicit_affirmative_request(
 
 
 @pytest.mark.parametrize(
+    ("text", "language", "source_operation"),
+    (
+        ("Could you scroll up on this page please", "en", "scroll_up"),
+        ("Would you scroll down in the current window please?", "en-US", "scroll_down"),
+        ("لطفا این صفحه را به بالا اسکرول کن", "fa", "scroll_up"),
+        ("لطفا این صفحه را به پایین اسکرول کن", "fa-IR", "scroll_down"),
+        ("Could you scroll up or down on this page please", "en", None),
+        ("Could you scroll down and then up please", "en", None),
+        ("Could you scroll on this page please", "en", None),
+        ("Could you scroll down please, do not do it yet", "en", None),
+        ("Could you scroll down if the page is ready", "en", None),
+        ('Could you scroll down to the words "up here"', "en", None),
+        ("Could you scroll down to 'up here'", "en", None),
+        ("Could you scroll down to ‘up here’", "en", None),
+        ("لطفا این صفحه را به پایین اسکرول نکن", "fa", None),
+        ("لطفا این صفحه را به بالا یا پایین اسکرول کن", "fa", None),
+        ("عبارت «به پایین اسکرول کن» را بخوان", "fa", None),
+        ("Weiter nach unten", "de", None),
+        ("Could you scroll down on this page please", "de", None),
+        ("Could you scroll down on this page please", None, None),
+    ),
+)
+@pytest.mark.parametrize(
+    "proposed_operation", (RequestedOperation.SCROLL_UP, RequestedOperation.SCROLL_DOWN)
+)
+def test_scroll_fallback_matches_independent_direction_with_real_action_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    language: str | None,
+    source_operation: str | None,
+    proposed_operation: RequestedOperation,
+) -> None:
+    reviewed: list[CommandIntent] = []
+    original_review = DemoCommandInterpreter.review_model_action
+
+    def review(
+        self: DemoCommandInterpreter, intent: CommandIntent, context: CommandContext
+    ) -> Interpretation:
+        reviewed.append(intent)
+        return original_review(self, intent, context)
+
+    monkeypatch.setattr(DemoCommandInterpreter, "review_model_action", review)
+    model = FakeModel(
+        UnderstandingResult(
+            UnderstandingStatus.READY,
+            (ProposedMeaning((MeaningStep(proposed_operation),)),),
+        )
+    )
+    interpreter = _interpreter(
+        tmp_path, model, available_operations=("scroll_up", "scroll_down")
+    )
+    # Use the production review, with real rules and a freshly observed app.
+    # Neither a direct command nor a fake rules stub may satisfy this test.
+    context = CommandContext(observed_scroll_app="example.desktop")
+    direct = interpreter._rules.interpret(
+        text, language=language, context=context, pending=None
+    )
+    assert isinstance(direct, (NotACommand, UnrecognizedCommand))
+
+    result = interpreter.interpret(
+        text, language=language, context=context, pending=None
+    )
+
+    assert model.calls == 1
+    if source_operation == proposed_operation.value:
+        intent = CommandIntent(CommandKind(source_operation), "example.desktop")
+        assert result == ReadyCommand(intent)
+        assert reviewed == [intent]
+    else:
+        assert isinstance(result, UnrecognizedCommand)
+        assert reviewed == []
+
+
+@pytest.mark.parametrize(
+    ("observed_app", "available_operations"),
+    ((None, ("scroll_up", "scroll_down")), ("example.desktop", ("open_app",))),
+)
+def test_grounded_scroll_fallback_still_requires_focus_and_enabled_operation(
+    tmp_path: Path,
+    observed_app: str | None,
+    available_operations: tuple[str, ...],
+) -> None:
+    model = FakeModel(
+        UnderstandingResult(
+            UnderstandingStatus.READY,
+            (ProposedMeaning((MeaningStep(RequestedOperation.SCROLL_UP),)),),
+        )
+    )
+    interpreter = _interpreter(
+        tmp_path, model, available_operations=available_operations
+    )
+    text = "Could you scroll up on this page please"
+    context = CommandContext(observed_scroll_app=observed_app)
+    assert isinstance(
+        interpreter._rules.interpret(
+            text, language="en", context=context, pending=None
+        ),
+        NotACommand,
+    )
+    assert isinstance(
+        interpreter.interpret(text, language="en", context=context, pending=None),
+        UnrecognizedCommand,
+    )
+    assert model.calls == 1
+
+
+@pytest.mark.parametrize(
     "utterance",
     (
         "Please do not click Search",
@@ -468,9 +590,7 @@ def _interpret(
         "Can you please launch Telegram for me?",
     ),
 )
-def test_common_polite_app_request_keeps_fast_path(
-    tmp_path: Path, phrase: str
-) -> None:
+def test_common_polite_app_request_keeps_fast_path(tmp_path: Path, phrase: str) -> None:
     model = FakeModel(CommandModelError("model should not run"))
     result = _interpret(_interpreter(tmp_path, model), phrase)
     assert result == ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "telegram"))
@@ -610,6 +730,124 @@ def test_existing_fast_command_does_not_wait_for_model(tmp_path: Path) -> None:
     result = _interpret(_interpreter(tmp_path, model), "Open Telegram")
     assert isinstance(result, ReadyCommand)
     assert model.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("text", "confirmation_pending"),
+    (
+        ("Hello Kairin", False),
+        ("certainly", True),
+        ("Kindly open Telegram", True),
+        ("Could you open seating please?", False),
+        ("Settings bitte", False),
+    ),
+)
+def test_partial_uses_only_rules_before_any_heavy_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    confirmation_pending: bool,
+) -> None:
+    reads = {"catalog": 0, "controls": 0, "ocr": 0}
+    original_catalog = CatalogSpokenAppResolver.model_options
+
+    def model_options(self: CatalogSpokenAppResolver) -> tuple[ModelAppOption, ...]:
+        reads["catalog"] += 1
+        return original_catalog(self)
+
+    def read_options(
+        self: FakeVisibleOptionsReader, expected_app: str, utterance: str
+    ) -> tuple[VisibleOption, ...]:
+        reads["controls"] += 1
+        # Simulate the inventory's OCR fallback without touching the desktop.
+        reads["ocr"] += 1
+        return self.options
+
+    monkeypatch.setattr(CatalogSpokenAppResolver, "model_options", model_options)
+    monkeypatch.setattr(FakeVisibleOptionsReader, "read_options", read_options)
+    model = FakeModel(
+        _visible_ready("Settings", None), confirmation=ConfirmationDecision.YES
+    )
+    interpreter = _interpreter(tmp_path, model, allow_visible_control=True)
+    context = CommandContext(
+        is_final_transcript=False, observed_scroll_app="example.desktop"
+    )
+    pending = (
+        PendingAppClarification(
+            (SpokenAppCandidate("telegram", "Telegram"),), confirmation=True
+        )
+        if confirmation_pending
+        else None
+    )
+    expected = interpreter._rules.interpret(
+        text, language="en", context=context, pending=pending
+    )
+
+    result = interpreter.interpret(
+        text, language="en", context=context, pending=pending
+    )
+
+    assert (model.calls, model.confirmation_calls, reads) == (
+        0,
+        0,
+        {"catalog": 0, "controls": 0, "ocr": 0},
+    )
+    assert result == expected
+
+    # The same dependencies remain reachable for final text; the guard must
+    # not disable confirmations or either visible-control discovery route.
+    final = interpreter.interpret(
+        text,
+        language="en",
+        context=CommandContext(observed_scroll_app="example.desktop"),
+        pending=pending,
+    )
+    if text == "certainly":
+        assert model.confirmation_calls == 1
+        assert final == ReadyCommand(CommandIntent(CommandKind.OPEN_APP, "telegram"))
+    else:
+        assert model.calls >= 1
+    if text in {"Could you open seating please?", "Settings bitte"}:
+        assert reads == {"catalog": 1, "controls": 1, "ocr": 1}
+
+
+def test_model_assisted_partial_preview_never_executes_and_final_still_does(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "Telegram"))
+    coordinator = CommandCoordinator(_interpreter(tmp_path, model))
+    gate = ActionGate(ActionPolicy(allowed_apps=frozenset({"telegram"})))
+    executed: list[ActionRequest] = []
+
+    class Executor:
+        def execute(self, request: ActionRequest) -> ActionResult:
+            executed.append(request)
+            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+
+    executor = Executor()
+    intent = CommandIntent(CommandKind.OPEN_APP, "telegram")
+    for text, expected in (
+        ("Open Telegram", (CommandCandidateUpdate(0, intent),)),
+        ("Kindly open Telegram", (CommandCandidateUpdate(0, None),)),
+    ):
+        events = coordinator.observe(
+            TranscriptUpdate(0, text, TranscriptStatus.PARTIAL, "en")
+        )
+        assert events == expected
+        for event in events:
+            assert dispatch_command_action(event, gate, executor) == ()
+        assert executed == []
+        assert model.calls == 0
+
+    events = coordinator.observe(
+        TranscriptUpdate(0, "Kindly open Telegram", TranscriptStatus.FINAL, "en")
+    )
+    assert events[0] == CommandResolution(0, intent, language="en")
+    for final_event in events:
+        dispatch_command_action(final_event, gate, executor)
+    assert model.calls == 1
+    assert len(executed) == 1
+    assert executed[0].intent == intent
 
 
 @pytest.mark.parametrize("phrase", ("Kindly close Telegram", "Gently close Telegram"))
@@ -952,8 +1190,13 @@ def test_ollama_device_options_and_probe() -> None:
     requests: list[dict[str, object]] = []
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        if url.endswith("/api/generate"):
+            return {"done": True, "done_reason": "unload"}
         requests.append(payload)
-        return {"message": {"content": '{"route":"no_action","steps":[]}'}}
+        return {
+            "prompt_eval_count": 1000,
+            "message": {"content": '{"route":"no_action","steps":[]}'},
+        }
 
     for device, expected in (
         (DevicePreference.CPU, 0),
@@ -964,6 +1207,8 @@ def test_ollama_device_options_and_probe() -> None:
             "http://127.0.0.1:11435",
             "qwen3.5:4b",
             device,
+            resources=ModelResources(memory=lambda: MemorySnapshot()),
+            token_counter=lambda payload: 1000,
             transport=transport,
             device_probe=lambda url, model, selected=device: (
                 0 if selected is DevicePreference.CPU else 1024
@@ -987,8 +1232,11 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
     request: dict[str, object] = {}
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        if url.endswith("/api/generate"):
+            return {"done": True, "done_reason": "unload"}
         request.update(payload)
         return {
+            "prompt_eval_count": 1000,
             "message": {
                 "content": json.dumps(
                     {
@@ -1002,13 +1250,15 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
                         ],
                     }
                 )
-            }
+            },
         }
 
     engine = OllamaCommandEngine(
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        resources=ModelResources(memory=lambda: MemorySnapshot()),
+        token_counter=lambda payload: 1000,
         transport=transport,
     )
     result = engine.understand(
@@ -1043,13 +1293,20 @@ def test_ollama_can_request_control_discovery_without_screen_options() -> None:
     sent: dict[str, object] = {}
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        if url.endswith("/api/generate"):
+            return {"done": True, "done_reason": "unload"}
         sent.update(payload)
-        return {"message": {"content": '{"route":"no_action","steps":[]}'}}
+        return {
+            "prompt_eval_count": 1000,
+            "message": {"content": '{"route":"no_action","steps":[]}'},
+        }
 
     engine = OllamaCommandEngine(
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        resources=ModelResources(memory=lambda: MemorySnapshot()),
+        token_counter=lambda payload: 1000,
         transport=transport,
     )
     engine.understand(
@@ -1067,9 +1324,16 @@ def test_explicit_gpu_without_gpu_memory_does_not_claim_success() -> None:
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.GPU,
-        transport=lambda url, payload, timeout: {
-            "message": {"content": '{"route":"no_action","steps":[]}'},
-        },
+        resources=ModelResources(memory=lambda: MemorySnapshot()),
+        token_counter=lambda payload: 1000,
+        transport=lambda url, payload, timeout: (
+            {"done": True, "done_reason": "unload"}
+            if url.endswith("/api/generate")
+            else {
+                "prompt_eval_count": 1000,
+                "message": {"content": '{"route":"no_action","steps":[]}'},
+            }
+        ),
         device_probe=lambda url, model: 0,
     )
     with pytest.raises(CommandModelError, match="device"):
@@ -1094,19 +1358,24 @@ def test_ollama_confirmation_requires_the_complete_spoken_reply(
     requests: list[dict[str, object]] = []
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        if url.endswith("/api/generate"):
+            return {"done": True, "done_reason": "unload"}
         requests.append(payload)
         return {
+            "prompt_eval_count": 1000,
             "message": {
                 "content": json.dumps(
                     {"decision": model_decision, "evidence": evidence}
                 )
-            }
+            },
         }
 
     engine = OllamaCommandEngine(
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        resources=ModelResources(memory=lambda: MemorySnapshot()),
+        token_counter=lambda payload: 1000,
         transport=transport,
     )
     assert (
@@ -1118,3 +1387,185 @@ def test_ollama_confirmation_requires_the_complete_spoken_reply(
     schema = requests[0]["format"]
     assert isinstance(schema, dict)
     assert schema["required"] == ["decision", "evidence"]
+
+
+@pytest.mark.parametrize("source", ["ocr", "accessibility"])
+def test_same_process_window_switch_during_inference_keeps_initial_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    from threading import Event, Thread
+    from time import monotonic
+    from typing import Literal, cast
+
+    from kyrin.actions.platforms.desktop_control import DesktopControlExecutor
+    from kyrin.desktop.window_observation import WindowObservation
+
+    entered, release = Event(), Event()
+    now = monotonic()
+    initial = WindowObservation(
+        "example.desktop", 42, "window-7", "initial", now, now + 10
+    )
+    option = VisibleOption(
+        "1",
+        "Settings",
+        cast(Literal["ocr", "accessibility"], source),
+        anchor=(75, 42),
+        observation=initial,
+    )
+    token = ["window-7"]
+
+    class SlowModel(FakeModel):
+        def understand(
+            self, text: UnderstandingInput, *, context: CommandContext
+        ) -> UnderstandingResult:
+            entered.set()
+            assert release.wait(2)
+            return super().understand(text, context=context)
+
+    model = SlowModel(_visible_ready("Settings", "1"))
+    coordinator = CommandCoordinator(
+        _interpreter(
+            tmp_path, model, visible_options=(option,), allow_visible_control=True
+        ),
+        window_observer=lambda: initial,
+    )
+    events: list[object] = []
+    errors: list[BaseException] = []
+
+    def understand() -> None:
+        try:
+            events.extend(
+                coordinator.observe(
+                    TranscriptUpdate(
+                        0,
+                        "Could you click Settings please?",
+                        TranscriptStatus.FINAL,
+                        "en",
+                    ),
+                    observed_scroll_app="example.desktop",
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=understand)
+    worker.start()
+    try:
+        assert entered.wait(2)
+        token[0] = "window-8"  # same app/PID, label, anchor and geometry
+    finally:
+        release.set()
+        worker.join(2)
+    assert not worker.is_alive()
+    assert errors == []
+    resolution = next(event for event in events if isinstance(event, CommandResolution))
+    assert resolution.intent is not None
+    assert resolution.intent.control_observation is initial
+    gate = ActionGate(
+        ActionPolicy(
+            allow_focused_control=True,
+            supported_kinds=frozenset({CommandKind.VISIBLE_CONTROL}),
+        )
+    )
+    request = gate.observe(resolution)
+    assert isinstance(request, ActionRequest)
+    assert request.intent.control_observation is initial
+
+    class Unused:
+        def ready(self) -> bool:
+            pytest.fail(
+                "changed window must be rejected before locating identical controls"
+            )
+
+        def find_visible_control(self, *args: object) -> None:
+            pytest.fail("changed window must not be scanned")
+
+        def execute(self, request: ActionRequest) -> ActionResult:
+            pytest.fail("must not delegate visible control")
+
+    executor = DesktopControlExecutor(
+        Unused(),
+        identity_reader=lambda: ("example.desktop", 42),
+        token_reader=lambda: token[0],
+        verifier=Unused(),
+    )
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.desktop_control.run_process",
+        lambda *_a, **_k: pytest.fail("no input"),
+    )
+    assert (
+        executor.execute(request).error_code
+        == "visible_control_target_changed:window_token"
+    )
+
+
+def test_discovery_after_first_inference_cannot_replace_initial_window(
+    tmp_path: Path,
+) -> None:
+    from time import monotonic
+
+    from kyrin.desktop.window_observation import WindowObservation
+
+    now = monotonic()
+    initial = WindowObservation(
+        "example.desktop", 42, "window-7", "initial", now, now + 10
+    )
+    replaced = WindowObservation(
+        "example.desktop", 42, "window-8", "later", now, now + 10
+    )
+    model = FakeModel(_visible_ready("Search", None))
+    coordinator = CommandCoordinator(
+        _interpreter(
+            tmp_path,
+            model,
+            allow_visible_control=True,
+            visible_options=(
+                VisibleOption("1", "Search", "accessibility", observation=replaced),
+            ),
+        ),
+        window_observer=lambda: initial,
+    )
+    events = coordinator.observe(
+        TranscriptUpdate(0, "Search openen", TranscriptStatus.FINAL, "nl"),
+        observed_scroll_app="example.desktop",
+    )
+    assert model.calls == 1
+    assert (
+        next(event for event in events if isinstance(event, CommandResolution)).intent
+        is None
+    )
+    assert any(
+        isinstance(event, ResponseRequest) and event.kind is ResponseKind.REPEAT_COMMAND
+        for event in events
+    )
+
+
+def test_model_inference_records_producer_timing_without_source_text(
+    tmp_path: Path,
+) -> None:
+    from kyrin.actions.models import ActionKey
+    from kyrin.timing import TimingEvent, TimingScope, timing_scope
+
+    model = FakeModel(_ready(RequestedOperation.OPEN_APP, "telegram"))
+    interpreter = _interpreter(tmp_path, model)
+    events: list[TimingEvent] = []
+    times = iter((1_000_000_000, 1_100_000_000))
+    with timing_scope(
+        TimingScope("session", ActionKey(2, 3), events.append, lambda: next(times))
+    ):
+        interpreter.interpret(
+            "Por favor abre Telegram",
+            language="es",
+            context=CommandContext(),
+            pending=None,
+        )
+    assert model.calls == 1
+    assert [event.stage for event in events] == [
+        "inference_started",
+        "inference_finished",
+    ]
+    assert [event.at_ns for event in events] == [1_000_000_000, 1_100_000_000]
+    assert all(event.key == ActionKey(2, 3) for event in events)
+    assert "Telegram" not in repr(events)

@@ -117,6 +117,19 @@ class ActionGate:
             )
         return self._issue(key, pending.intent, pending.language)
 
+    def cancel_unstarted(self, key: ActionKey) -> ActionNotice:
+        """Release an issued request only when its input operation has not started."""
+        try:
+            request = self._outstanding.pop(key)
+        except KeyError as exc:
+            raise ValueError("no outstanding action to cancel") from exc
+        return ActionNotice(
+            key,
+            request.intent,
+            ActionNoticeReason.CANCELLED,
+            language=request.language,
+        )
+
     def record_result(self, result: ActionResult) -> ActionFeedback:
         """Apply a matched result without treating an unverified launch as fact."""
         try:
@@ -153,7 +166,11 @@ class ActionGate:
             result.outcome,
             ResponseChannel.TEXT_ONLY
             if result.outcome
-            in (ActionOutcome.CONFIRMED, ActionOutcome.LAUNCH_ACCEPTED)
+            in (
+                ActionOutcome.CONFIRMED,
+                ActionOutcome.LAUNCH_ACCEPTED,
+                ActionOutcome.DISPATCHED_UNVERIFIED,
+            )
             else ResponseChannel.TEXT_AND_VOICE,
             result.error_code,
             request.language,

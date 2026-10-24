@@ -1,5 +1,11 @@
 # Local command models in the Ubuntu application
 
+<div dir="rtl">
+
+**به‌روزرسانی F03:** ورودی کنترل عمومی و تلگرام بدون شاهد پس‌شرط، `DISPATCHED_UNVERIFIED` است. مراحل وابسته در این حالت اجرا نمی‌شوند؛ راه‌اندازی برنامهٔ متفاوت می‌تواند ادامه یابد. بررسی محدود نتیجهٔ کند و محدودیت تأیید هویت چت در [قرارداد پس‌شرط](../actions/ACTION_POSTCONDITIONS.md) آمده است. این رفتار با آزمون قطعی بررسی شده؛ آزمون زنده انجام نشده است.
+
+</div>
+
 The **Command Understanding** page can select an installed model from a local
 Ollama model store or a directory of separate stores. The initial selection is
 **Fast rules only**, preserving the existing behavior until the owner chooses
@@ -27,8 +33,24 @@ incomplete models cause a visible start error rather than a silent switch.
 
 ## Decision boundary
 
-Existing fast rules decide simple commands immediately. Unresolved speech is
-sent to the model. Common polite English app-opening requests also use the
+`LiveCommandRuntime` owns one understanding thread with four waiting updates
+plus one in flight. Accepted finals remain FIFO; a final discards waiting
+previews to free capacity. A full live queue uses the existing repeat-command
+response without inventing an action intent. Exact listening controls stay on
+the speech consumer. Stop, standby, or an STT stream change invalidates queued
+work and late results, including speculative dialogue state and action tickets.
+Understanding, focus reads, and inference run outside that consumer. Dialogue
+flows retain their order on the understanding worker. Finite file input waits
+for capacity and drains at normal EOF. On stop, understanding has a one-second
+join budget; a timeout reports an error and suppresses late delivery. This does
+not kill a Python thread or prove the model computation has stopped. No live
+microphone/model latency measurement has been made for this change.
+
+Existing fast rules decide simple commands immediately. Partial transcripts
+return only the fast-rule result for replaceable previews; they never call
+model understanding, model confirmation classification, the model app catalog,
+or visible-control inventory/OCR. Only unresolved final speech is sent to the
+model. Common polite English app-opening requests also use the
 fast rules, avoiding both model inference and screen reading. A brief direct
 greeting or question can now produce a
 conversational response in the user's language, with no command intent. The
@@ -62,14 +84,44 @@ negative, or unavailable classification does not run the action. Chat opening
 and system power do not use this fallback. A focused scroll or named
 visible-control request may use the model when the related Desktop Actions
 permission is enabled. The focused window is observed again before input.
+Model-proposed scrolling additionally requires a complete bounded English or
+Persian request whose independently extracted direction matches the proposal.
+Opposite, ambiguous, negated, quoted, and conditional requests are rejected;
+languages without an independent direction grammar do not authorize scrolling.
 
 The model receives the original STT text, its advisory language hint, a
 periodically refreshed catalog of installed permitted applications with
 localized and owner aliases, and the operations enabled in the session. Screen
 requests use fresh accessibility controls first and OCR when needed. A unique
 exact visible name uses one model inference; an inexact name needs a second
-inference against current option IDs. The selected control retains the focused
-app ID; the executor rechecks that app, focus, and target before input.
+inference against current option IDs. Before interpretation (including the
+first inference when controls are discovered later), the coordinator records
+the existing GNOME `GetActiveWindowToken` plus app/PID, an observation generation,
+monotonic time and the existing ten-second absolute deadline. Options carry
+their observation too; OCR uses its capture ID as the observation generation.
+`CommandIntent.control_observation`, retained inside `ActionRequest`, carries the
+original request evidence to both OCR and accessibility helpers. Fresh target
+reads never renew that deadline or authorize a replacement window of the same
+app/PID, even with identical labels, anchors and frames. Helpers recheck the
+token/age after portal consent, after accessibility lookup and before pressing;
+the input budget also includes the original deadline. Missing/expired evidence
+requests a new command, and a changed window stops the old request.
+AT-SPI traversal uses only one active top-level window of the process; absent or
+ambiguous window evidence supplies no accessible target. `ACTIVE` follows the
+[official AT-SPI state contract](https://docs.gtk.org/atspi2/enum.StateType.html).
+<div dir="rtl">
+
+مسیر AT-SPI به آماده‌بودن یا حتی وجود سرویس OCR و مجوز تصویر وابسته نیست. گزینهٔ دسترس‌پذیر نقش و زنجیرهٔ والدهای خود را تا فرمان حمل می‌کند؛ helper همان ساختار را در پنجرهٔ فعال یکتا و با token اولیه دوباره حل می‌کند. کنترل و والدهای آن باید visible، showing، enabled و sensitive باشند؛ hidden، defunct، stale، ابهام یا تغییر ساختار مانع اجرا می‌شود. action مناسب از نام‌های غیرمحلی interface واقعی خوانده می‌شود؛ شمارهٔ صفر فرض نمی‌شود. مسیر معنایی RemoteDesktop یا screenshot ایجاد نمی‌کند، اما مجوز مستقل کنترل دسکتاپ و بررسی مالک مشترک ورودی همچنان الزامی‌اند.
+
+موفقیت `do_action` فقط به نتیجهٔ پذیرفته‌شدن فراخوانی تبدیل می‌شود. برای وضعیت boolean، cache پاک و وضعیت پس از عمل بازخوانی می‌شود؛ بدون تحقق پس‌شرط نتیجه نامعلوم است و کلیک مجدد انجام نمی‌شود. fallback مختصاتی فقط با نبود Action/عمل اعلام‌شده یا نبود کنترل صادرشده در درخت مجاز است؛ خطای انتقال، کنترل نامعتبر و action ناشناخته این fallback را مجاز نمی‌کنند. fallback از همان مالک ورودی عبور می‌کند و پس از حرکت اشاره‌گر، وضعیت و ساختار کنترل را پیش از فشردن دوباره بررسی می‌کند. مجوز پیامد عملیات و toggleهای عمومی اکنون تابع [سیاست قابلیت و تأیید محدود F02](../actions/CONTROL_POLICY.md) است؛ مدل تأیید یا قابلیت صادر نمی‌کند. این مسیر آزمون قطعی دارد؛ آزمون زندهٔ AT-SPI با OCR خاموش هنوز انجام نشده است.
+
+قراردادهای رسمی: [Action](https://docs.gtk.org/atspi2/method.Action.do_action.html)، [نام action](https://docs.gtk.org/atspi2/method.Action.get_action_name.html) و [وضعیت‌ها](https://docs.gtk.org/atspi2/enum.StateType.html). نام اتصال Python روی این دستگاه با introspection نیز بررسی شد: `get_action_name`.
+
+اعتبارسنجی این کارت: سه رگرسیون اصلی پیش از اصلاح شکست خوردند و پس از اصلاح موفق شدند. اجرای کامل با Qt غیرنمایشی و امکان ساخت D-Bus موقت، ۱۶۶۶ آزمون موفق داشت؛ lint و بررسی نوع هستهٔ اصلاح و آزمون معنایی جدید نیز موفق‌اند. بررسی نوع سراسری پروژه همچنان ۴۶۷ خطا در ۴۷ فایل دارد و موفق گزارش نمی‌شود.
+
+</div>
+
+These controls do not claim atomicity with focus changes after the final check.
 These paths have deterministic tests but still need a live test with the
 selected STT, command model, and OCR engine.
 Slow model inference (at least two seconds), accessibility scans, and OCR reads
@@ -153,3 +205,12 @@ The GNOME window adapter remains attached during login even if the Shell
 extension loads a little later; unavailable reads return unknown rather than
 locking the feature off until the app is restarted. A new-tab request checks
 again immediately before execution that exactly one Ptyxis window remains.
+
+<div dir="rtl" lang="fa">
+
+**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
+[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
+تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
+سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
+
+</div>

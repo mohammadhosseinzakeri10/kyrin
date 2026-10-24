@@ -27,7 +27,8 @@ from kyrin.actions.visible_control import (
     visible_ocr_labels,
 )
 from kyrin.app.qt.screen_access import ScreenAccess
-from kyrin.app.qt.screen_text_reader import ScreenTextReader
+from kyrin.app.qt.screen_text_reader import ReadRegion, ScreenTextReader
+from kyrin.operations import Operation, OperationStopped, activate, budget
 from kyrin.vision.ocr.contracts import OcrOptions
 from kyrin.vision.text_reader import IdentifiedWindowText
 from kyrin.vision.text_targets import find_exact_phrases, find_literal_phrases
@@ -52,6 +53,7 @@ class _Request:
     search_query: bool = False
     visible_control: bool = False
     visible_inventory: bool = False
+    operation: Operation | None = None
     finished: Event = field(default_factory=Event)
     result: (
         bool
@@ -68,6 +70,7 @@ class QtChatVerifier(QObject):
     """Block only the action worker; all screen access remains on Qt's thread."""
 
     requested = Signal(object)
+    cancel_requested = Signal(object)
 
     def __init__(
         self,
@@ -82,6 +85,7 @@ class QtChatVerifier(QObject):
         self._pending_ready: _Request | None = None
         self._last_choice_status = "not_requested"
         self.requested.connect(self._start)
+        self.cancel_requested.connect(self._cancel)
         reader.completed.connect(self._completed)
         reader.failed.connect(self._failed)
         access.changed.connect(self._access_changed)
@@ -202,15 +206,60 @@ class QtChatVerifier(QObject):
     ):
         if QThread.currentThread() == self.thread():
             return None
-        self.requested.emit(request)
-        if not request.finished.wait(timeout_s):
+        try:
+            with budget(timeout_s) as operation:
+                request.operation = operation
+                self.requested.emit(request)
+                while not request.finished.wait(min(0.02, operation.remaining())):
+                    operation.remaining()
+                operation.remaining()
+                return request.result
+        except OperationStopped:
+            if request.operation is not None:
+                request.operation.cancel()
             request.finished.set()
+            self.cancel_requested.emit(request)
             return None
-        return request.result
+
+    @Slot(object)
+    def _cancel(self, request: object) -> None:
+        if not isinstance(request, _Request):
+            return
+        if self._pending_ready is request:
+            self._finish_ready(request, False)
+        if self._pending is request:
+            self._pending = None
+            self._reader.cancel(request.operation)
+
+    def _read(
+        self, options: OcrOptions | None = None, *, region: ReadRegion = None
+    ) -> bool:
+        pending = self._pending
+        if pending is None or pending.finished.is_set():
+            return False
+        operation = pending.operation
+        if operation is None:
+            return self._reader.read(options, region=region)
+        if operation.stopped:
+            return False
+        with activate(operation):
+            return self._reader.read(options, region=region)
 
     @Slot(object)
     def _start(self, request: object) -> None:
-        if not isinstance(request, _Request) or request.finished.is_set():
+        try:
+            self._start_request(request)
+        except OperationStopped:
+            self._cancel(request)
+            if isinstance(request, _Request):
+                request.finished.set()
+
+    def _start_request(self, request: object) -> None:
+        if (
+            not isinstance(request, _Request)
+            or request.finished.is_set()
+            or (request.operation is not None and request.operation.stopped)
+        ):
             return
         available = (
             self._access.granted
@@ -229,8 +278,19 @@ class QtChatVerifier(QObject):
                 and self._pending_ready is None
             ):
                 self._pending_ready = request
-                QTimer.singleShot(5000, lambda: self._finish_ready(request, False))
-                self._access.request_session()
+                milliseconds = (
+                    5000
+                    if request.operation is None
+                    else max(1, int(request.operation.remaining(5) * 1000))
+                )
+                QTimer.singleShot(
+                    milliseconds, lambda: self._finish_ready(request, False)
+                )
+                if request.operation is None:
+                    self._access.request_session()
+                else:
+                    with activate(request.operation):
+                        self._access.request_session()
             else:
                 request.result = False
                 request.finished.set()
@@ -280,15 +340,15 @@ class QtChatVerifier(QObject):
             self._finish(False)
             return
         if request.menu:
-            started = self._reader.read(language, region="left_menu")
+            started = self._read(language, region="left_menu")
         elif request.settings_header:
-            started = self._reader.read(language, region="settings_header")
+            started = self._read(language, region="settings_header")
         elif request.settings_item or (
             request.view_title and request.target == "Settings"
         ):
-            started = self._reader.read(language, region="settings_pane")
+            started = self._read(language, region="settings_pane")
         elif request.visible_choices:
-            started = self._reader.read(
+            started = self._read(
                 OcrOptions(self._visible_languages()[0]),
                 region="left_chat_list_fast",
             )
@@ -303,10 +363,10 @@ class QtChatVerifier(QObject):
                 request.visible_inventory,
             )
         ):
-            started = self._reader.read(language, region="chat_header")
+            started = self._read(language, region="chat_header")
         else:
             started = (
-                self._reader.read() if language is None else self._reader.read(language)
+                self._read() if language is None else self._read(language)
             )
         if not started and self._pending is request:
             self._finish(False)
@@ -314,6 +374,11 @@ class QtChatVerifier(QObject):
     def _completed(self, observation: object) -> None:
         pending = self._pending
         if pending is None:
+            return
+        if pending.finished.is_set() or (
+            pending.operation is not None and pending.operation.stopped
+        ):
+            self._finish(None)
             return
         result: (
             bool
@@ -441,14 +506,14 @@ class QtChatVerifier(QObject):
                         language = alternate
                     else:
                         language = None
-                    if language is not None and self._reader.read(
+                    if language is not None and self._read(
                         OcrOptions(language, layout="block"),
                         region="left_chat_list",
                     ):
                         return
                     if not pending.visible_full:
                         pending.visible_full = True
-                        if self._reader.read(OcrOptions(primary)):
+                        if self._read(OcrOptions(primary)):
                             return
             elif pending.search:
                 assert pending.target is not None
@@ -487,7 +552,9 @@ class QtChatVerifier(QObject):
             return
         self._pending_ready = None
         if not request.finished.is_set():
-            request.result = ready
+            request.result = ready and not (
+                request.operation is not None and request.operation.stopped
+            )
             request.finished.set()
 
     def _finish(

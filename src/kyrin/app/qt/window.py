@@ -27,7 +27,12 @@ from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.platforms.telegram import TELEGRAM_PORTAL_HELPER
 from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
-from kyrin.app.events import ApplicationEvent, AudioCaptureReady, SttDeviceReady
+from kyrin.app.events import (
+    ApplicationEvent,
+    AudioCaptureReady,
+    AudioDuplexChanged,
+    SttDeviceReady,
+)
 from kyrin.app.model_library import InstalledModel, ModelLibrary
 from kyrin.app.permission_token import permission_token_path, read_opaque_token
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
@@ -145,6 +150,7 @@ class ControlWindow(QWidget):
         ]
         | None = None,
         preview_tts: Callable[[str, str, TtsSelection], bool] | None = None,
+        interrupt_speech: Callable[[], None] | None = None,
         ui_translations: UiTranslations,
         app_catalog: AppPickerCatalog | None = None,
         screen_access: ScreenAccess | None = None,
@@ -170,6 +176,7 @@ class ControlWindow(QWidget):
         self._omnilingual_python = omnilingual_python
         self._active_stt_device: ComputeDevice | None = None
         self._audio_ready = False
+        self._echo_cancelled = False
         self._pending_settings: AppSettings | None = None
         self._pointer_grant_process: QProcess | None = None
         self._scroll_grant_process: QProcess | None = None
@@ -265,6 +272,9 @@ class ControlWindow(QWidget):
         self.status_label.setObjectName("Status")
         self.status_label.setAccessibleName("KYRIN status")
         root.addWidget(self.status_label)
+        self.duplex_label = QLabel()
+        self.duplex_label.setWordWrap(True)
+        root.addWidget(self.duplex_label)
         self.audio_drop_zone = AudioDropZone()
         self.audio_drop_zone.file_selected.connect(self.import_audio_file)
         self.audio_drop_zone.invalid_input.connect(self._show_audio_import_message)
@@ -381,6 +391,7 @@ class ControlWindow(QWidget):
         self.pages.addWidget(self.screen_access_page)
 
         self.preferences_page = PreferencesPage(self._label)
+        self.preferences_page.load_history(settings or AppSettings())
         self.ui_language_combo = self.preferences_page.ui_language_combo
         self._fill_languages()
         self.dashboard_animation_checkbox = (
@@ -404,6 +415,12 @@ class ControlWindow(QWidget):
         self.save_startup_button.clicked.connect(self._save_startup)
         self.clear_memory_button = self.preferences_page.clear_memory_button
         self.clear_memory_button.clicked.connect(self._clear_conversation_memory)
+        self.preferences_page.archive_memory_button.clicked.connect(
+            lambda: self._change_conversation_memory("archive")
+        )
+        self.preferences_page.clear_all_memory_button.clicked.connect(
+            lambda: self._change_conversation_memory("all")
+        )
         self.review_memory_button = self.preferences_page.review_memory_button
         self.review_memory_button.clicked.connect(self._review_conversation_memory)
         self._memory_dialog: ArchivedMemoryDialog | None = None
@@ -419,6 +436,11 @@ class ControlWindow(QWidget):
         self.microphone_off_button = QPushButton()
         self.microphone_off_button.clicked.connect(self._turn_microphone_off)
         buttons.addWidget(self.microphone_off_button)
+        self.stop_speech_button = QPushButton()
+        self.stop_speech_button.setEnabled(interrupt_speech is not None)
+        if interrupt_speech is not None:
+            self.stop_speech_button.clicked.connect(interrupt_speech)
+        buttons.addWidget(self.stop_speech_button)
         self.quit_button = QPushButton()
         self.quit_button.clicked.connect(self._quit)
         buttons.addWidget(self.quit_button)
@@ -500,6 +522,10 @@ class ControlWindow(QWidget):
         self.apply_button.setText(t("save"))
         self.quit_button.setText(t("quit"))
         self.microphone_off_button.setText(t("microphone_off"))
+        self.stop_speech_button.setText(t("stop_speech"))
+        self.duplex_label.setText(
+            t("audio_aec" if self._echo_cancelled else "audio_half_duplex")
+        )
         self.import_language_button.setText(t("import_language"))
         self.save_ui_button.setText(t("save"))
         self.startup_checkbox.setText(t("start_at_login"))
@@ -511,6 +537,11 @@ class ControlWindow(QWidget):
         self.save_startup_button.setText(t("apply_startup"))
         self.clear_memory_button.setText(t("conversation_memory_clear"))
         self.review_memory_button.setText(t("conversation_memory_review"))
+        self.preferences_page.history_enabled_checkbox.setText(t("history_enabled"))
+        for spin in self.preferences_page.retention_fields.values():
+            spin.setSpecialValueText(t("history_unlimited"))
+        self.preferences_page.archive_memory_button.setText(t("history_archive"))
+        self.preferences_page.clear_all_memory_button.setText(t("history_delete_all"))
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device_combo.setItemText(index, t(key))
         if self.microphone_combo.count():
@@ -604,33 +635,77 @@ class ControlWindow(QWidget):
         self.feedback_label.setText(self._translations.text("startup_saved"))
 
     def _clear_conversation_memory(self) -> None:
+        self._change_conversation_memory("active")
+
+    def _memory_idle(self) -> bool:
+        if (
+            not self._controller.wait_until_stopped(0)
+            or self._pending_settings is not None
+            or (self._audio_import is not None and self._audio_import.busy)
+        ):
+            self.feedback_label.setText(self._translations.text("history_stop_first"))
+            return False
+        return True
+
+    def _clear_memory_views(self) -> None:
+        if self._memory_dialog is not None:
+            self._memory_dialog.close()
+            self._memory_dialog = None
+        self.diagnostics_output.clear()
+
+    def _change_conversation_memory(self, scope: str) -> None:
+        if not self._memory_idle():
+            return
         t = self._translations.text
+        key = {
+            "active": "conversation_memory_clear_question",
+            "archive": "history_archive_question",
+            "all": "history_delete_all_question",
+        }[scope]
         if (
             QMessageBox.question(
                 self,
-                t("conversation_memory_clear_title"),
-                t("conversation_memory_clear_question"),
+                t("conversation_memory_heading"),
+                t(key),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             != QMessageBox.StandardButton.Yes
         ):
             return
+        # A modal dialog can process events: recheck producers after confirmation.
+        if not self._memory_idle():
+            return
         try:
-            history = SqliteConversationHistory(default_history_path())
+            history = SqliteConversationHistory(
+                default_history_path(),
+                retention=(self._settings or AppSettings()).history_retention,
+            )
             try:
-                history.clear()
+                if scope == "archive":
+                    history.archive_active()
+                elif scope == "all":
+                    history.clear_all()
+                else:
+                    history.clear_active()
             finally:
                 history.close()
         except OSError, ValueError, sqlite3.Error:
             self.feedback_label.setText(t("conversation_memory_unavailable"))
             return
-        self.feedback_label.setText(t("conversation_memory_cleared"))
+        self._clear_memory_views()
+        self.feedback_label.setText(t("history_changed"))
 
     def _review_conversation_memory(self) -> None:
+        if self._memory_dialog is not None:
+            self._memory_dialog.close()
+            self._memory_dialog = None
         try:
             dialog = ArchivedMemoryDialog(
-                default_history_path(), self._translations.text, self
+                default_history_path(),
+                self._translations.text,
+                self,
+                retention=(self._settings or AppSettings()).history_retention,
             )
         except OSError, ValueError, sqlite3.Error:
             self.feedback_label.setText(
@@ -792,6 +867,8 @@ class ControlWindow(QWidget):
             raise ValueError(self._translations.text("action_select_one"))
         return replace(
             self._settings,
+            history_enabled=self.preferences_page.history_enabled_checkbox.isChecked(),
+            history_retention=self.preferences_page.history_retention(),
             microphone_device_key=key,
             stt=stt,
             command_model=self.command_model_page.selection(),
@@ -821,7 +898,12 @@ class ControlWindow(QWidget):
         assert self._settings is not None
         stt = self._settings.stt
         return (
-            self.microphone_combo.currentData() != self._settings.microphone_device_key
+            self.preferences_page.history_enabled_checkbox.isChecked()
+            != self._settings.history_enabled
+            or self.preferences_page.history_retention()
+            != self._settings.history_retention
+            or self.microphone_combo.currentData()
+            != self._settings.microphone_device_key
             or self.model_path.text().strip()
             != (str(stt.model_path) if stt is not None else "")
             or self.backend_combo.currentData()
@@ -1005,6 +1087,24 @@ class ControlWindow(QWidget):
         except (ValueError, MicrophoneError, DeviceUnavailableError) as error:
             self._show_error(error)
             return
+        if self._audio_import is not None and self._audio_import.busy:
+            self.feedback_label.setText(self._translations.text("history_stop_first"))
+            return
+        assert self._settings is not None
+        if candidate.history_retention.is_stricter_than(
+            self._settings.history_retention
+        ):
+            if (
+                QMessageBox.question(
+                    self,
+                    self._translations.text("conversation_memory_heading"),
+                    self._translations.text("history_retention_question"),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
         status = self._controller.status()
         if status.state in (ApplicationState.STARTING, ApplicationState.RUNNING):
             self._pending_settings = candidate
@@ -1054,6 +1154,11 @@ class ControlWindow(QWidget):
                 permission_token_path("desktop-control").unlink(missing_ok=True)
             except OSError as error:
                 self._show_error(error)
+        if self._settings is not None and (
+            self._settings.history_enabled != candidate.history_enabled
+            or self._settings.history_retention != candidate.history_retention
+        ):
+            self._clear_memory_views()
         self._settings = candidate
         self.actions_page.set_pointer_grant_ready(
             read_opaque_token(permission_token_path("telegram-control")) is not None
@@ -1225,6 +1330,12 @@ class ControlWindow(QWidget):
                 )
             )
             return
+        if isinstance(event, AudioDuplexChanged):
+            self._echo_cancelled = event.echo_cancelled
+            self.duplex_label.setText(
+                t("audio_aec" if event.echo_cancelled else "audio_half_duplex")
+            )
+            return
         if isinstance(event, AudioCaptureReady):
             self._audio_ready = True
             self._refresh()
@@ -1244,6 +1355,17 @@ class ControlWindow(QWidget):
                 f"({t('diagnostics_final_to_result')}: "
                 f"{latency.final_to_result_ms:.0f} ms)"
             )
+            for summary in self._action_latency.summaries():
+                if (
+                    summary.metric == "final_to_result"
+                    and summary.route == latency.route
+                    and summary.temperature == latency.temperature
+                    and summary.p95_ms is not None
+                ):
+                    self.diagnostics_output.appendPlainText(
+                        f"{summary.route} ({summary.temperature}, n={summary.count}): "
+                        f"p50={summary.p50_ms:.0f} ms, p95={summary.p95_ms:.0f} ms"
+                    )
         if isinstance(event, PowerPrompt):
             self._power_prompt = (
                 event

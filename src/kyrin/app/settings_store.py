@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
@@ -17,10 +18,11 @@ from kyrin.app.settings import (
     TtsLanguageRoute,
     TtsSelection,
 )
+from kyrin.memory.history import HistoryRetention
 from kyrin.stt.device import DevicePreference
 from kyrin.vision.ocr.contracts import OcrDevicePreference
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 class SettingsError(ValueError):
@@ -144,7 +146,18 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("document_ocr")
     if version >= 15:
         fields.add("allow_desktop_control")
+    if version >= 16:
+        fields.update({"history_enabled", "history_retention"})
     root = _object(document, fields, "settings")
+    retention = HistoryRetention()
+    if version >= 16:
+        raw_retention = _object(
+            root["history_retention"], set(asdict(retention)), "history_retention"
+        )
+        for value in raw_retention.values():
+            if value is not None and type(value) is not int:
+                raise SettingsError("history limits must be integers or null")
+        retention = HistoryRetention(**cast("dict[str, int | None]", raw_retention))
     microphone = root["microphone_device_key"]
     if microphone is not None:
         microphone = _string(microphone, "microphone_device_key")
@@ -308,6 +321,12 @@ def _parse_settings(document: object) -> AppSettings:
         )
     try:
         return AppSettings(
+            history_enabled=(
+                _boolean(root["history_enabled"], "history_enabled")
+                if version >= 16
+                else True
+            ),
+            history_retention=retention,
             listening_enabled=_boolean(root["listening_enabled"], "listening_enabled"),
             start_at_login=_boolean(root["start_at_login"], "start_at_login"),
             microphone_device_key=microphone,
@@ -358,6 +377,8 @@ def _document(settings: AppSettings) -> dict[str, object]:
     stt = settings.stt
     return {
         "schema_version": SCHEMA_VERSION,
+        "history_enabled": settings.history_enabled,
+        "history_retention": asdict(settings.history_retention),
         "listening_enabled": settings.listening_enabled,
         "start_at_login": settings.start_at_login,
         "microphone_device_key": settings.microphone_device_key,

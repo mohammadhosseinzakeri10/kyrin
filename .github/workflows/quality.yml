@@ -1,0 +1,47 @@
+name: Python quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PIP_CACHE_DIR: ${{ github.workspace }}/local-data/pip-cache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14.4'
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libportaudio2 libegl1 libopengl0 ffmpeg gjs dbus-daemon systemd
+      - name: Install pinned Python dependencies
+        run: |
+          python -m pip install -r requirements/bootstrap.txt
+          python -m pip install -r requirements/core.txt -r requirements/dev.txt -r requirements/test-ui.txt
+          python -m pip install --no-build-isolation --no-deps -e '.[dev]'
+          python -m pip check
+      - name: Record installed versions
+        run: |
+          mkdir -p local-data/quality
+          python --version > local-data/quality/python.txt
+          python -m pip freeze --all > local-data/quality/installed.txt
+      - name: Syntax, lint, strict types and deterministic tests
+        run: python scripts/development/check.py
+      - name: Retain every check result, including failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-quality
+          path: local-data/quality/
+          retention-days: 7

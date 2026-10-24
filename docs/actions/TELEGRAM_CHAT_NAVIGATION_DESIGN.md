@@ -1,5 +1,38 @@
 # Telegram chat navigation: first bounded action
 
+<div dir="rtl" lang="fa">
+
+**قرارداد فعلی F10 — ۲۰۲۶/۱۰/۲۴:** منو با کنترل یکتای زندهٔ AT-SPI و نام
+`Main menu`/«منوی اصلی» باز می‌شود؛ مختصات ثابت حذف شده است. دو Escape
+مسیر معتبر قبلی حفظ شده‌اند؛ تمرکز Search معنایی است. فیلد باید با نام
+Search/«جستجو»/«جست‌وجو»، نقش ENTRY/TEXT و قابلیت EditableText یکتا باشد.
+token پنجره پیش از portal ثبت می‌شود و پس از consent باید همان باشد.
+
+Ctrl+A و تایپ سراسری نام حذف شده‌اند. متن مستقیماً به شیء همان فیلد، در
+بخش‌های حداکثر چهارنویسه‌ای می‌رود؛ offset نویسه و length بایت UTF-8 است.
+شیء، ancestry، bounds، token، focus و متن قبلی بین بخش‌ها بازخوانی می‌شوند.
+مالک broker، لغو، مهلت و epoch مجوز با `HelperLifetime.check` پیش از هر
+تغییر بررسی می‌شوند؛ مالک مشترک کل عملیات در executor موجود حفظ شده است.
+تغییر focus داخل فراخوانی درج، متن را به فیلد دیگری منتقل نمی‌کند. ورودی
+قبلاً پذیرفته‌شده بازگردانده نمی‌شود. نبود/ابهام شاهد یا تغییر وضعیت، عملیات
+را متوقف می‌کند؛ fallback مختصاتی یا تایپ کور وجود ندارد.
+
+آزمون‌های ساختگی resize/sidebar/RTL، تغییر focus/پنجره/token، جایگزینی فیلد،
+تغییر ancestry/متن، لغو و حفظ مالک broker بین بخش‌ها را پوشش می‌دهند.
+**آزمون زنده انجام نشده است:** باید نام و نقش واقعی کنترل‌ها، اثر EditableText
+بر نتایج جست‌وجو، منو، زبان فارسی، sidebar، resize، تغییر focus و لغو/پس‌گرفتن
+مجوز روی نسخهٔ نصب‌شده بررسی شوند. AT-SPI در بررسی‌های قبلی Telegram قابل
+اتکا نبود؛ build فاقد شاهد معتبر و زبان‌های دیگر فعلاً متوقف می‌شوند.
+OCR سطرها/مقصدها همچنان محدودیت چیدمان دارد. این قرارداد جایگزین توضیحات
+تاریخیِ کلیک گوشهٔ چپ و Ctrl+F/Ctrl+A در ادامهٔ سند است.
+
+APIها با مستند رسمی جاری بررسی شدند:
+[درج متن](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.EditableText.insert_text.html)،
+[وضعیت‌های AT-SPI](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.StateType.html)،
+[کنترل‌های Telegram Desktop](https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/dialogs/dialogs_widget.cpp).
+
+</div>
+
 ## Telegram destination commands (2026-10-18)
 
 With Telegram in the foreground, English commands for Archive, Contacts,

@@ -1,12 +1,21 @@
 # Active App Observation on GNOME
 
+<div dir="rtl" lang="fa">
+
+**به‌روزرسانی F20:** آمادگی از نسخه و قابلیت کد بارشده سنجیده می‌شود؛ مبدل
+نشست GNOME برای سرویس دیررس حفظ می‌شود و probe محدود دارد. نبود سرویس دیگر
+به‌تنهایی موجب انتخاب دائمی launcher هنگام شروع نیست؛ فعال‌سازی نامطمئن
+همچنان اجرای دوم نمی‌فرستد. [قرارداد فعلی](BACKEND_PROTOCOL.md).
+
+</div>
+
 ## Problem and scope
 
 For a command such as “open Ali's chat,” conversation history alone cannot establish which app the user is currently using. The `kyrin.desktop.active_app.ActiveAppObserver` contract provides a fresh observation. `None` means the active app is unknown; command understanding should ask the user when that distinction matters.
 
 This integration targets GNOME Shell 50 only. The extension reports the desktop ID of the focused app. Its `GetActiveWindow` method also reports the focused window PID for the separate, read-only [screen observation](SCREEN_OBSERVATION.md) adapter. It does not read window titles, text, images, or files. `GnomeShellActiveAppObserver` maps reported desktop IDs to KYRIN's internal app IDs through an explicit mapping. An unrecognized app, no focused app, an unavailable extension, or a D-Bus error produces `None`. Results are not cached; each request makes a new observation.
 
-For an explicitly allowed `OPEN_APP` action, `GnomeExistingAppActivator` can ask the same extension to raise an existing window. The extension checks whether the exact registered desktop ID has a window and uses GNOME's `Main.activateWindow` with a fresh display timestamp only in that case. This follows the window path used by Ubuntu Dock and handles a minimized window or another workspace. The result `requested` is not proof of focus: `ActivateOrLaunchExecutor` reads the foreground app again before reporting `CONFIRMED`. An explicit `no_window` falls back to the existing `.desktop` launcher; a missing or uncertain reply never triggers a second launch. The action gate still decides which app KYRIN may control. When the updated extension is not installed, KYRIN keeps the previous launcher behavior. Other desktop environments can implement the same `ExistingAppActivator` contract.
+For an explicitly allowed `OPEN_APP` action, `GnomeExistingAppActivator` can ask the same extension to raise an existing window. The extension checks whether the exact registered desktop ID has a window and uses GNOME's `Main.activateWindow` with a fresh display timestamp only in that case. This follows the window path used by Ubuntu Dock and handles a minimized window or another workspace. The result `requested` is not proof of focus: `ActivateOrLaunchExecutor` reads the foreground app again before reporting `CONFIRMED`. An explicit `no_window` falls back to the existing `.desktop` launcher; a missing or uncertain reply never triggers a second launch. The action gate still decides which app KYRIN may control. When the loaded extension is absent or incompatible, GNOME activation fails closed with a backend diagnostic until a later compatible probe succeeds. Other desktop environments can implement the same `ExistingAppActivator` contract.
 
 ## Existing-window commands
 
@@ -51,6 +60,16 @@ tests alone cannot establish live visual behavior.
 `RESTORE_APP`, `MINIMIZE_APP`, `MAXIMIZE_APP`, `UNMAXIMIZE_APP`, `FULLSCREEN_APP`, `UNFULLSCREEN_APP`, and `CLOSE_APP_WINDOW` have separate settings permissions from `OPEN_APP`. Existing settings migrate with both new permissions disabled. The GNOME extension accepts only an exact registered desktop ID. When an app has multiple windows, it targets the focused window only if that window belongs to the named app; otherwise it asks the user to focus the desired window and repeat the command. This rule also applies to raising an existing app with `OPEN_APP`. Restore never launches a missing app. Unmaximize means returning to normal size and also exits fullscreen if needed. Close sends a normal window close request and never kills a process; the app may keep running in its tray or ask about unsaved work. Full application quit is a separate future action.
 
 `GnomeAppWindowController` receives an opaque window token and checks the state of that exact window before returning success. A sent request alone is not a confirmed result. The extension returns only state flags and the token, never a window title or content. On an unsupported session or when the updated extension has not loaded yet, the window commands are unavailable. This GNOME-specific adapter sits behind `AppWindowController`, so other platforms can implement the same contract without changing command understanding. The control center exposes separate opt-in checkboxes for non-closing window controls and close, scoped to the selected applications.
+
+<div dir="rtl">
+
+**قرارداد فعلی بستن پنجره، F11:** نام برنامه، مجوز close و پاسخ گفتاری به پیشنهاد نام/عمل، رضایت بستن یک پنجرهٔ نامعلوم محسوب نمی‌شوند. بستن مستقیم و شماره‌ای از همان رابط `QtControlConfirmation` و تصمیم یک‌بارمصرف `ControlApproval` استفاده می‌کنند. هشدار احتمال ازدست‌رفتن کار ذخیره‌نشده یا فرایند در حال اجرا، عمل بستن و شناسهٔ برنامه/پنجره را نمایش می‌دهد. Terminal و برنامهٔ معمولی تابع همین قراردادند؛ مسیر مستقل دو تأیید power تغییر نکرده است.
+
+`PrepareWindowClose` فقط یک هدف را مشاهده می‌کند؛ برای انتخاب شماره‌ای، snapshot موجود ملاک است و گرفتن ورودی انحصاری picker پیش از نمایش دکمه‌های Qt آزاد می‌شود. مشاهده شامل برنامه/PID/token/نسل و مهلت ثابت ده‌ثانیه‌ای است. پس از تأیید، `CloseConfirmedWindow` همان نسل را یک‌بار مصرف و در همان نوبت حلقهٔ GNOME، هویت و قابلیت بستن را دوباره بررسی می‌کند. تعویض پنجره یا PID، تغییر تمرکز حتی با بازگشت، تغییر snapshot، نسل نامنطبق و انقضا مانع بستن هستند. روش‌های قدیمیِ close بدون این اتصال، درخواست را رد می‌کنند؛ نبود رابط تأیید نیز اجرا نمی‌شود.
+
+فقط درخواست معمول [`Meta.Window.delete`](https://mutter.gnome.org/meta/method.Window.delete.html) ارسال می‌شود؛ هیچ kill، پاسخ به dialog ذخیره‌سازی یا تکرار خودکار close وجود ندارد. باقی‌ماندن پنجره، از جمله هنگام پرسش ذخیره‌سازی، موفقیت گزارش نمی‌شود. زمان افزونه از ساعت یکنواخت [`GLib.get_monotonic_time`](https://docs.gtk.org/glib/func.get_monotonic_time.html) می‌آید. افزونهٔ به‌روز باید نصب و بارگذاری شود؛ افزونهٔ قدیمی مسیر جایگزین بدون تأیید ایجاد نمی‌کند. آزمون‌های قطعی Python/Qt/GJS جای آزمون زندهٔ GNOME/Wayland را نمی‌گیرند؛ آزمون زندهٔ Terminal، ویرایشگر با کار ذخیره‌نشده و رفتار تمرکز dialog هنوز انجام نشده است.
+
+</div>
 
 ## Components
 

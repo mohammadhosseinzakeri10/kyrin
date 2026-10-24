@@ -3,9 +3,11 @@
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from runpy import run_path
+from threading import Event
 
 import pytest
 
+from kyrin.actions.models import ActionRequest
 from kyrin.stt.device import ComputeDevice
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
@@ -74,6 +76,19 @@ def test_manual_stop_closes_controller_and_engine_without_a_timer(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     runtime_globals = run.__globals__
+    completed = Event()
+    printed = 0
+    print_action = runtime_globals["print_action_decision"]
+
+    def show_action(*args: object, **kwargs: object) -> None:
+        nonlocal printed
+        print_action(*args, **kwargs)
+        if isinstance(args[0], ActionRequest):
+            printed += 1
+            if printed == 2:
+                completed.set()
+
+    monkeypatch.setitem(runtime_globals, "print_action_decision", show_action)
 
     class FakeEngine:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -92,6 +107,7 @@ def test_manual_stop_closes_controller_and_engine_without_a_timer(
         def events(self) -> Iterator[TranscriptUpdate]:
             yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
             yield TranscriptUpdate(1, "Open browser", TranscriptStatus.FINAL, "en")
+            assert completed.wait(2), "ordered command outputs did not finish"
             raise KeyboardInterrupt
 
         def stop(self) -> None:

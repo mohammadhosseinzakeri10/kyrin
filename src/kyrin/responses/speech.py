@@ -5,11 +5,12 @@ import subprocess
 from collections.abc import Callable
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
-from time import sleep
+from time import monotonic, sleep
 from typing import Protocol
 
 from kyrin.commands.models import ResponseChannel
 from kyrin.responses.presenter import PresentedResponse
+from kyrin.responses.speech_dispatcher import LocalSpeechConnection
 
 
 class SpeechSynthesisError(RuntimeError):
@@ -46,38 +47,77 @@ class SpeechDispatcherSynthesizer:
         self._timeout_s = timeout_s
         self._rate = rate
         self._voice_type = voice_type
+        self._cancelled = Event()
+        self._is_playing = False
+        self.last_playback_end = 0.0
+
+    @property
+    def is_playing(self) -> bool:
+        return self._is_playing
+
+    def interrupt(self) -> None:
+        self._cancelled.set()
+
+    def _playing(self, value: bool) -> None:
+        if self._is_playing and not value:
+            self.last_playback_end = monotonic()
+        self._is_playing = value
 
     def speak(self, text: str, language: str) -> None:
         if not text.strip():
             return
+        self.speak_if_current(text, language, lambda: True)
+
+    def speak_if_current(
+        self, text: str, language: str, is_current: Callable[[], bool]
+    ) -> None:
+        if self._is_playing:
+            raise SpeechSynthesisError("previous system playback stop is unconfirmed")
+        self._cancelled.clear()
         primary = language.replace("_", "-").split("-", maxsplit=1)[0].casefold()
+        if not primary.isalpha():
+            raise SpeechSynthesisError("invalid speech language")
+        connection = None
         try:
-            arguments = [
-                self._executable,
-                "--wait",
-                "--output-module",
-                "espeak-ng",
-                "--application-name",
-                "KYRIN",
-                "--rate",
-                str(self._rate),
-                "--language",
+            if not is_current():
+                return
+            try:
+                connection = LocalSpeechConnection(self._timeout_s)
+            except FileNotFoundError, ConnectionRefusedError:
+                # Keep the existing local service autospawn behavior, without
+                # submitting any speech or touching another client's queue.
+                subprocess.run(
+                    [self._executable, "--list-output-modules"],
+                    capture_output=True,
+                    timeout=2,
+                    check=True,
+                )
+                connection = LocalSpeechConnection(self._timeout_s)
+            connection.speak(
+                text,
                 primary,
-            ]
-            if self._voice_type != "default":
-                arguments.extend(("--voice-type", self._voice_type))
-            arguments.append(text)
-            result = subprocess.run(
-                arguments,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout_s,
-                check=False,
+                self._rate,
+                self._voice_type,
+                self._cancelled,
+                is_current,
+                self._playing,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
+            if connection is not None and connection.output_uncertain:
+                raise SpeechSynthesisError(
+                    "System voice stop is unconfirmed; microphone stays guarded. "
+                    "Restore the speech service and restart KYRIN."
+                ) from exc
             raise SpeechSynthesisError("offline speech playback failed") from exc
-        if result.returncode != 0:
-            raise SpeechSynthesisError("offline speech playback failed")
+        finally:
+            if connection is not None and connection.output_uncertain:
+                # A lost control connection is not proof that the service
+                # stopped speaking. Retain the conservative microphone guard.
+                self._is_playing = True
+            else:
+                self._playing(False)
+            if connection is not None:
+                connection.close()
 
 
 class ResponseSpeaker:
@@ -102,7 +142,7 @@ class ResponseSpeaker:
             tuple[
                 int,
                 PresentedResponse,
-                Callable[[str, str], None] | None,
+                Callable[[str, str, Callable[[], bool]], None] | None,
                 Callable[[], bool] | None,
             ]
         ] = Queue(maxsize=max_pending)
@@ -124,6 +164,18 @@ class ResponseSpeaker:
         return self._active.is_set()
 
     @property
+    def is_playing(self) -> bool:
+        """Echo guard state; queueing and known model synthesis are not audio.
+
+        Backends without playback telemetry retain the conservative guard.
+        """
+        playing = getattr(self._synthesizer, "is_playing", None)
+        if playing is None:
+            return self.is_active
+        ended = getattr(self._synthesizer, "last_playback_end", 0.0)
+        return bool(playing) or (ended > 0 and monotonic() < ended + self._tail_s)
+
+    @property
     def is_enabled(self) -> bool:
         with self._lock:
             return self._enabled
@@ -132,7 +184,7 @@ class ResponseSpeaker:
         self,
         response: PresentedResponse,
         *,
-        speak: Callable[[str, str], None] | None = None,
+        speak: Callable[[str, str, Callable[[], bool]], None] | None = None,
         still_current: Callable[[], bool] | None = None,
     ) -> bool:
         """Queue voice without blocking capture; text is displayed by the caller."""
@@ -157,7 +209,7 @@ class ResponseSpeaker:
         self,
         response: PresentedResponse,
         *,
-        speak: Callable[[str, str], None] | None = None,
+        speak: Callable[[str, str, Callable[[], bool]], None] | None = None,
         still_current: Callable[[], bool] | None = None,
     ) -> bool:
         """Interrupt current voice and make this the only pending announcement."""
@@ -221,7 +273,31 @@ class ResponseSpeaker:
                         self._speaking = True
                 if current:
                     started = True
-                    (speak or self._synthesizer.speak)(response.text, response.language)
+
+                    def is_current(
+                        generation: int = generation,
+                        validity: Callable[[], bool] | None = still_current,
+                    ) -> bool:
+                        return (
+                            generation == self._generation
+                            and not self._closed.is_set()
+                            and (validity is None or validity())
+                        )
+
+                    if speak is not None:
+                        speak(response.text, response.language, is_current)
+                    else:
+                        guarded_speak = getattr(
+                            self._synthesizer, "speak_if_current", None
+                        )
+                        if callable(guarded_speak):
+                            guarded_speak(
+                                response.text,
+                                response.language,
+                                is_current,
+                            )
+                        else:
+                            self._synthesizer.speak(response.text, response.language)
             except SpeechSynthesisError as exc:
                 self._on_error(exc)
             finally:

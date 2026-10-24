@@ -5,9 +5,18 @@ from pathlib import Path
 from time import sleep
 from uuid import uuid4
 
+# A read-only handshake must not import GI or open a desktop connection.
+if __name__ == "__main__" and sys.argv[1:] == ["--capabilities"]:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from kyrin.backend_protocol import helper_manifest
+
+    print(helper_manifest("desktop_scroll-v1"))
+    raise SystemExit(0)
+
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from kyrin.actions.platforms.helper_lifecycle import HelperLifetime  # noqa: E402
 from kyrin.actions.platforms.telegram_portal_helper import (  # noqa: E402
     BUS,
     OBJECT,
@@ -21,8 +30,9 @@ from kyrin.actions.platforms.telegram_portal_helper import (  # noqa: E402
 from kyrin.app.permission_token import (  # noqa: E402
     permission_token_path,
     read_opaque_token,
-    save_opaque_token,
 )
+from kyrin.backend_protocol import BackendUnavailable, probe_gnome  # noqa: E402
+from kyrin.operations import run_process  # noqa: E402
 
 
 def _scroll(
@@ -115,6 +125,15 @@ def _scroll(
 
 
 def main() -> int:
+    grant_modes = {("grant",), ("grant-control",)}
+    if tuple(sys.argv[1:]) not in grant_modes:
+        status = probe_gnome(
+            "ActiveApp",
+            {"GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer"},
+            run=run_process,
+        )
+        if not status.ready:
+            raise BackendUnavailable(status)
     if sys.argv[1:] == ["grant"]:
         mode = "grant"
         expected = None
@@ -127,9 +146,7 @@ def main() -> int:
         if len(sys.argv) != 7:
             raise ValueError("expected app ID, PID, direction, steps, area, token")
         _, app_id, pid_text, direction, steps_text, area, token_name = sys.argv
-        if direction not in {"up", "down"} or area not in {
-            "center", "left", "right"
-        }:
+        if direction not in {"up", "down"} or area not in {"center", "left", "right"}:
             raise ValueError("invalid scroll direction or area")
         steps = int(steps_text)
         if not 1 <= steps <= 4:
@@ -151,7 +168,9 @@ def main() -> int:
     if mode == "scroll" and remembered is None:
         print("CONTROL_SETUP_REQUIRED", flush=True)
         return 3
-    connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    connection = HelperLifetime(
+        Gio.bus_get_sync(Gio.BusType.SESSION, None), token_path, remembered
+    )
     session: str | None = None
     try:
         created = _request(
@@ -179,7 +198,7 @@ def main() -> int:
         if not isinstance(replacement, str):
             token_path.unlink(missing_ok=True)
             return 1
-        save_opaque_token(token_path, replacement)
+        connection.rotate(replacement)
         if mode == "grant":
             print("SCROLL_GRANT_READY", flush=True)
             return 0
@@ -217,11 +236,15 @@ def main() -> int:
                 )
             except GLib.Error:
                 pass
+        connection.close()
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except BackendUnavailable as exc:
+        print("BACKEND_UNAVAILABLE:" + exc.status.reason, flush=True)
+        raise SystemExit(1) from exc
     except (GLib.Error, RuntimeError, ValueError, OSError, KeyError, TypeError) as exc:
         print(f"Scroll unavailable: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

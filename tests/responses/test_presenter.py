@@ -9,6 +9,7 @@ from kyrin.actions.models import (
     ActionNotice,
     ActionNoticeReason,
     ActionOutcome,
+    ActionRequest,
     ActionResult,
 )
 from kyrin.audio.audio_backlog import BacklogNotice, BacklogState
@@ -18,6 +19,7 @@ from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.models import (
     CommandIntent,
     CommandKind,
+    CommandResolution,
     ResponseChannel,
     ResponseKind,
     ResponseRequest,
@@ -378,3 +380,39 @@ def test_spoken_command_language_reaches_late_action_feedback() -> None:
     assert response.text == (
         "The request was accepted; completion has not been confirmed."
     )
+
+
+@pytest.mark.parametrize("language", ["fa", "en"])
+def test_dispatched_control_has_distinct_user_message(language: str) -> None:
+    intent = CommandIntent(CommandKind.VISIBLE_CONTROL, "Settings")
+    presenter = ResponsePresenter(language)
+    feedback = ActionFeedback(
+        KEY,
+        intent,
+        ActionOutcome.DISPATCHED_UNVERIFIED,
+        ResponseChannel.TEXT_ONLY,
+        language=language,
+    )
+    text = presenter.present(feedback).text
+    assert text == (
+        "ورودی ارسال شد؛ نتیجهٔ کار هنوز تأیید نشده است."
+        if language == "fa"
+        else "I sent the input, but completion has not been confirmed."
+    )
+    gate = ActionGate(
+        ActionPolicy(
+            allow_focused_control=True,
+            supported_kinds=frozenset({CommandKind.VISIBLE_CONTROL}),
+        )
+    )
+    request = gate.observe(
+        CommandResolution(KEY.segment_id, intent, stream_id=KEY.stream_id)
+    )
+    assert isinstance(request, ActionRequest)
+    event = gate.record_result(ActionResult(KEY, ActionOutcome.DISPATCHED_UNVERIFIED))
+    assert event.outcome is ActionOutcome.DISPATCHED_UNVERIFIED
+    assert gate.verified_context.active_app is None
+    with pytest.raises(ValueError, match="only confirmed"):
+        ActionResult(
+            KEY, ActionOutcome.DISPATCHED_UNVERIFIED, observed_active_app="app"
+        )

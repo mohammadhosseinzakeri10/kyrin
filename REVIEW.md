@@ -1,548 +1,639 @@
 <div dir="rtl" lang="fa">
 
-# بازبینی معماری، قابلیت اعتماد و کنترل رابط کاربری Kyrin
+# بازبینی جامع Kyrin: معماری، قابلیت اطمینان و تعامل با رابط کاربری
 
-تاریخ: ۲۰۲۶/۱۰/۲۳ — مبنا: وضعیت جاری پروژه، شامل تغییرات ثبت‌نشدهٔ موجود؛ آخرین commit ثبت‌شده: `d67013d3ebe5a4a2f3027db056677f665b749485`.
+تاریخ: ۲۰۲۶/۱۰/۲۳ — مبنای بررسی: commit `63df3390427adb49b9f4340eee37edd860d0f3d3`؛ در آغاز بررسی، درخت کاری Git پاک بود. این گزارش جایگزین گزارش پیشین همین فایل می‌شود و اصلاحات دو commit اخیر را در نظر می‌گیرد. هیچ کد، تنظیم، تست یا فایل دیگری تغییر نکرده است.
 
-## ۱. نتیجهٔ اصلی و حدود بررسی
+## ۱. نتیجهٔ اصلی
 
-**توصیهٔ اصلی: پیش از افزودن مدل بینایی یا قابلیت وب‌کم، قرارداد اجرای عمل را اصلاح کنید.** مشکل کلیک ترکیبی از تشخیص متن، اتصال درخواست به هدف درست، تبدیل مختصات، تازگی مشاهده و تأیید نتیجه است. تعویض OCR فقط یکی از این حلقه‌ها را تغییر می‌دهد. معماری فعلی مرزهای مفیدی دارد و بازنویسی کامل آن توجیه ندارد؛ بهترین مسیر، تکامل تدریجی به یک هستهٔ رویدادمحور با ابزارهای دارای پیش‌شرط و پس‌شرط و یک مجری واحد برای ورودی سیستم‌عامل است.
+**پیشنهاد اصلی، اصلاح قرارداد عمل و چرخهٔ مشاهده تا تأیید نتیجه است؛ تعویض OCR به‌تنهایی مشکل کلیک را حل نمی‌کند.** برای نسخهٔ فعلی، سه عامل باید پیش از انتخاب مدل بزرگ‌تر بررسی شوند:
 
-این گزارش **تحلیل** است. هیچ اصلاحی در کد، تنظیمات، تست‌ها، مدل‌ها یا مستندات موجود انجام نشده است. تنها خروجی ایجادشده توسط این بررسی همین فایل است.
+۱. مقایسهٔ بایت‌های PNG به‌جای پیکسل‌های تصویر می‌تواند حتی پنجرهٔ ثابت را «تغییرکرده» تشخیص دهد؛ GNOME زمان ساخت تصویر را داخل PNG می‌نویسد.
+۲. سیاست جدید، تقریباً تمام نام‌های دلخواه و همهٔ درخواست‌های روشن/خاموش را پیش از OCR مسدود می‌کند؛ از جمله `Apply All Devices`.
+۳. ارسال کلیک هنوز به معنی تحقق نتیجه نیست؛ ابزار عمومی بررسی پس از کلیک ندارد.
 
-### روش و میزان اطمینان
+**[CONFIRMED]** این پروژه صرفاً یک اسکریپت صوتی یا نمونهٔ بدون تست نیست: قراردادهای جدا، تزریق وابستگی، صف محدود عمل، مجوزها، مشاهدهٔ GNOME، چند backend صوت/متن و تاریخچهٔ محلی دارد. در مقابل، قراردادهای lifecycle، لغو، تازگی هدف و نتیجه در همهٔ مسیرها یکسان نیستند. بازنویسی کامل توجیه ندارد؛ تکامل به یک هماهنگ‌کنندهٔ رویدادمحور با ابزارهای دارای پیش‌شرط و پس‌شرط، مناسب‌ترین مسیر است. شواهد ساختار: [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:271)، [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:102)، [gate.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/gate.py:57).
 
-- `[CONFIRMED]`: رفتار یا ساختار مستقیماً در کد دیده شده، یا با اجرای کنترل‌شدهٔ همان منطق و وابستگی‌های ساختگی بازتولید شده است. این برچسب به‌تنهایی به معنی مشاهدهٔ خطا روی دسکتاپ واقعی نیست.
-- `[LIKELY]`: نتیجهٔ محتمل بر اساس شواهد مشخص؛ شرایط و روش اعتبارسنجی آن نوشته شده است.
-- `[SPECULATION]`: فرضیه‌ای که هنوز شواهد کافی ندارد و باید آزمایش شود.
-- «پیشنهاد» و «معیار پذیرش» مشخص‌کنندهٔ طراحی آینده‌اند، نه توصیف قابلیت موجود. شدت‌های `Critical / High / Medium / Low` اولویت مهندسی این پروژه‌اند و امتیاز رسمی امنیتی نیستند.
+### روش، دامنه و محدودیت شواهد
 
-**[CONFIRMED] پوشش بررسی:** ساختار تمام فایل‌های نسخه‌دار و فایل‌های جدیدِ خارج از ignore فهرست شد؛ فایل‌های متنی کد، پیکربندی، اسکریپت‌ها، تست‌ها و مستندات به‌صورت ماشینی خوانده شدند؛ مسیرهای اصلی صوت، تصمیم، مجوز، کلیک، Telegram، تاریخچه و چرخهٔ عمر به‌صورت عمیق بررسی شدند. در شمارش ایستای تست‌ها ۹۸۲ تعریف تابع تست وجود داشت؛ این عدد تعداد حالت‌های حاصل از parametrization نیست. بررسی دستی تک‌تک خطوط همهٔ تست‌ها، کد وابستگی‌های ثالث و وزن‌های باینری مدل‌ها ادعا نمی‌شود. [راهنمای ساختار](/mnt/ai_projects/KYRIN/docs/development/PROJECT_LAYOUT.md:1) و [زمینهٔ مهندسی](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:1) نیز در کنار کد استفاده شدند.
+- `[CONFIRMED]`: مستقیماً در کد دیده شده یا با منطق واقعی و وابستگی‌های ساختگی بازتولید شده است. به معنی آزمون موفق روی دسکتاپ واقعی نیست.
+- `[LIKELY]`: استنتاج قوی؛ شواهد و شرط وقوع مشخص شده‌اند.
+- `[SPECULATION]`: فرضیهٔ نیازمند آزمایش؛ روش بررسی نوشته شده است.
+- «پیشنهاد» و «معیار پذیرش» توصیف آینده‌اند. شدت‌ها اولویت مهندسی این محصول‌اند؛ امتیاز رسمی امنیتی نیستند.
 
-**[CONFIRMED] اعتبارسنجی انجام‌شده:** parsing ایستای فایل‌های Python بدون خطای syntax؛ اجرای `ruff check --no-cache --statistics src tests scripts` با خروج موفق؛ بازتولیدهای درون حافظه برای اتصال اشتباه هدف، scroll نامعتبر، پایان فایل صوتی، حالت انتظار، نگاشت مختصات و ساخت عبارت فارسی. در بازتولیدها عملیات سیستم‌عامل جایگزین ساختگی داشت و نوشتن فایل و ایجاد subprocess مسدود بود. کل مجموعهٔ `pytest` و `mypy` اجرا نشد؛ آزمون زندهٔ میکروفون، OCR روی صفحهٔ شخصی، کلیک واقعی و benchmark مدل نیز انجام نشد. عدد تاریخی «۱۳۳۱ passed» در [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:100)، نتیجهٔ این بازبینی نیست.
+**[CONFIRMED] دامنه:** ۴۵۹ فایل نسخه‌دار فهرست و برای ممیزی محتوایی/ایستا خوانده شدند: ۱۹۳ فایل Python در `src`، تعداد ۱۳۳ فایل تست Python، تعداد ۲۱ اسکریپت Python، تعداد ۶۲ سند Markdown و پنج فایل JavaScript. فایل‌های Python با AST تجزیه شدند؛ مسیرهای اصلی ورود، ترکیب وابستگی‌ها، صوت، فهم فرمان، سیاست، کلیک، Telegram، خروجی و حافظه عمیق‌تر بررسی شدند. همهٔ خطوط تمام تست‌ها و مستندات به‌صورت دستی بازبینی نشده‌اند؛ وزن مدل، کد کتابخانه‌های ثالث و داده‌های شخصی خارج از دامنه‌اند. [نقشهٔ پروژه](/mnt/ai_projects/KYRIN/docs/development/PROJECT_LAYOUT.md:1) و [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:1) در کنار کد بررسی شدند؛ مستندات تاریخی به‌تنهایی اثبات رفتار فعلی نیستند.
 
-**[CONFIRMED] محیط قابل مشاهده:** متغیرهای نشست این فرایند `XDG_SESSION_TYPE=wayland`، `WAYLAND_DISPLAY=wayland-0` و `XDG_CURRENT_DESKTOP=ubuntu:GNOME` هستند. Python سیستم و محیط پروژه در زمان بررسی `3.14.4` بود. بنابراین نحو جدیدی مانند `except OSError, ValueError:` را در این پروژه نباید به‌اشتباه syntax error دانست. [pyproject.toml](/mnt/ai_projects/KYRIN/pyproject.toml:11) نیز Python 3.14 را الزام می‌کند. وجود متغیر محیطی، موفقیت دسترسی portal یا نصب بودن نسخهٔ جاری extension را اثبات نمی‌کند.
+**[CONFIRMED] اعتبارسنجی این بررسی:**
 
-**فرض‌های صریح:** مقدار دقیق VRAM، مدل‌های انتخاب‌شده در نشست زنده، چیدمان مانیتورها، scale نمایشگرها و محتوای پایگاه دادهٔ شخصی بررسی نشده‌اند. پیشنهاد تخصیص CPU/GPU مشروط به اندازه‌گیری همین موارد است. سند تازه و خارج از Git یعنی [AGENTS1.md](/mnt/ai_projects/KYRIN/AGENTS1.md:1) به‌عنوان یادداشت طراحی کلیک دیده شد؛ ساختار پیشنهادی آن به‌معنای پیاده‌سازی موجود نیست و در این کارِ تحلیل، فایل یا آزمایش عملی خواسته‌شده در آن ایجاد نشد.
-
-## ۲. پروژه اکنون چه می‌کند؟
-
-### ساختار و نقطهٔ شروع
-
-| بخش | مسئولیت مشاهده‌شده و محل اصلی |
+| بررسی | نتیجه و حدود |
 |---|---|
-| ورودی برنامه | `[CONFIRMED]` دستور `kyrin-desktop` به `kyrin.app.qt.main:main` می‌رسد؛ ساخت Qt، تنظیمات، ابزارهای مشاهده و کنترل: [pyproject.toml](/mnt/ai_projects/KYRIN/pyproject.toml:54)، [main.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:163). |
-| ترکیب وابستگی‌ها | `[CONFIRMED]` انتخاب STT، interpreter، policy، executor، تاریخچه، صوت و پاسخ در `UbuntuSessionFactory`: [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:271). |
-| دریافت و پردازش صوت | `[CONFIRMED]` قرارداد مستقل `AudioInput`، میکروفون، تبدیل نرخ، قاب‌بندی، VAD، کنترل backlog و مسیر جداگانهٔ فایل: [live_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/live_speech_pipeline.py:1)، [file_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/file_speech_pipeline.py:1). |
-| فهم فرمان | `[CONFIRMED]` مسیر سریع قواعد فارسی/انگلیسی، مسیر تکمیلی مدل محلی، clarification و فرمان چندمرحله‌ای: [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:213)، [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:195)، [coordinator.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/coordinator.py:107). |
-| سیاست و اجرا | `[CONFIRMED]` `ActionGate` و صف FIFO محدود، زنجیرهٔ executorهای برنامه و desktop، همراه با نتیجهٔ ساخت‌یافته: [gate.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/gate.py:25)، [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:59). |
-| مشاهده و کنترل Linux | `[CONFIRMED]` GNOME extension برای پنجره و تصویر، AT-SPI، OCR و RemoteDesktop portal برای ورودی؛ به‌جای اتکا به X11: [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:55)، [extension.js](/mnt/ai_projects/KYRIN/integrations/gnome-shell/window-capture-prototype@kyrin.local/extension.js:303). |
-| خروجی | `[CONFIRMED]` پاسخ متنی، نشانگر GNOME و صف TTS مستقل: [speech.py](/mnt/ai_projects/KYRIN/src/kyrin/responses/speech.py:83). |
-| حافظه | `[CONFIRMED]` تاریخچهٔ متن نهایی با SQLite از قبل وجود دارد و آخرین شش متن به context می‌رسند؛ این هنوز حافظهٔ بلندمدتِ ساخت‌یافتهٔ ترجیحات و رویدادها نیست: [history.py](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:45)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:495). |
+| parsing تمام ۳۴۸ فایل Python | بدون خطای نحوی با Python پروژه؛ این پروژه Python 3.14 می‌خواهد و نحو جدید `except A, B:` در آن معتبر است. |
+| `ruff check --no-cache --statistics src tests scripts` | خروج موفق؛ بدون diagnostic. |
+| `ruff format --check --no-cache --output-format concise src tests scripts` | ناموفق از نظر قالب‌بندی: ۷۷ فایل نیازمند قالب‌بندی، ۲۷۱ فایل مطابق قالب. هیچ فایل اصلاح نشد. |
+| آزمون‌های منتخب | `71 passed, 2 deselected`؛ هندسه، تطبیق متن، انتقال هندسه، کلیک عمومی، برنامهٔ عمل، صف و runtime. |
+| محافظ آزمون | نوشتن فایل، ساخت/حذف مسیر، subprocess واقعی و اتصال شبکه در فرایند آزمون مسدود شد؛ bytecode، cache و بارگذاری خودکار pluginهای pytest غیرفعال بودند. |
+| اجرای اولیهٔ آزمون منتخب | یک fixture نیازمند فایل موقت با محافظ برخورد کرد؛ این خطای محصول نبود. آن آزمون و آزمون تاریخچهٔ نیازمند دیتابیس موقت کنار گذاشته شدند؛ اجرای نهایی بدون خطا بود. |
+| بازتولیدهای مستقل در حافظه | PNG هم‌پیکسل با metadata متفاوت؛ رد برچسب‌ها با policy؛ پذیرفتن جهت مخالف scroll؛ inference روی partial؛ ادامهٔ برنامهٔ درحال‌اجرا پس از لغو صف؛ تفاوت عبارت فارسی در locator و inventory. |
+| اجرا نشده | کل pytest، mypy، آزمون زندهٔ میکروفون/کلیک/portal، دسترسی به محتوای صفحه، اجرای مدل واقعی و benchmark انتهابه‌انتها. |
 
-**[CONFIRMED] وابستگی‌ها:** هسته شامل `numpy`، `onnxruntime`، `soxr` و `sounddevice` است؛ Qt و `sherpa-onnx` در extra دسکتاپ و چند backend دیگر در extraهای اختیاری قرار دارند. علاوه بر pip، مسیرهای عملی به ابزارهایی مانند `busctl`، portal، GNOME extension، runtimeهای STT/OCR/TTS و برای فایل صوتی `ffmpeg` وابسته‌اند. تنها نصب بسته‌های Python برای همهٔ قابلیت‌ها کافی نیست. [pyproject.toml](/mnt/ai_projects/KYRIN/pyproject.toml:18)، [LOCAL_AUDIO_FILE_INPUT.md](/mnt/ai_projects/KYRIN/docs/audio/LOCAL_AUDIO_FILE_INPUT.md:1).
+**[CONFIRMED] محیط قابل مشاهده:** Ubuntu 26.04.1، GNOME Shell 50.1، `XDG_SESSION_TYPE=wayland`، `WAYLAND_DISPLAY=wayland-0` و `XDG_CURRENT_DESKTOP=ubuntu:GNOME`. پرس‌وجوی `nvidia-smi` در محیط این بررسی نتوانست با driver ارتباط بگیرد؛ این نتیجه برای اعلام خرابی GPU میزبان یا تعیین VRAM کافی نیست. مقدار VRAM، scale و چیدمان واقعی مانیتورها، مدل انتخاب‌شده و نسخهٔ extension واقعاً بارشده تأیید نشده‌اند. اطلاعات تاریخی سخت‌افزار در [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:322) جای اندازه‌گیری جاری را نمی‌گیرد.
+
+**فرض‌های صریح:** هدف، دسکتاپ محلی مالک با مدل‌های محلی است؛ شبکهٔ ابری و ورود به حساب جدید پیشنهاد پیش‌فرض نیستند. حفظ رفتارهای امنِ رد عمل در ابهام، بر افزایش پوشش به قیمت کلیک نامطمئن اولویت دارد. هیچ نصب، دانلود، اتصال حساب، اجرای sudo، درخواست مجوز جدید یا تعامل واقعی با دسکتاپ انجام نشد.
+
+## ۲. پروژه اکنون چه می‌کند و چگونه کار می‌کند؟
+
+### ساختار و نقاط ورود
+
+| بخش | مسئولیت مشاهده‌شده |
+|---|---|
+| ورودی دسکتاپ | `kyrin-desktop -> kyrin.app.qt.main:main`، پنجرهٔ PySide6، نمونهٔ واحد، settings، سرویس مشاهده و workerها؛ [pyproject.toml](/mnt/ai_projects/KYRIN/pyproject.toml:54)، [main.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:163). |
+| ترکیب وابستگی‌ها | `UbuntuSessionFactory` مدل، مجوز، interpreter، gate، executor، صوت و حافظه را می‌سازد؛ [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:271). |
+| صوت | `AudioInput` مستقل از `MicrophoneInput`؛ دریافت، تبدیل نرخ، framing، Silero VAD، backlog و STT؛ [live_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/live_speech_pipeline.py:35). |
+| فایل صوتی | ffmpeg فایل را بدون ساخت نسخهٔ PCM روی دیسک به مسیر ترتیبی VAD/STT می‌دهد؛ همان مجوزهای عمل مصرف می‌شوند؛ [file_input.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/file_input.py:35)، [file_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/file_speech_pipeline.py:30). |
+| فهم فرمان | قواعد فارسی/انگلیسی، سپس مدل محلی Ollama و بررسی مستقل operation/target؛ clarification، fragment و plan؛ [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:213)، [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:246). |
+| عمل | gate با مجوز صریح، صف FIFO و executorهای برنامه/پنجره/Telegram/scroll/control؛ [gate.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/gate.py:25)، [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:59). |
+| مشاهده و ورودی Linux | GNOME extension، D-Bus، AT-SPI، OCR و RemoteDesktop portal؛ قرارداد مشترک `CaptureGeometry` اکنون وجود دارد؛ [capture_geometry.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/capture_geometry.py:19). |
+| پاسخ و حافظه | متن، نشانگر GNOME، صف TTS و SQLite برای متن نهایی؛ [speech.py](/mnt/ai_projects/KYRIN/src/kyrin/responses/speech.py:83)، [history.py](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:45). |
+
+همهٔ ردیف‌های جدول بالا **[CONFIRMED]** هستند. وابستگی‌های اصلی `numpy / onnxruntime / soxr / sounddevice` و extraهای اختیاری Qt، STT و TTS در [pyproject.toml](/mnt/ai_projects/KYRIN/pyproject.toml:18) آمده‌اند. ابزارهای سیستم مانند `busctl`، GNOME extension، portal و runtime مدل‌ها نیز لازم‌اند؛ نصب pip به‌تنهایی همهٔ قابلیت‌ها را آماده نمی‌کند.
 
 ### جریان داده و کنترل
 
 <div dir="ltr">
 
 ```text
-Microphone / local audio file
-          |
-          v
-capture -> resample/frame -> Silero VAD -> STT worker
-                                             |
-                                      partial / final events
-                                             |
-                                             v
-                                  LiveCommandRuntime
-                                             |
-                        +--------------------+-------------------+
-                        |                                        |
-                 voice-mode handling                  CommandCoordinator
+Microphone -> capture queue -> resample / frames -> VAD -> audio backlog
                                                           |
-                                               rules -> optional LLM
+                                                          v
+                                                    STT worker
                                                           |
-                                               final typed command
+Local audio file -> ffmpeg -> ordered VAD / STT -----------+
                                                           |
-                                                 bounded action FIFO
+                                                  partial / final events
                                                           |
-                                                      ActionGate
+                       LiveCommandRuntime -> CommandCoordinator
                                                           |
-                                                  executor adapters
+                         fast rules -> optional local model -> validators
                                                           |
-                                      GNOME / portal / application actions
+                                              final Command / Plan
                                                           |
-                                             ActionResult / observation
+                                       bounded action queue -> ActionGate
                                                           |
-                                               text / mascot / TTS
+                         app / window / Telegram / desktop executors
+                                                          |
+                                   OS input -> result / some verification
+                                                          |
+                                               text / GNOME status / TTS
 
-Focused window -> capture / AT-SPI / OCR -> options + target evidence
-Final transcripts -> SQLite history -> bounded recent context
+Focused window -> capture geometry / AT-SPI / OCR -> target evidence
+Final transcript -> bounded SQLite history -> recent text context
+Power confirmation flow and Telegram selection have additional workers.
 ```
 
 </div>
 
-**[CONFIRMED] نکتهٔ معماری:** اجرای عمل صف مستقل دارد، ولی فراخوانی interpreter و مدل در مصرف‌کنندهٔ رویداد صوتی همگام است. شکل بالا نباید به‌عنوان وجود worker مستقل برای همهٔ مراحل تعبیر شود؛ این مسئله در R10 بررسی می‌شود.
+**[CONFIRMED] نکتهٔ جریان:** capture/VAD/STT و اجرای عمل worker دارند، اما تفسیر فرمان و فراخوانی مدل در مصرف‌کنندهٔ رویدادها همگام‌اند. نمودار به معنی مستقل بودن تمام مراحل نیست؛ پیامد آن در F07 آمده است.
 
-**[CONFIRMED] تفاوت با توصیف اولیه:** در checkout بررسی‌شده اجرای آزاد دستور shell از متن گفتار پیدا نشد. کنترل Ptyxis برای پنجره، tab و preferences آرگومان‌های ثابت دارد؛ `shell=True` یا `eval` برای متن فرمان دیده نشد. بنابراین «دستیار دارای اجرای shell دلخواه» توصیف دقیقی از این نسخه نیست. [ptyxis.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/ptyxis.py:12)، [ptyxis.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/ptyxis.py:123). قابلیت عمومی کلیک و تاریخچه نیز از توصیف اولیه جلوترند؛ وب‌کم، تشخیص چهره و احراز هویت گوینده در مسیر اجرایی بررسی‌شده وجود ندارند.
+**[CONFIRMED] تفاوت با شرح اولیه:** در نسخهٔ فعلی مسیر آزاد «گفتار -> دستور shell دلخواه» پیدا نشد. Ptyxis با flagهای ثابت، tab/window/preferences را کنترل می‌کند؛ شواهدی از اجرای متن STT با `shell=True`، `eval` یا `bash -c` در این مسیر وجود ندارد. همچنین حافظهٔ متنی و کلیک عمومی از قبل وجود دارند. وب‌کم، تشخیص چهره/گوینده و حلقهٔ خودمختار عمومی در مسیر اجرایی بررسی‌شده پیاده نشده‌اند. [ptyxis.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/ptyxis.py:12)، [linux.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/linux.py:35)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:495).
 
-## ۳. یافته‌های اولویت‌دار: کلیک و اتصال فرمان به هدف
+### وضعیت اصلاحات پس از گزارش قبلی
 
-### R01 — گزینهٔ انتخاب‌شدهٔ مدل الزاماً همان هدف درخواست‌شده نیست — Critical
+شناسه‌های R در این جدول به گزارش پیشین اشاره دارند؛ شناسه‌های F در ادامه، یافته‌های این گزارش‌اند.
 
-**[CONFIRMED]** در [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:379)، وجود `target_phrase` در گفتار بررسی می‌شود، اما انتخاب کنترل با `target_id` انجام می‌شود و intent نهایی از `option.label` ساخته می‌شود. در مسیر دارای گزینه‌های ازپیش‌خوانده‌شده، هیچ الزام مستقلی وجود ندارد که این label با هدف گفتار هم‌معنا یا مطابق alias تأییدشده باشد. مسیر خاصِ کشف بعدیِ گزینهٔ دقیق، این خلأ را در تمام مسیرها برطرف نمی‌کند.
+| موضوع قدیمی | وضعیت فعلی مشاهده‌شده |
+|---|---|
+| R01: شناسهٔ گزینه می‌توانست با هدف گفتار متفاوت باشد | **[CONFIRMED] اصلاح شده:** تطابق `_words(option.label) == _words(target)` الزامی است؛ [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:449). خطای قدیمی نباید دوباره فعال گزارش شود. |
+| R02: پذیرش scroll برای نفی/گفتار غیرامری | **[CONFIRMED] محدود شده:** `_source_is_instruction` افزوده شده؛ ولی جهت operation هنوز مستقل بررسی نمی‌شود؛ F09. |
+| R03/R04: نبود geometry مشترک | **[CONFIRMED] اصلاح ساختاری:** scale، padding، viewport، token، capture ID و timestamp مشترک شده‌اند و به Telegram می‌رسند؛ [test_capture_geometry_flow.py](/mnt/ai_projects/KYRIN/tests/actions/test_capture_geometry_flow.py:25). محدودیت producer و legacy باقی است؛ F13. |
+| R05: نبود هویت پنجره/تازگی | **[CONFIRMED] بهبود:** helperهای OCR اکنون token، سن capture و محتوا را بررسی می‌کنند. این حفاظت برای همهٔ مسیرهای AT-SPI و فاصلهٔ فهم فرمان تا capture کامل نیست؛ F14. |
+| R11: لغو فرمان‌های در صف/نتیجهٔ دیررس مدل | **[CONFIRMED] بهبود:** generation زمان submit بررسی و صف باطل می‌شود؛ [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:294). برنامهٔ شروع‌شده و helper درحال‌اجرا هنوز لغو سراسری ندارند؛ F05. |
+| R12: لغو فرمان‌های فایل در EOF | **[CONFIRMED] اصلاح شده:** منبع متناهی برای ظرفیت صبر می‌کند و در EOF طبیعی تا سقف ۶۰ ثانیه drain می‌شود؛ [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:314). این تضمین زمان نامحدود نیست. |
+| R13: فیلتر پیامدهای حساس | **[CONFIRMED] محافظه‌کارانه‌تر شده:** Unicode/punctuation نرمال و unknown risk رد می‌شود؛ ولی مسیر تأیید برای ادامه وجود ندارد و پوشش محصول کاهش یافته؛ F02. |
 
-**بازتولید:** با گزینه‌های `1=Settings` و `2=Quit`، درخواست `I want Settings opened` و خروجی ساختگی مدل شامل `target_phrase="Settings", target_id="2"`، interpreter واقعی با قواعد و بازبینی عمل، `ReadyCommand(target="Quit")` تولید کرد. کلیکی انجام نشد. این آزمایش نقص مرز اعتبارسنجی را ثابت می‌کند، نه اینکه مدل واقعی همواره چنین خروجی‌ای می‌دهد.
+## ۳. یافته‌های اصلی با اولویت کلیک
 
-**چرا مهم است:** اعتبار شناسه فقط ثابت می‌کند گزینه‌ای روی صفحه وجود دارد؛ رضایت کاربر برای همان گزینه را ثابت نمی‌کند. حتی OCR بی‌نقص و مختصات کاملاً صحیح می‌توانند در این وضعیت «دکمهٔ اشتباه را درست کلیک کنند». فیلتر حساسیت نیز `Quit` را پوشش نمی‌دهد؛ R13 محدودیت‌های بیشتری دارد.
+### F01 — High — «یکسان بودن PNG» معیار معتبر تازگی محتوای هدف نیست
 
-**اصلاح پیشنهادی:** هدف گفتار، گزینهٔ انتخاب‌شده و عملیات را مستقل از مدل به هم متصل کنید. تطابق دقیق نرمال‌شده یا alias مشخص کافی است؛ اصلاح املایی/معنایی دورتر باید به گزینهٔ قابل مشاهده برای رفع ابهام تبدیل شود. مدل حق انتخاب آزاد هر ID معتبر را نداشته باشد. نتیجهٔ locator باید شناسهٔ مشاهده و دلیل تطابق را حفظ کند. **معیار پذیرش:** خروجی متناقض ID/label هرگز به `ActionRequest` نرسد؛ آزمون منفی برای گزینهٔ کم‌خطر و مخرب هر دو اضافه شود.
+**[CONFIRMED] محل:** [extension.js](/mnt/ai_projects/KYRIN/integrations/gnome-shell/window-capture-prototype@kyrin.local/extension.js:425)، به‌ویژه مقایسهٔ طول و همهٔ بایت‌ها در خط ۴۶۵. helper عمومی از [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:179) و Telegram از [telegram_portal_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:366) آن را شرط کلیک می‌کنند.
 
-### R02 — مدل می‌تواند scroll را برخلاف متن منفی پیشنهاد کند و پذیرفته شود — High
+**[CONFIRMED] شاهد خارجی:** منبع رسمی GNOME در شاخهٔ 50 در `write_screenshot_thread`، کلید `tEXt::Creation Time` را با زمان تصویر ذخیره می‌کند؛ زمان هر capture تازه ساخته می‌شود. بنابراین مقایسهٔ فایل فشرده با مقایسهٔ تصویر یکسان نیست. [منبع GNOME 50، خطوط ۲۵۹ تا ۲۸۴](https://github.com/GNOME/gnome-shell/blob/gnome-50/src/shell-screenshot.c#L259).
 
-**[CONFIRMED]** شاخهٔ scroll در [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:365) پیش از `SourceOperationVerifier` در خط ۴۴۵ برمی‌گردد. وجود پنجره و فعال بودن قابلیت کنترل، جای بررسی معنای درخواست را گرفته است.
+**بازتولید بدون دسکتاپ:** دو PNG معتبر در حافظه با یک پیکسل قرمز یکسان و دو مقدار متفاوت `Creation Time` ساخته شدند. QImage برابری پیکسل‌ها را تأیید کرد؛ شرط برابری بایت‌ها false شد.
 
-**بازتولید:** خروجی ساختگی `SCROLL_DOWN` برای هر دو متن `Please do not scroll down` و `What is the weather today?` در context مجاز و دارای پنجرهٔ مشاهده‌شده، به `ReadyCommand(SCROLL_DOWN)` رسید. این نتیجه با `review_model_action` واقعی هم برقرار بود.
+**[LIKELY] اثر عملی:** روی GNOME نصب‌شده، عبور capture و validation از مرز یک ثانیه می‌تواند پنجرهٔ کاملاً ثابت را رد کند؛ خود PNG زندهٔ این نشست خوانده نشد. حتی با حذف metadata، caret، spinner، ویدئو، تغییر ساعت یا پیام جدید در بخش نامرتبط، کل تصویر را متفاوت می‌کند. این شکست به غلط شبیه جابه‌جایی هدف گزارش می‌شود. هزینهٔ capture/PNG دوم هم به latency افزوده می‌شود.
 
-**اصلاح پیشنهادی:** همهٔ عملیات، از جمله scroll و visible control، یک بررسی مستقلِ درخواست صریح، نفی و هدف داشته باشند؛ شاخه‌های زودهنگام از این قاعده مستثنا نباشند. برای زبان فاقد بررسی قابل اتکا، عدم اجرا یا clarification انتخاب شود. **معیار پذیرش:** جملهٔ منفی، نقل‌قول فرمان و جملهٔ غیرامری، حتی با خروجی نامعتبر مدل، ورودی سیستم‌عامل تولید نکنند.
+**اصلاح پیشنهادی:** مقایسه بر decoded pixels یا fingerprint ناحیهٔ مرتبط باشد؛ metadata نادیده گرفته شود. هویت پنجره و ساختار هدف حفظ و درست پیش از عمل، label/role/state/bbox هدف دوباره resolve شود. ROI و نواحی پویا جدا شوند؛ حذف بی‌قید validation نیز راه‌حل نیست. **معیار پذیرش:** metadata متفاوت و انیمیشن نامرتبط کلیک هدف ثابت را رد نکنند؛ جابه‌جایی یا جایگزینی خود هدف همچنان مانع عمل شود.
 
-### R03 — تبدیل مختصات، scale واقعی و سایه را با یک قرارداد صریح تفکیک نمی‌کند — High
+### F02 — High — بیشتر فرمان‌های کلیک و همهٔ toggleها اکنون پیش از OCR رد می‌شوند
 
-**[CONFIRMED]** در [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:164)، اختلاف مساوی عرض و ارتفاع PNG با frame، در شرایط مشخص به‌عنوان سایهٔ متقارن تفسیر می‌شود. در غیر این صورت فقط اختلاف بسیار کوچک، حداکثر حدود ۲٪ یا چهار پیکسل، rescale می‌شود؛ اختلاف بزرگ‌تر رد می‌شود. بنابراین پشتیبانی عمومی از scaleهای `1.25/1.5/2` وجود ندارد. رد کردن این ورودی‌ها محافظه‌کارانه است، ولی قابلیت HiDPI را کامل نمی‌کند.
+**[CONFIRMED] محل:** [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:39). فقط شش label انگلیسی `advanced/settings/search/help/preferences/about` با `state=None` مجازند؛ هر مقدار دیگر `visible_control_risk_unknown` می‌دهد و executor در خط ۸۸ پیش از identity/OCR برمی‌گردد.
 
-**بازتولیدهای هندسی با همان تابع و bus ساختگی:**
+**بازتولید واقعی تابع policy:**
 
-| ورودی مصنوعی | نتیجهٔ واقعی منطق | تفسیر |
+| درخواست هدف | نتیجه |
+|---|---|
+| `Apply All Devices` | `visible_control_risk_unknown` |
+| `Select All` / `Mode` | `visible_control_risk_unknown` |
+| `Notifications` با `state=True` | `visible_control_risk_unknown` |
+| «تنظیمات» | `visible_control_risk_unknown` |
+| `Settings` با `state=None` | عبور از policy؛ موفقیت کلیک هنوز تضمین نیست. |
+
+**اهمیت:** یک رد امنِ عمدی، regression پوشش محصول ایجاد کرده است؛ نباید آن را OCR miss تشخیص داد. روشن/خاموش‌کردن در parser و helper وجود دارد، اما در مسیر عمومی فعلی دسترس‌پذیر نیست. شرح کلیک OpenRGB در مستندات قدیمی‌تر رفتار این checkout را تضمین نمی‌کند.
+
+**اصلاح پیشنهادی:** policy بر نوع عمل، control و پیامد متکی شود؛ خطر نامعلوم به جریان تأیید مشخص با هدف/پیامد/انقضا برسد، سپس target دوباره resolve شود. برای navigation شناخته‌شده alias چندزبانه و قابلیت ابزار تعریف شود. همهٔ نام‌های unknown را آزاد نکنید و فقط denylist را بلندتر نکنید. **معیار پذیرش:** label کم‌خطرِ تأییدشده قابل اجرا باشد؛ Delete/Send/Pay و toggle ناشناخته بدون تصمیم روشن اجرا نشوند؛ UI علت «مجوز/خطر» را از «متن پیدا نشد» جدا نشان دهد.
+
+### F03 — High — dispatch کلیک، تحقق عمل را ثابت نمی‌کند
+
+**[CONFIRMED] محل:** helper عمومی پس از press/release، `CLICK_DISPATCHED` می‌دهد؛ [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:288). executor آن را به‌درستی `LAUNCH_ACCEPTED` می‌نامد، اما مشاهدهٔ پس از کلیک ندارد؛ [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:232).
+
+**[CONFIRMED]** برای toggle فقط «از قبل در حالت مطلوب است» بررسی می‌شود؛ پس از تغییر، حالت حاصل خوانده نمی‌شود. Telegram در مسیر search header را بررسی می‌کند ولی در visible-row فقط dispatch گزارش می‌دهد؛ [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:856). کنترل پنجره در مقابل، verification با token و polling دارد؛ [gnome_window_control.py](/mnt/ai_projects/KYRIN/src/kyrin/desktop/platforms/gnome_window_control.py:118). پس ادعای «هیچ verificationی در پروژه نیست» صحیح نیست.
+
+**[CONFIRMED]** `ActionPlanRunner` با `FAILED/UNKNOWN` متوقف می‌شود، اما `LAUNCH_ACCEPTED` می‌تواند مرحلهٔ بعد را آزاد کند؛ فقط برای `OPEN_CHAT` بررسی وابستگی ویژه وجود دارد. [plan_runner.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/plan_runner.py:41).
+
+**اصلاح پیشنهادی:** پس‌شرط معنایی ابزار تعریف شود: dialog مورد انتظار، node جدید، checked state یا هویت chat. مرحلهٔ وابسته تا تحقق آن شروع نشود. `DISPATCHED_UNVERIFIED` وضعیت مستقل و قابل بازیابی باشد. **معیار پذیرش:** «کلیک ارسال شد» با «گزینه فعال شد» در event، حافظه و پیام کاربر یکسان نشود.
+
+### F04 — High — AT-SPI وجود دارد، اما به OCR وابسته و عمدتاً به مختصات تقلیل یافته است
+
+**[CONFIRMED] محل:** [desktop_control_inventory.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_inventory.py:61)، [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:105)، [desktop_accessibility_inventory.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_accessibility_inventory.py:23)، [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:63).
+
+inventory ابتدا accessibility را می‌خواند و در نام یکتای منطبق، OCR را کنار می‌گذارد؛ این نکتهٔ مثبت موجود است. ولی ورود به همان inventory و executor، `verifier.ready()` می‌خواهد که به screen grant و موجود/آزاد بودن OCR reader وابسته است. فرمان مستقیم معمولاً ابتدا OCR و سپس fallback accessibility دارد.
+
+**[CONFIRMED]** جست‌وجو در subtree کل برنامهٔ هم‌PID انجام می‌شود؛ state عمدتاً `ENABLED` و مرکز rect داخل frame بررسی می‌شود. stateهای `SHOWING/VISIBLE/SENSITIVE/DEFUNCT`، ancestor پنجرهٔ دقیق و action interface کامل بررسی نمی‌شوند. `do_action` وجود ندارد؛ node به مرکز rect تبدیل و با portal کلیک می‌شود. Radio button در click roles هست، ولی در state roles نیست.
+
+**[LIKELY]** node پنهان یا پنجرهٔ دیگرِ هم‌PID می‌تواند ambiguity یا انتخاب نامناسب بسازد؛ OCR busy یا نبود زبان OCR می‌تواند عملی را متوقف کند که accessibility به‌تنهایی قادر به اجرای آن است.
+
+**اصلاح پیشنهادی:** locator/actuator معنایی AT-SPI را مستقل کنید؛ node را با window، role، ancestry و state معتبر resolve کنید؛ actionهای موجود را enumerate و action مناسب را invoke کنید؛ selection/text/value نیز interface خود را داشته باشند. سپس state خوانده شود. **معیار پذیرش:** کنترل استاندارد با OCR خاموش و بدون screenshot قابل استفاده باشد؛ node پنهان/defunct انتخاب نشود. semantics رسمی: [Action.do_action](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Action.do_action.html)، [StateType](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.StateType.html).
+
+### F05 — High — توقف یا لغو صف، برنامهٔ شروع‌شده و helper فعال را متوقف نمی‌کند
+
+**[CONFIRMED] محل:** [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:128)، [plan_runner.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/plan_runner.py:41)، [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:180). generation برای کارهای شروع‌نشده مفید است، اما `_process(command)` cancellation دریافت نمی‌کند؛ حلقهٔ plan نیز میان مراحل آن را بررسی نمی‌کند.
+
+**بازتولید با executor ساختگی:** برنامه‌ای دو مرحله‌ای در مرحلهٔ اول متوقف شد؛ `invalidate_pending()` فراخوانی شد؛ پس از آزادشدن مرحلهٔ اول، هر دو مرحلهٔ `[0,1]` اجرا شدند. عملیات واقعی انجام نشد.
+
+**[CONFIRMED]** کلیک عمومی `subprocess.run(timeout=45)` و Telegram تا ۶۵ ثانیه منتظر helper می‌مانند؛ helper cancellation مشترک ندارد. close صف برای نشست زنده ۲۰ ثانیه صبر می‌کند. حذف restore token برای revocation، نشست portal ازقبل‌فعال را در این کد نمی‌بندد. [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:149)، [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:595)، [window.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/window.py:1050).
+
+**[LIKELY] اثر:** پس از Pause/Stop یا خاموش‌شدن permission، عمل شروع‌شده ممکن است هنوز input بفرستد. این یک خطر lifecycle است؛ ادعای اجرای عمل مخرب روی دسکتاپ در این بررسی نیست.
+
+**اصلاح پیشنهادی:** cancellation و deadline مشترک تا هر مرحله و helper حمل شوند؛ مجری درست پیش از input epoch مجوز را بررسی کند؛ مالک subprocess بتواند آن را متوقف کند و portal را ببندد. لغو، عمل قبلاً انجام‌شده را rollback نمی‌کند؛ نتیجهٔ آن باید مشاهده یا UNKNOWN گزارش شود. **معیار پذیرش:** پس از لغو، مرحلهٔ بعد و input هنوز ارسال‌نشده اجرا نشوند.
+
+### F06 — High — مالک واحد برای تمام ورودی‌های دسکتاپ وجود ندارد
+
+**[CONFIRMED] محل:** صف عمل یک worker دارد، ولی انتخاب شمارهٔ Telegram و paging، thread مستقل می‌سازند؛ [telegram_selection.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_selection.py:332)، [telegram_selection.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_selection.py:386). خود Telegram lock داخلی دارد؛ [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:184). executorهای generic control و scroll در wrapperهای بیرونی از همان lock عبور نمی‌کنند؛ [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:775).
+
+**[LIKELY]** completion انتخاب Telegram با scroll/click عمومی یا تغییر focus توسط ابزار دیگر می‌تواند هم‌پوشان شود. محافظ‌های focus بسیاری از موارد را رد می‌کنند، اما ترتیب واحدِ عملیات مرکب را تضمین نمی‌کنند. **روش تأیید:** barrier آزمون، completion فعال Telegram و فرمان generic هم‌زمان، ثبت ترتیب input ساختگی.
+
+**اصلاح پیشنهادی:** یک DesktopInputBroker/actor مالک کلیهٔ keyboard/pointer و نشست portal باشد؛ عملیات مرکب input به‌صورت واحد قابل لغو اجرا شود. خواندن observation می‌تواند مستقل باشد؛ ورودی OS باید serialize شود. reuse نشست portal در همان مرز و با revocation واقعی انجام شود.
+
+### F07 — High — مدل روی partial نیز فراخوانی می‌شود و مصرف‌کنندهٔ رویداد را مسدود می‌کند
+
+**[CONFIRMED] محل:** [coordinator.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/coordinator.py:171) پیش از شاخهٔ `PARTIAL`، interpreter را صدا می‌زند؛ [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:320) guard برای `context.is_final_transcript` ندارد؛ مدل می‌تواند بعد از شکست قواعد اجرا شود.
+
+**بازتولید:** یک partial با متن نامتعارف به coordinator واقعی و مدل ساختگی داده شد؛ شمار inference مدل یک شد. partial همچنان اجازهٔ عمل نمی‌دهد؛ نقص، هزینه و انسداد است.
+
+**[CONFIRMED]** timeout مدل ۶۰ ثانیه و در CPU برابر ۱۲۰ ثانیه است؛ مسیر کشف کنترل گاهی دو inference دارد. [ollama_engine.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:365)، [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:382). فراخوانی همگام در runtime است؛ [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:281).
+
+**[LIKELY]** final و «توقف شنیدن» پشت inference منتظر می‌مانند؛ با event queue محدود ۲۵۶تایی و backlog پنج‌ثانیه‌ای، کندی طولانی می‌تواند به فشار صف و از دست رفتن پیوستگی نشست برسد. overflow مشخصی در این بررسی زنده دیده نشد.
+
+**اصلاح پیشنهادی:** partial فقط مسیر ارزان و بدون I/O داشته باشد؛ فهم final در worker قابل لغو با backpressure انجام شود؛ stop/control مسیر اولویت‌دار مستقل داشته باشد. **معیار پذیرش:** صفر inference مدل برای partial؛ توقف دستی مستقل از timeout مدل؛ نتیجهٔ دیررس پس از تغییر epoch اجرا نشود.
+
+### F08 — High — timeout درخواست، پایان واقعی کار OCR یا deadline کل عملیات نیست
+
+**[CONFIRMED] محل:** [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:192). caller پس از ۱۸ ثانیه Event را set می‌کند، اما worker و pending را لغو نمی‌کند. Paddle هر بار process/model تازه با timeout ۶۰ یا ۹۰ ثانیه می‌سازد؛ [paddle.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/paddle.py:95). callback می‌تواند پس از پایان انتظار caller، fallback OCR بعدی را آغاز کند؛ [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:430).
+
+**[CONFIRMED]** حلقهٔ settle ده‌ثانیه‌ای Telegram یک call داخلی هجده‌ثانیه‌ای دارد و در حالت خاص برای تأیید دوم ادامه می‌دهد؛ پس «۱۰ ثانیه» سقف کل نیست. [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:982). capture حداکثر ۱۰ ثانیه معتبر است، اما آماده‌سازی مجدد portal می‌تواند بیشتر طول بکشد.
+
+**[LIKELY]** کاربر شکست می‌بیند ولی OCR هنوز busy است؛ فرمان بعدی رد می‌شود و مصرف CPU ادامه می‌یابد. **اصلاح پیشنهادی:** deadline مطلق مشترک، remaining budget برای هر call، ابطال fallback پس از timeout، و worker پایدارِ قابل توقف برای backend سنگین. ابتدا input grant آماده و سپس target تازه گرفته شود. cold start، queue و inference جدا اندازه‌گیری شوند.
+
+### F09 — High — بررسی جدید scroll، جهت درخواست را با پیشنهاد مدل تطبیق نمی‌دهد
+
+**[CONFIRMED] محل:** [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:416). `_source_is_instruction(scroll=True)` وجود یک درخواست scroll بالا یا پایین را می‌سنجد؛ intent از operation پیشنهادی مدل ساخته می‌شود، بدون اثبات برابری جهت.
+
+**بازتولید با قواعد واقعی و مدل ساختگی:** متن `Could you scroll up on this page please` در قواعد مستقیم `NotACommand` شد؛ مدل `SCROLL_DOWN` پیشنهاد کرد؛ interpreter با `review_model_action` واقعی، `ReadyCommand(SCROLL_DOWN)` برگرداند. دو عبارت طبیعی دیگر نیز همان نتیجه را داشتند.
+
+**اصلاح پیشنهادی:** استخراج مستقل جهت/ناحیه/مقدار و مقایسه با proposal؛ ابهام یا تناقض به clarification برسد. همان اصل برای state کنترل‌ها و تمام شاخه‌های زودبازگشت برقرار باشد. **معیار پذیرش:** خروجی معکوس مدل هرگز به input تبدیل نشود؛ آزمون منفیِ مدل عمداً اشتباه اضافه شود.
+
+### F10 — High — Telegram هنوز به layout و نقاط ثابت وابسته است؛ تایپ نیز focus تراکنشی ندارد
+
+**[CONFIRMED] محل:** cropهای درصدی/پیکسلی در [screen_text_reader.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/screen_text_reader.py:38)، قواعد عنوان/تاریخ/preview در [telegram_verification.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_verification.py:73)، و hamburger ثابت `(14,26,28,32)` در [telegram_portal_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:586). افزودن geometry مشترک، ثابت‌بودن محل hamburger را رفع نکرده است.
+
+**[LIKELY]** sidebar قابل تغییر، زبان RTL، UI scale داخل Telegram، عنوان بلند یا theme متفاوت می‌توانند crop و فرض سطر را نامعتبر کنند. وجود چندمانیتور به‌خودی‌خود اثبات خرابی نیست.
+
+**[CONFIRMED]** بعد از focus search و Ctrl+A، رشته حرف‌به‌حرف تایپ می‌شود؛ در حلقهٔ هر حرف، identity/فیلد متنی دوباره بررسی نمی‌شود؛ [telegram_portal_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:281). **[LIKELY]** تغییر focus در این بازه می‌تواند ادامهٔ نام chat را در مقصد دیگری وارد کند؛ حداکثر طول ۶۴ و کاراکترهای مجاز، مانع این نوع اشتباه نیستند.
+
+**اصلاح پیشنهادی:** navigation شناخته‌شده با shortcut تأییدشده یا semantic selector؛ عناصر تصویری با locator از دادهٔ زنده؛ عملیات تایپ با field identity، cancellable batch و بررسی focus/state بین بخش‌ها. **معیار پذیرش:** resize/sidebar/RTL و تغییر focus وسط تایپ موجب ورودی در پنجرهٔ نامرتبط نشوند.
+
+### F11 — High — تأیید بستن پنجره‌های دارای کار ذخیره‌نشده یکسان نیست
+
+**[CONFIRMED] محل:** [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:1081). بستن Terminal تأیید ویژه دارد، اما exact close برای دیگر برنامه‌های مجاز می‌تواند مستقیم Ready شود. composition، `confirmation_required_for` را برای gate تنظیم نمی‌کند؛ [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:406).
+
+**[CONFIRMED]** کنترل GNOME درخواست معمول window close و سپس مشاهدهٔ بسته‌شدن را انجام می‌دهد؛ اجبار عمومی برای kill در این مسیر دیده نشد. **[LIKELY]** برنامهٔ مقصد ممکن است dialog ذخیره‌سازی نشان دهد، ولی همهٔ برنامه‌ها چنین تضمینی ندارند؛ KYRIN نیز state ذخیره‌نشدهٔ همهٔ برنامه‌ها را نمی‌داند.
+
+**اصلاح پیشنهادی:** بستن دارای پیامد از allowlist کلی برنامه جدا شود؛ حالت نامعلومِ unsaved با تأیید هدف/پنجره و انقضای روشن مدیریت شود. power flow موجود با دو تأیید مستقل حفظ شود. **معیار پذیرش:** پنجرهٔ اشتباه یا درخواست قدیمیِ تأییدشده قابل مصرف نباشد.
+
+## ۴. یافته‌های تکمیلی و کیفیت مهندسی
+
+### F12 — Medium — قرارداد عبارت OCR و فهرست گزینه‌ها با زبان/segmentation یکسان کار نمی‌کند
+
+**[CONFIRMED] محل:** [visible_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_control.py:37) گروه‌بندی حداکثر چهار span، حرکت چپ‌به‌راست، اختلاف top حداکثر ۸ و gap حداکثر ۲۰ پیکسل دارد. locator دقیق در [text_targets.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/text_targets.py:18) RTL و overlap محدود را می‌فهمد.
+
+**بازتولید:** دو span «تنظیمات صدا» به ترتیب راست‌به‌چپ، در `unique_visible_target` یک هدف ساختند؛ inventory فقط «تنظیمات» و «صدا» را تولید کرد. مدل، عبارت کاملی را که locator می‌یابد در catalog نمی‌بیند.
+
+**[CONFIRMED]** inventory می‌تواند چند زبان را با هم بخواند، درحالی‌که هدف ASCII هنگام اجرا با `eng` خوانده می‌شود؛ [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:251). حداقل confidence هر کلمه ۰٫۶۵ است؛ score ناموجود، از جمله PaddleOCR-VL، اجازهٔ کلیک نمی‌دهد. [paddle.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/paddle.py:135).
+
+**[LIKELY]** یک threshold مشترک بین engine، زبان، word و line کالیبره نیست. گزارش تاریخی افت `Apply` از ۰٫۷۲ در eng به ۰٫۳۷ در eng+fas شاهد قبلی است، نه آزمایش تکرارشدهٔ این بررسی؛ [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:116).
+
+**اصلاح پیشنهادی:** normalizer/phrase assembler مشترک RTL/LTR و backend-independent، زبان هدفمند و threshold کالیبره با نمونه‌های مثبت/منفی. confidence ناموجود را یک فرض نکنید؛ پایین‌آوردن سراسری threshold نیز مناسب نیست. segmentation و کیفیت ورودی را طبق [راهنمای رسمی Tesseract](https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html) ارزیابی کنید؛ نوشتن «۳۰۰ DPI» جزئیات تصویری تازه تولید نمی‌کند.
+
+### F13 — Medium — مبدل geometry اصلاح شده، ولی صحت metadata تولیدکننده هنوز نیازمند اثبات است
+
+**[CONFIRMED]** مبدل فعلی scaleهای `1/1.25/1.5/2`، مختصات منفی، padding/crop/resize و خروج از viewport را در آزمون مستقل پشتیبانی می‌کند؛ [capture_geometry.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/capture_geometry.py:97)، [test_capture_geometry.py](/mnt/ai_projects/KYRIN/tests/vision/test_capture_geometry.py:8). نسبت‌دادن محدودیت قدیمیِ «scale دوبرابر همیشه رد می‌شود» به این قرارداد جدید غلط است.
+
+**[CONFIRMED]** extension scale مانیتور را می‌گیرد و اختلاف ابعاد PNG با اندازهٔ scaled را به padding متقارن تبدیل می‌کند، با سقف ۲۵۶ پیکسل؛ [extension.js](/mnt/ai_projects/KYRIN/integrations/gnome-shell/window-capture-prototype@kyrin.local/extension.js:351). generic helper هنوز مسیر legacyِ تشخیص سایه از اختلاف ابعاد دارد؛ [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:194).
+
+**[SPECULATION]** capture دارای سایهٔ نامتقارن، پنجرهٔ spanning، scale متفاوتِ buffer برنامهٔ XWayland و انتقال میان mixed-DPI ممکن است با metadata فرض‌شده یکسان نباشد. خرابی هیچ‌یک روی این ماشین اثبات نشده است. **روش تأیید:** markerهای معلوم در چهار گوشه و مرکز، مقایسهٔ screenshot pixel با مختصات منطقی در scaleهای مختلف، native Wayland و XWayland، دو مانیتور و پنجرهٔ جابه‌جاشده.
+
+**اصلاح پیشنهادی:** تست producer تا actuator، ثبت provenance scale/padding و handshake نسخه؛ legacy فقط مسیر سازگاریِ صریح باشد. واحدهای `OCR pixel / image pixel / desktop logical` جدا بمانند. از دوبار اعمال crop/scale جلوگیری شود؛ Qt اکنون box را به مختصات تصویر اصلی بازمی‌گرداند و helper با `image_pixels=True` آن را مصرف می‌کند.
+
+### F14 — Medium — token جدید فقط بخشی از مسیر هدف را پوشش می‌دهد
+
+**[CONFIRMED]** intent کنترل از مرحلهٔ فهم فرمان، `control_window_app` و anchor نگه می‌دارد ولی window token/capture generation اولیه را حفظ نمی‌کند؛ [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:463). executor پس از inference، identity فعلی و OCR تازه می‌گیرد. در مسیر `accessible_only`، guardهای CaptureGeometry اعمال نمی‌شوند؛ [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:174).
+
+**[LIKELY]** سوییچ به پنجرهٔ دیگر همان برنامه با label و anchor مشابه در فاصلهٔ تشخیص تا اجرا، ممکن است به هدف جدید منتقل شود. geometry جدید از پنجرهٔ تازه تا لحظهٔ کلیک محافظت می‌کند؛ الزاماً ثابت نمی‌کند همان پنجرهٔ منظور کاربر در آغاز فرمان است.
+
+**اصلاح پیشنهادی:** window token، generation مشاهده و deadline در evidence اولیه تا intent/request حفظ شوند؛ accessibility نیز window-specific باشد. تغییر پنجره، بازبینی آگاهانهٔ درخواست را لازم کند. **معیار پذیرش:** دو پنجرهٔ هم‌برنامه با هندسهٔ یکسان و label یکسان، بدون تصمیم تازه جای یکدیگر را نگیرند.
+
+### F15 — Medium — جزئیات خطاهای جدید در مرز helper از بین می‌روند
+
+**[CONFIRMED] محل:** helper علت‌هایی مانند `TARGET_CHANGED:content/window_token/stale_capture/stale_or_window` می‌فرستد، اما parser فقط frame/pointer و الگوی image_scale را نگه می‌دارد؛ بقیه `unknown` می‌شوند. [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:211)، [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:174).
+
+**اصلاح پیشنهادی:** پاسخ JSON نسخه‌دار با error enum، stage، retryability و dispatch state؛ log بدون متن شخصی. این اصلاح کوچک برای تشخیص F01، timeout و geometry ارزش فوری دارد. **معیار پذیرش:** خطای content به OCR miss یا generic target changed تقلیل نیابد.
+
+### F16 — Medium — شنیدن هم‌زمان با TTS، وقفهٔ گفتاری کامل نیست
+
+**[CONFIRMED]** در نبود AEC، `PlaybackGuardInput` هنگام `speaker.is_active` ورودی میکروفون را سکوت می‌کند؛ [playback_guard.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/playback_guard.py:22). active از enqueue روشن می‌شود، پس انتظار صف و synthesis نیز می‌تواند شنیدن را بپوشاند؛ tail پیش‌فرض ۳۵۰ms است. [speech.py](/mnt/ai_projects/KYRIN/src/kyrin/responses/speech.py:146).
+
+**[CONFIRMED]** AEC در composition فقط با میکروفون پیش‌فرض تلاش می‌شود؛ انتخاب device مشخص این مسیر را کنار می‌گذارد؛ [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:528). رویداد عمومی `SpeechTransition.STARTED -> speaker.interrupt()` در مسیر live متصل نیست. interrupt مدل TTS می‌تواند playback را متوقف و generation را باطل کند، اما هر synthesis درون‌پردازه را فوراً قطع نمی‌کند؛ [tts/runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/tts/runtime.py:401).
+
+**اصلاح پیشنهادی:** AEC برای ورودی انتخاب‌شده، VAD با pre-roll و قطع فوری playback؛ مجوز عمل همچنان از final بگذرد. اگر AEC فراهم نیست، half-duplex صریح و دکمهٔ توقف فوری قابل اتکا عرضه شود. **معیار پذیرش:** کاربر وسط پاسخ بتواند آن را قطع کند، ابتدای گفتارش گم نشود و صدای خود عامل به فرمان تبدیل نشود.
+
+### F17 — Medium — تاریخچهٔ متن پیش‌فرض است و آرشیو سقف نگهداری مستقل ندارد
+
+**[CONFIRMED]** history در هر session ساخته و متن‌های نهایی فعال تا ۲۰۰۰ کاراکتر ثبت می‌شوند؛ تنظیم روشن/خاموش‌کردن persistence در `AppSettings` دیده نمی‌شود. [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:495)، [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:332)، [settings.py](/mnt/ai_projects/KYRIN/src/kyrin/app/settings.py:148).
+
+**[CONFIRMED]** سقف ۲۰۰۰ turn فقط active را حذف می‌کند؛ archive می‌تواند رشد کند و `clear()` فقط `archived=0` را پاک می‌کند. [history.py](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:103)، [history.py](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:200). UI پاک‌سازی همین clear را صدا می‌زند؛ [window.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/window.py:606).
+
+**اصلاح پیشنهادی:** کنترل persistence، retention زمانی/حجمی active و archive، و تفاوت روشن «خارج‌کردن از context / حذف فعال / حذف همه»؛ provenance میکروفون/فایل و حذف دادهٔ حساس. نکات مثبت `0600`، SQL پارامتری، lock و recent محدود حفظ شوند. پایگاه دادهٔ شخصی خوانده نشد.
+
+### F18 — Medium — سنجهٔ latency برای plan و stream کامل نیست
+
+**[CONFIRMED] محل:** [latency.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/latency.py:31). کلید فقط `segment_id` است و اولین feedback آن را pop می‌کند؛ `stream_id/step_index` تطبیق داده نمی‌شوند. timestampها زمان دریافت event هستند، نه timestamp خود صوت.
+
+**[LIKELY]** نتیجهٔ دیررس stream قبلی می‌تواند به segment هم‌شمارهٔ جدید نسبت داده شود؛ plan چندمرحله‌ای نیز زمان اولین نتیجه را به‌جای پایان کل کار ثبت می‌کند. **اصلاح پیشنهادی:** `session_id + ActionKey`، timestamp capture، پایان گفتار، final، صف، inference، dispatch، postcondition و اولین صدای TTS جدا؛ p50/p95 و cold/warm به تفکیک مسیر. **معیار پذیرش:** streamهای دارای segment یکسان و planهای چندمرحله‌ای attribution درست داشته باشند.
+
+### F19 — Medium — بودجهٔ مشترک GPU/RAM و token وجود ندارد
+
+**[CONFIRMED]** Ollama مدل را پنج دقیقه نگه می‌دارد، TTS دو مدل را warm نگه می‌دارد و STT جدا مدیریت می‌شود؛ [ollama_engine.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:304)، [tts/runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/tts/runtime.py:278). مدل فرمان `num_ctx=4096` و `num_predict=768` دارد و catalog برنامه، تا ۱۰۰ کنترل و history وارد prompt می‌شوند.
+
+**[LIKELY]** هم‌زمانی مدل‌ها روی GPU محدود می‌تواند OOM، offload یا نوسان latency بسازد؛ OOM جاری اثبات نشده است. prompt بلند چندزبانه نیز ممکن است از context مؤثر بگذرد؛ شمار گزینه، جایگزین بودجهٔ token نیست.
+
+**اصلاح پیشنهادی:** سیاست مرکزی سبک برای residency، سقف peak memory و اولویت STT؛ TTS سبک روی CPU و VLM فقط هنگام نیاز. prompt بر اساس token budget و relevance بسته شود؛ شواهد operation/permission با truncation حذف نشوند. محدودیت حافظهٔ CPU Qwen موجود است، ولی مدیر منابع کل برنامه نیست؛ [memory_budget.py](/mnt/ai_projects/KYRIN/src/kyrin/tts/memory_budget.py:11).
+
+### F20 — Medium — کشف قابلیت و نسخهٔ backend با نصب موفق یکسان نیست
+
+**[CONFIRMED]** metadata افزونه‌ها به GNOME 50 محدود است؛ [metadata.json](/mnt/ai_projects/KYRIN/integrations/gnome-shell/active-app@kyrin.local/metadata.json:5). observer/activator/controller در startup براساس availability انتخاب می‌شوند؛ window presence انعطاف بیشتری برای بارشدن دیرهنگام دارد؛ [main.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:366). handshake صریح protocol version وجود ندارد و ScreenAccess سه شکل پاسخ قدیمی/جدید را می‌پذیرد؛ [screen_access.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/screen_access.py:154).
+
+**[LIKELY]** extension دیررس یا ماژول قدیمیِ هنوزبارشده می‌تواند session را ناقص یا در مسیر legacy نگه دارد. سند پروژه نیز تفاوت installed و loaded را گزارش کرده است؛ [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:85).
+
+**اصلاح پیشنهادی:** `GetCapabilities/ProtocolVersion`، نسخهٔ واقعاً بارشده، probe بدون input، retry محدود سرویس دیررس و نمایش علت unavailable. manifest نسخه/hash مدل و runtime و CI حداقلی اضافه شود. lockfile و workflow CI در فایل‌های نسخه‌دار یافت نشدند؛ نبود lock به‌تنهایی bug runtime نیست، ولی بازتولید نصب را دشوار می‌کند.
+
+### F21 — Medium — offline بودن worker، sandbox امنیتی نیست
+
+**[CONFIRMED] محل:** [document_worker.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/document_worker.py:145) مدل محلی را با `trust_remote_code=True` و `local_files_only=True` بار می‌کند. worker با همان user اجرا می‌شود؛ offline دانلود را محدود می‌کند ولی اختیار کد داخل checkpoint را حذف نمی‌کند.
+
+**اصلاح پیشنهادی:** artifactهای تأییدشده با hash/provenance، حداقل دسترسی فایل/شبکه برای worker خواندن سند و امکان حذف runtime آسیب‌دیده. **هیچ مدل مخرب، secret افشاشده یا نفوذی در این بررسی کشف یا اثبات نشده است.** این موضوع پیش‌شرط گسترش plugin/model import است.
+
+### F22 — Low — چند نقطهٔ بزرگ و قراردادهای نیمه‌کامل، نگهداری را دشوار می‌کنند
+
+**[CONFIRMED]** اندازهٔ توابع با AST: `DemoCommandInterpreter.interpret` برابر ۷۴۰ خط، `UbuntuSessionFactory.__call__` برابر ۵۸۱، `CommandCoordinator.observe` برابر ۳۳۱ و `ModelAssistedInterpreter.interpret` برابر ۳۰۱ خط. [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:213)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:271). formatting check نیز ۷۷ فایل ناسازگار دارد.
+
+**[CONFIRMED]** `ActiveWindowTextReader` هندسه را حمل می‌کند، ولی `image_size/capture_rect/frame_rect` را در خروجی مقداردهی نمی‌کند؛ locator فعلی با image_size ناموجود هدفی نمی‌سازد. مسیر Qt این اطلاعات را جدا می‌گذارد، پس این نقص به معنی خرابی کلیک اصلی نیست. [text_reader.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/text_reader.py:41)، [visible_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_control.py:98).
+
+**اصلاح پیشنهادی:** پس از اصلاح رفتار، validator، handler عملیات و lifecycle مشترک استخراج شوند؛ ساخت observation یک مسیر داشته باشد. نام production مناسب‌تر از «Demo» است، ولی تغییر نام اولویت پایین‌تری از صحت دارد. broad except در مرز thread/plugin گاهی موجه است؛ تشخیص علت باید حفظ شود، نه اینکه مکانیکی تمام آن‌ها حذف شوند.
+
+## ۵. چرا OCR کلیک را خراب می‌کند و چه روشی جایگزین شود؟
+
+### تشخیص بر اساس نوع شکست
+
+| عامل | واقعیت/عدم قطعیت فعلی | تصمیم مناسب |
 |---|---|---|
-| frame برابر `800×600`، PNG برابر `1600×1200` | `TARGET_CHANGED:image_scale_800x600_png_1600x1200` | `[CONFIRMED]` نگاشت scale دوبرابر انجام نمی‌شود. |
-| frame مربع `400×400`، PNG برابر `500×500`، مرکز هدف `(125,125)` و مبدأ صفر | dispatch به `(75,75)` | `[CONFIRMED]` اختلاف به‌عنوان سایهٔ ۵۰ پیکسلی تفسیر می‌شود. اگر این PNG ناشی از scale برابر `1.25` باشد، نقطهٔ صحیح `(100,100)` است. |
-
-**[LIKELY]** سناریوی دوم در هندسه‌ای که scale با شرط سایه اشتباه شود می‌تواند کلیک را منحرف کند؛ تولید چنین تصویری توسط backend واقعی این ماشین آزمایش نشده است. در مقابل، سند پروژه برای OpenRGB سایهٔ واقعی ۲۵ پیکسلی و dispatch موفق را گزارش کرده است؛ این اصلاح خاص را نباید نادیده گرفت یا خطا دانست. [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:130).
-
-**اصلاح پیشنهادی:** همراه تصویر، تبدیل صریح `image pixel -> logical desktop coordinate` و provenance آن حمل شود؛ padding، crop، scale و origin جدا باشند. از اختلاف ابعاد به‌تنهایی نوع تبدیل استنتاج نشود. آزمون مستقل برای scale و سایهٔ هم‌زمان، نه فقط هر یک جداگانه، لازم است.
-
-### R04 — مسیر کلیک Telegram از قرارداد هندسی مسیر عمومی عقب مانده است — High
-
-**[CONFIRMED]** [ChatSearchMatch](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_verification.py:15) اطلاعات `capture_rect/frame_rect` ندارد؛ [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:767) فقط جعبه و ابعاد تصویر را می‌فرستد. [telegram_portal_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:303) تقریباً برابری ابعاد frame و تصویر را می‌خواهد و سپس origin پنجره را به مختصات OCR اضافه می‌کند.
-
-**[LIKELY]** تصویر دارای سایه، تفاوت ناحیهٔ capture با frame یا HiDPI می‌تواند این مسیر را متوقف کند یا فرض نگاشت آن را نامعتبر سازد؛ موفقیت مسیر عمومی، موفقیت Telegram را تضمین نمی‌کند. **اصلاح پیشنهادی:** هر دو مسیر از یک `CaptureGeometry` و یک مبدل مختصات آزموده‌شده استفاده کنند. همسان‌سازی قرارداد بر کپی کردن patch سایه در helper دوم اولویت دارد.
-
-### R05 — هویت برنامه و PID، هویت یکتای پنجره و تازگی محتوا نیست — High
-
-**[CONFIRMED]** [IdentifiedWindowText](/mnt/ai_projects/KYRIN/src/kyrin/vision/text_reader.py:22) `app_id`، PID و geometry دارد، اما window token و timestamp ندارد. intent کلیک نیز تنها `control_window_app` را از مشاهده نگه می‌دارد؛ [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:410). executor تغییر identity را پیش و پس از OCR بررسی می‌کند و helper تغییر frame را می‌گیرد؛ این‌ها کنترل‌های مفیدی هستند، اما کامل نیستند.
-
-**[LIKELY]** دو پنجرهٔ یک برنامه با PID یکسان و هندسهٔ مشابه، dialog تازه در همان پنجره، یا جابه‌جایی محتوا در زمان انتظار portal می‌توانند از این کنترل‌ها عبور کنند. خود extension هنگام گرفتن تصویر focus را کنترل می‌کند؛ مسئله، فاصلهٔ مشاهده تا اجرای بعدی است. زمان مجاز helper تا ۴۵ ثانیه است: [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:145).
-
-**اصلاح پیشنهادی:** `window_token` پایدار، نسل مشاهده، زمان monotonic و مهلت اعتبار هدف تا مجری حمل شوند. `get_stable_sequence()` از قبل در [active-app extension](/mnt/ai_projects/KYRIN/integrations/gnome-shell/active-app@kyrin.local/extension.js:392) استفاده می‌شود و نقطهٔ شروع مناسبی است. پس از گرفتن مجوز ورودی، locator باید دوباره اعتبارسنجی شود. **معیار پذیرش:** تعویض دو پنجرهٔ هم‌برنامه و نمایش dialog بعد از locate، بدون کلیک بر هدف قدیمی متوقف شوند.
-
-### R06 — dispatch با تحقق نتیجه یکسان نیست؛ بعضی مراحل بعدی زود ادامه می‌یابند — High
-
-**[CONFIRMED]** helper عمومی پس از ارسال دکمهٔ ماوس `CLICK_DISPATCHED` می‌دهد و [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:220) آن را صادقانه به `LAUNCH_ACCEPTED` تبدیل می‌کند؛ state پس از کلیک دوباره خوانده نمی‌شود. برای toggle، حالت «از قبل تنظیم‌شده» بررسی می‌شود، ولی حالت حاصل از تغییر بررسی نمی‌شود.
-
-**[CONFIRMED]** Telegram در مسیر ردیفِ ازقبل‌نمایان عمداً پس از dispatch برمی‌گردد؛ در مسیر نتیجهٔ جست‌وجو header را نیز بررسی می‌کند و برای عنوان‌های تکراری از ادعای هویت قطعی پرهیز می‌کند. [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:828). بنابراین ادعای «هیچ verificationی وجود ندارد» نادرست است؛ پوشش آن یکسان نیست.
-
-**[CONFIRMED]** [plan_runner.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/plan_runner.py:78) فقط با `FAILED/UNKNOWN` متوقف می‌شود و `LAUNCH_ACCEPTED` می‌تواند اجازهٔ مرحلهٔ بعد را بدهد. برای `OPEN_CHAT` یک بررسی وابستگیِ مخصوص وجود دارد، ولی قرارداد عمومی برای پس‌شرط همهٔ مراحل وجود ندارد.
-
-**اصلاح پیشنهادی:** هر ابزار پس‌شرط روشن داشته باشد: dialog مورد انتظار، مقدار `checked`، پنجرهٔ جدید یا شناسهٔ chat. مرحلهٔ وابسته تا اثبات همان پس‌شرط شروع نشود. تغییر تصویر فقط شاهد کمکی است: blinking cursor یا حرکت pointer نیز تصویر را تغییر می‌دهد، و عملی مانند Apply ممکن است تغییر تصویری محسوسی نداشته باشد.
-
-### R07 — AT-SPI موجود است، اما هنوز مزیت اصلی آن استفاده نمی‌شود — High
-
-**[CONFIRMED]** پروژه از صفر نیازمند افزودن accessibility نیست. inventory موجود، نام/role/state را می‌خواند. با این حال، در اجرای کنترل مستقیم معمولاً OCR پیش از fallback دسترس‌پذیری امتحان می‌شود؛ inventory و executor هر دو به آماده بودن مسیر screen/OCR وابسته‌اند. [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:100)، [desktop_control_inventory.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_inventory.py:61).
-
-**[CONFIRMED]** [desktop_accessibility_inventory.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_accessibility_inventory.py:23) و [_accessible_control](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:55) جست‌وجو را در subtree برنامهٔ دارای PID انجام می‌دهند، عمدتاً `ENABLED` را بررسی می‌کنند و نقش‌های محدودی می‌پذیرند. `SHOWING/VISIBLE/SENSITIVE/DEFUNCT`، ancestor پنجرهٔ دقیق و ابعاد معتبر به‌صورت کامل کنترل نمی‌شوند. مسیر اجرا در نهایت مرکز rectangle را کلیک می‌کند؛ `Action.do_action` استفاده نمی‌شود.
-
-**[LIKELY]** کنترل پنهان، node قدیمی، متن یکسان در پنجرهٔ دیگر یا widget فاقد role فعلی می‌تواند به ambiguity، رد بی‌مورد یا انتخاب نامناسب منجر شود. **اصلاح پیشنهادی:** ابتدا node در پنجرهٔ صحیح و state مناسب resolve شود؛ action واقعی از interface آن خوانده و در صورت پشتیبانی فراخوانی شود؛ برای selection/text نیز interface متناظر به کار رود. نتیجه سپس مشاهده شود. دسترسی accessibility از آمادگی OCR مستقل باشد. نام action یا وجود آن را ثابت فرض نکنید. [مستندات Action.do_action](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Action.do_action.html)، [مستندات StateType](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.StateType.html).
-
-### R08 — confidence، جهت متن و segmentation در مسیرهای OCR یکسان نیستند — High
-
-**[CONFIRMED]** [visible_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_control.py:37) برای گزینه‌سازی حداقل confidence برابر `0.65` و گروه‌بندی حداکثر چهار span با حرکت از چپ به راست، اختلاف top تا ۸ و gap تا ۲۰ پیکسل دارد. در مقابل، [text_targets.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/text_targets.py:17) برای هدف دقیق RTL و overlap محدود را پشتیبانی می‌کند. بازتولید با دو span فارسی در ترتیب راست‌به‌چپ نشان داد هدف دقیق پیدا می‌شود، ولی عبارت کامل در inventory تولید نمی‌شود.
-
-**[CONFIRMED]** [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:251) در inventory تا چهار زبان را ترکیب می‌کند، ولی هنگام درخواست یک label انگلیسی مشخص می‌تواند فقط `eng` را انتخاب کند. بنابراین مدل ممکن است گزینه‌ای را نبیند که اجرای مستقیم آن قابل تشخیص است. تفاوت word-level و line-level OCR نیز در جست‌وجوی عبارت اهمیت دارد؛ متن خوانا لزوماً span مناسب برای label کوتاه نمی‌سازد.
-
-**[LIKELY]** آستانهٔ ثابت میان backendها، زبان‌ها و طول labelها calibration مناسبی ندارد. سند پروژه برای `Apply` confidence برابر `0.37` با `eng+fas` و `0.72` با `eng` گزارش کرده است؛ این مشاهدهٔ تاریخی در این بررسی تکرار نشده است. [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:116).
-
-**اصلاح پیشنهادی:** یک normalizer و phrase assembler مشترک با پشتیبانی RTL/LTR، حفظ bounding box و calibration بر corpus واقعی بسازید. زبان UI یا label را محدود کنید؛ خواندن چندبارهٔ هدفمند از crop بهتر از اجرای کور همهٔ زبان‌هاست. آستانه را صرفاً پایین نیاورید: برای label کوتاه مانند `OK` و گزینهٔ مخرب شواهد قوی‌تری لازم است. [راهنمای رسمی بهبود ورودی Tesseract](https://github.com/tesseract-ocr/tessdoc/blob/main/ImproveQuality.md?plain=1) نیز اهمیت segmentation و کیفیت تصویر را توضیح می‌دهد؛ تغییر metadata به «۳۰۰ DPI» به‌تنهایی جزئیات پیکسلی تولید نمی‌کند.
-
-### R09 — layoutهای Telegram هنوز به اندازه و موقعیت نسبی ثابت وابسته‌اند — High
-
-**[CONFIRMED]** cropها در [screen_text_reader.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/screen_text_reader.py:38)، قواعد ستون عنوان/زمان/preview در [telegram_verification.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_verification.py:111) و محل hamburger در [telegram_portal_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:493) به نسبت‌ها یا پیکسل‌های ثابت تکیه دارند. تبدیل معکوس crop و بزرگ‌نمایی دوبرابری در [screen_text_reader.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/screen_text_reader.py:100) انجام می‌شود؛ مشکل، نبود کامل تبدیل crop نیست.
-
-**[LIKELY]** تغییر عرض sidebar، اندازهٔ فونت، حالت باریک پنجره، theme یا RTL این فرض‌ها را می‌شکند. **اصلاح پیشنهادی:** navigation شناخته‌شده با shortcut معتبر و پیش‌شرط focus انجام شود؛ برای ردیف chat از ساختار accessibility یا تشخیص layout جاری استفاده شود. قواعد Telegram در adapter آن بمانند و وارد locator عمومی نشوند. **معیار پذیرش:** حالت باریک/عریض، دو scale و نام‌های تکراری با نتیجهٔ قابل تشخیص پوشش داده شوند.
-
-## ۴. یافته‌های runtime، صف و تأخیر
-
-### R10 — مدل، مصرف رویداد گفتار و رسیدگی به فرمان توقف را مسدود می‌کند — High
-
-**[CONFIRMED]** [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:266) به‌صورت همگام تصمیم‌گیری می‌کند؛ transport مدل در [ollama_engine.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:365) تا ۶۰ ثانیه و در انتخاب CPU تا ۱۲۰ ثانیه timeout دارد. inventory و گاهی inference دوم نیز در همین مسیرند. وجود صف مستقل action این گلوگاه را برطرف نمی‌کند.
-
-**[LIKELY]** هنگام کندی مدل، دریافت رویداد توقف و وضعیت‌های جدید عقب می‌افتد؛ صف رویداد ۲۵۶تایی و backlog صوت محدود در [live_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/live_speech_pipeline.py:137) می‌توانند باعث فشار برگشتی یا کنار گذاشتن صوت قدیمی شوند. پس از بازگشت inference نیز پیش از `worker.submit` بررسی دوبارهٔ نسل فعال بودن فرمان وجود ندارد.
-
-**اصلاح پیشنهادی:** فهم فرمان به worker مستقل با صف محدود و deadline منتقل شود؛ کنترل stop/standby مسیر اولویت‌دار داشته باشد. پاسخ مدل متعلق به نسل لغوشده یا مشاهدهٔ منقضی، پیش از gate کنار گذاشته شود. صرفاً `async` کردن امضا بدون جدا کردن I/O و inference مسدودکننده کافی نیست.
-
-### R11 — حالت انتظار، فرمان‌های ازقبل‌صف‌شده را باطل نمی‌کند — High
-
-**[CONFIRMED]** [set_commands_active](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:173) فقط flag و reset گفت‌وگو را تغییر می‌دهد؛ صف action مستقل باقی می‌ماند. `stop()` نیز فقط controller، انتخاب Telegram و power flow را متوقف می‌کند و لغو مستقیمِ مجری عمومی ندارد. [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:103) در close عمل جاری را تا ۲۰ ثانیه انتظار می‌کشد، در حالی که helper کلیک timeout برابر ۴۵ ثانیه دارد.
-
-**بازتولید:** عمل اول با executor ساختگی مسدود شد، عمل دوم در صف قرار گرفت، سپس `set_commands_active(False)` فراخوانی شد. پس از آزادسازی عمل اول، هر دو عمل اجرا شدند. هیچ برنامهٔ واقعی کنترل نشد.
-
-**[LIKELY]** در توقف کامل نیز ممکن است helper جاری بعد از اعلام مشکل توقف هنوز ورودی ارسال کند. **اصلاح پیشنهادی:** هر درخواست `session_generation` و cancellation token داشته باشد؛ standby/stop درخواست‌های شروع‌نشده را باطل کنند و مجری پیش از input دوباره token را کنترل کند. فرایند helper متعلق به درخواست باید قابل خاتمه باشد و release دکمه‌ها در cleanup طراحی شود. لغو، عمل قبلاً انجام‌شده را برنمی‌گرداند؛ نتیجهٔ آن باید `UNKNOWN` یا نتیجهٔ مشاهده‌شده باشد، نه ادعای rollback.
-
-**TODO — خطر باقی‌ماندهٔ R11:** تغییر نسل نشست، فقط درخواست‌هایی را که هنوز در مجری شروع نشده‌اند باطل می‌کند. helper کلیکی که پیش از standby یا stop شروع شده، همچنان ممکن است پس از آن ورودی ارسال کند. فرایند helper در این اصلاح متوقف یا کشته نمی‌شود. برای رفع این خطر، قرارداد لغو درون helper، بررسی لغو درست پیش از ارسال دکمه و آزادسازی تضمین‌شدهٔ دکمه در cleanup لازم است؛ نتیجهٔ عملِ آغازشده نیز باید مشاهده یا `UNKNOWN` گزارش شود.
-
-### R12 — پایان طبیعی فایل صوتی، فرمان‌های منتظر اجرا را لغو می‌کند — High
-
-**[CONFIRMED]** `finally` در [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:293) برای پایان طبیعی و توقف کاربر یکسان `worker.close()` را فراخوانی می‌کند. close در [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:103) همهٔ فرمان‌های شروع‌نشده را لغو می‌کند. مسیر فایل برخلاف میکروفون می‌تواند بسیار سریع تمام شود: [file_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/file_speech_pipeline.py:105).
-
-**بازتولید:** source محدود با سه transcript نهایی، پس از شروع عمل اول پایان یافت؛ مجری اول عمداً کند بود. نتیجه: فقط فرمان `0` اجرا شد و برای فرمان‌های `1` و `2` رویداد `CANCELLED` تولید شد. این رفتار با runtime واقعی و مجری ساختگی بازتولید شد.
-
-**اصلاح پیشنهادی:** پایان طبیعی `drain` با مهلت مشخص داشته باشد؛ توقف صریح `cancel_pending` باشد. برای فایل، ظرفیت چهارفرمانی صف نیازمند backpressure یا acknowledgement است؛ سرعت decode نباید فرمان معتبر را با `BUSY` یا پایان stream از دسترس خارج کند. آزمون موجود [test_queued_dispatch.py](/mnt/ai_projects/KYRIN/tests/actions/test_queued_dispatch.py:75) درستی cancel روی close را می‌سنجد؛ مسئله، استفاده از همان semantics در EOF است.
-
-### R13 — فهرست واژه‌های حساس، مرز مطمئن مجوز برای کلیک نیست — High
-
-**[CONFIRMED]** [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:26) یک denylist دارد که با `split()` یا برابری کل label بررسی می‌شود. ارزیابی مستقیم همین شرط، `Delete` را مسدود کرد اما `Delete...`، `Log out now` و `Erase disk` را عبور داد؛ در مورد عبارت چندکلمه‌ای، وجود `log out` در مجموعه به‌معنای یافتن آن داخل جمله نیست.
-
-**چرا مهم است:** اجازهٔ کلی `allow_focused_control` با اجازهٔ هر پیامد یکسان نیست. ترکیب این ضعف با R01 سطح اثر انتخاب اشتباه مدل را بیشتر می‌کند. **اصلاح پیشنهادی:** policy بر operation و پیامد تکیه کند؛ control شناخته‌شدهٔ ارسال/حذف/پرداخت/خروج با جزئیات هدف تأیید شود یا تا وجود چنین جریان تأییدی اجرا نشود. اصلاح Unicode و punctuation یک quick win است، اما denylist کامل و امن ایجاد نمی‌کند. unknown-risk را هم‌ارز harmless نگیرید.
-
-### R14 — timeout در caller، کار OCR را متوقف نمی‌کند — High
-
-**[CONFIRMED]** در [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:180)، درخواست عمومی OCR پس از ۱۸ ثانیه برمی‌گردد؛ `_ask` فقط `finished` را set می‌کند. `_pending` و `reader.busy` تا تکمیل worker باقی می‌مانند. backend [paddle.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/paddle.py:95) برای هر خواندن subprocess با timeout برابر ۶۰ یا ۹۰ ثانیه می‌سازد. callback مسیر visible choices می‌تواند fallback بعدی را نیز آغاز کند: [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:430).
-
-**[LIKELY]** کاربر «پیدا نشد/در دسترس نیست» می‌شنود، اما OCR هنوز منابع را مصرف می‌کند و درخواست بعدی به علت busy رد می‌شود. deadline حلقه‌های Telegram نیز با یک فراخوانی داخلیِ طولانی، deadline سراسری واقعی نیست. [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:959).
-
-**اصلاح پیشنهادی:** deadline مطلق و cancellation تا capture و backend منتقل شود؛ timeout درخواست، مجوز شروع fallback بعدی را لغو کند. backend سنگین در worker پایدار و قابل توقف نگهداری شود، با سیاست آزادسازی حافظه؛ زمان warm-up از زمان inference جدا ثبت شود. افزایش سادهٔ timeout مشکل lifecycle را حل نمی‌کند.
-
-### R15 — قطع پاسخ صوتی با صحبت کاربر در همهٔ حالت‌ها کار نمی‌کند — High
-
-**[CONFIRMED]** در نبود AEC، [PlaybackGuardInput](/mnt/ai_projects/KYRIN/src/kyrin/audio/playback_guard.py:22) صوت ورودی را هنگام فعال بودن speaker با سکوت جایگزین می‌کند. flag فعال در [speech.py](/mnt/ai_projects/KYRIN/src/kyrin/responses/speech.py:141) از زمان enqueue روشن می‌شود؛ بنابراین دورهٔ synthesis و انتظار پاسخ هم ممکن است پوشانده شود. tail پیش‌فرض ۳۵۰ میلی‌ثانیه است.
-
-**[CONFIRMED]** AEC با PipeWire وجود دارد، اما در ترکیب فعلی برای میکروفون پیش‌فرض تلاش می‌شود؛ انتخاب میکروفون مشخص این مسیر را کنار می‌گذارد. [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:528). همچنین اتصال عمومی `SpeechTransition.STARTED -> speaker.interrupt()` در مسیر live وجود ندارد؛ interrupt برای جریان‌هایی مانند power flow و تغییر تنظیم TTS استفاده می‌شود. [main.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:256)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:624).
-
-**اصلاح پیشنهادی:** echo reference برای میکروفون انتخاب‌شده برقرار شود؛ VAD معتبر ابتدا پاسخ صوتی را قطع کند و buffer کوتاه گفتار حفظ شود. تأیید یا اجرای فرمان همچنان به متن نهایی و policy وابسته بماند. اگر AEC در دسترس نیست، حالت half-duplex صریح و کنترل توقف دستی فوری ارائه شود. توقف playback باید از لغو synthesis هم تفکیک شود؛ [tts/runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/tts/runtime.py:401) generation و پخش را قطع می‌کند، اما همهٔ محاسبات backend را فوراً متوقف نمی‌کند.
-
-## ۵. یافته‌های تکمیلی: نگهداری، حافظه و امنیت
-
-### R16 — مرز مجوز پنجره در D-Bus از policy پایتون مستقل است — Medium
-
-**[CONFIRMED]** [ControlAppWindow](/mnt/ai_projects/KYRIN/integrations/gnome-shell/active-app@kyrin.local/extension.js:369) عملیات از جمله close را می‌پذیرد و در همان متد هویت caller یا session مجاز Kyrin بررسی نمی‌شود. allowanceهای Python در این endpoint اعمال نمی‌شوند؛ مسیرهای picker نیز دادهٔ مجوز را از caller می‌گیرند. این با حفاظت owner در extension تصویر یکسان نیست.
-
-**محدودهٔ خطر:** caller محلی دارای دسترسی به session bus مطرح است؛ دسترسی از اینترنت، افزایش سطح به root یا exploit روی سیستم واقعی اثبات نشده است. **اصلاح پیشنهادی:** endpoint تغییردهنده به session/capability مشخص متصل شود و با قطع owner لغو شود. چون helperهای `busctl` اتصال جدا می‌سازند، بررسی سادهٔ owner فرایند اصلی بدون طراحی broker می‌تواند رفتار فعلی را بشکند. یک broker با اتصال پایدار راه روشن‌تری است.
-
-### R17 — تاریخچهٔ متنی فعال است و archive سقف کل را دور می‌زند — Medium
-
-**[CONFIRMED]** factory هنگام ساخت مسیر فرمان تاریخچه را می‌سازد؛ [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:495). [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:310) متن‌های نهاییِ عبورکرده از فیلتر حالت شنیدن را، حتی اگر فرمان قابل اجرا نباشند، تا ۲۰۰۰ کاراکتر ذخیره می‌کند. در تنظیمات فعلی گزینهٔ صریح مستقل برای خاموش کردن این ذخیره‌سازی مشاهده نشد.
-
-**[CONFIRMED]** سقف ۲۰۰۰ turn در [history.py](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:105) فقط برای `archived=0` است. archiveهای پی‌درپی کل داده را بدون این سقف افزایش می‌دهند؛ `clear()` در [خط ۲۰۰](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:200) نیز archive را حذف نمی‌کند. این الزاماً با قصد UI برای «پاک کردن فعال‌ها» ناسازگار نیست، اما حذف کامل تاریخچه نیست.
-
-**اصلاح پیشنهادی:** کلید روشن/خاموش، سقف کل یا retention زمانی، حذف جداگانهٔ archive و توضیح دقیق دامنهٔ حذف اضافه شود. منبع داده (`microphone/file`)، حساسیت و provenance برای حافظهٔ آینده ثبت شوند. نکات مثبت موجود: permission فایل `0600`، SQL پارامتری، lock اتصال و reads محدود؛ این‌ها حفظ شوند. محتوای پایگاه دادهٔ شخصی در این بررسی خوانده نشد.
-
-### R18 — معیار تأخیر، هویت کامل عمل را نگه نمی‌دارد — Medium
-
-**[CONFIRMED]** [latency.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/latency.py:16) فقط `segment_id` را کلید می‌کند؛ اولین `ActionFeedback` با `pop` marker را حذف می‌کند. `stream_id` و `step_index` در matching نیستند و زمان‌ها زمان دریافت رویدادند، نه الزاماً زمان capture صوت.
-
-**[LIKELY]** نتایج دیررس stream قبلی با شناسه‌های تکرارشده می‌توانند به نمونهٔ جدید نسبت داده شوند؛ در plan چندمرحله‌ای نیز زمان اولین نتیجه جای زمان تکمیل کل plan را می‌گیرد. **اصلاح پیشنهادی:** `session_id + ActionKey`، زمان capture، پایان گفتار، final STT، enqueue/start action، postcondition و اولین نمونهٔ TTS جدا ثبت شوند. آمار p50/p95 به تفکیک مسیر سریع/مدل، CPU/GPU و cold/warm منتشر شود.
-
-### R19 — بودجهٔ مشترک منابع و prompt وجود ندارد — Medium
-
-**[CONFIRMED]** STT، مدل فرمان و TTS جدا مدیریت می‌شوند؛ Ollama از `keep_alive="5m"` استفاده می‌کند و TTS دو مدل رایج را warm نگه می‌دارد. [ollama_engine.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:304)، [tts/runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/tts/runtime.py:278). context مدل `4096` و سقف تولید `768` است: [ollama_engine.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:353).
-
-**[LIKELY]** هم‌زمانی مدل‌ها روی GPU محدود می‌تواند latency و پایداری حافظه را بدتر کند؛ وجود OOM در این نشست اثبات نشده است. همچنین catalog برنامه‌ها، گزینه‌های صفحه، history و prompt بدون بودجه‌بندی token ممکن است از context مؤثر فراتر روند؛ میزان آن با نام‌های فارسی و catalog واقعی باید اندازه‌گیری شود.
-
-**اصلاح پیشنهادی:** یک مدیر منابع سبک، اولویت GPU برای STT تعاملی، TTS سبک CPU و VLM فقط هنگام نیاز تعریف کند. تعداد گزینه‌ها بر اساس relevance و بودجهٔ token محدود شود؛ فیلدهای مجوز و شواهد اصلی هرگز با truncation حذف نشوند. مصرف حافظهٔ کل و زمان جابه‌جایی مدل‌ها سنجیده شود، نه فقط اندازهٔ فایل وزن.
-
-### R20 — نصب و بازیابی قابلیت‌ها قرارداد نسخهٔ کافی ندارند — Medium
-
-**[CONFIRMED]** نسخهٔ GNOME در [metadata.json](/mnt/ai_projects/KYRIN/integrations/gnome-shell/active-app@kyrin.local/metadata.json:5) به `50` محدود است و حداقل Python برابر `3.14` است. lockfile و workflow CI در فایل‌های نسخه‌دار بررسی‌شده وجود ندارد. بنابراین «پشتیبانی عمومی از هر Ubuntu» از کد نتیجه نمی‌شود.
-
-**[CONFIRMED]** انتخاب چند factory مشاهده/کنترل در [main.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:366) به availability زمان startup وابسته است؛ فقط برخی قابلیت‌ها بعداً کشف می‌شوند. **[LIKELY]** فعال‌شدن دیرهنگام extension می‌تواند بدون restart قابلیت‌ها را ناقص باقی بگذارد. سند پروژه نیز تفاوت فایل نصب‌شده با ماژول واقعاً بارشده را گزارش کرده است: [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:85).
-
-**اصلاح پیشنهادی:** startup probe بدون input، `GetCapabilities/ProtocolVersion`، تشخیص session، retry محدود برای سرویس دیررس و گزارش نسخهٔ بارشده اضافه شود. فایل نصب‌شده و فرایند فعال جدا نمایش داده شوند. نسخه‌های runtimeها و hash مدل‌های مورد آزمون در manifest ثبت شوند؛ artifactهای حجیم مطابق سیاست پروژه روی `/mnt/ai_projects/KYRIN/` بمانند.
-
-### R21 — بعضی مدل‌های OCR کد محلی مدل را با اعتماد کامل بار می‌کنند — Medium
-
-**[CONFIRMED]** [document_worker.py](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/document_worker.py:145) از `trust_remote_code=True` همراه `local_files_only=True` استفاده می‌کند. حالت offline دانلود را محدود می‌کند، ولی مانع اجرای کد داخل مدل نمی‌شود. subprocess با همان user نیز sandbox امنیتی کامل نیست.
-
-**اصلاح پیشنهادی:** provenance و hash بستهٔ مدل/runtime ثبت و فقط artifact بررسی‌شده بار شود؛ برای worker پردازش اسناد، دسترسی فایل و شبکه متناسب با نیاز محدود شود. **هیچ مدل مخرب یا سرقت اطلاعاتی در این بررسی کشف یا اثبات نشده است.**
-
-### R22 — پیچیدگی در چند نقطهٔ مرکزی متمرکز شده است — Medium
-
-**[CONFIRMED]** با شمارش AST، `DemoCommandInterpreter.interpret` حدود ۷۴۰ خط، `UbuntuSessionFactory.__call__` حدود ۵۸۰ خط، `CommandCoordinator.observe` حدود ۳۳۱ خط و `ModelAssistedInterpreter.interpret` حدود ۲۹۷ خط است. [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:213)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:271)، [coordinator.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/coordinator.py:107)، [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:195).
-
-**پیامد قابل مشاهده:** بررسی مشترک عملیات در یک شاخه انجام می‌شود و در شاخهٔ دیگر جا می‌ماند؛ دو مسیر کلیک قرارداد هندسی متفاوت پیدا کرده‌اند. این صرفاً سلیقهٔ نام‌گذاری نیست. **اصلاح پیشنهادی:** ابتدا validator مشترک، geometry مشترک و lifecycle درخواست را استخراج کنید؛ سپس handlerهای operation را جدا کنید. تغییر نام `DemoCommandInterpreter` به نامی مطابق نقش production، اولویت پایین‌تری از اصلاح رفتار دارد. وجود Protocolها، type annotation و dependency injection فعلی مبنای مناسب این تفکیک است.
-
-### R23 — پوشش تست فراوان است، اما مرزهای اتصال نیاز به تست تازه دارند — Medium
-
-**[CONFIRMED]** تست‌های geometry، pointer delay، permission، model failure و صف وجود دارند؛ از جمله [test_desktop_control_helper.py](/mnt/ai_projects/KYRIN/tests/actions/test_desktop_control_helper.py:30)، [test_model_interpreter.py](/mnt/ai_projects/KYRIN/tests/commands/test_model_interpreter.py:527) و [test_queued_dispatch.py](/mnt/ai_projects/KYRIN/tests/actions/test_queued_dispatch.py:39). تست‌های فعلی helper حتی سایه را پوشش می‌دهند؛ ادعای «پروژه تست ندارد» غلط است.
-
-**[CONFIRMED]** با این حال بازتولیدهای R01، R02، R11 و R12 در ترکیب اجزا شکست منطقی نشان دادند. **اصلاح پیشنهادی:** تست‌های قرارداد میان لایه‌ها اولویت بگیرند: خروجی متناقض مدل، EOF در زمان اجرای کند، لغو هنگام inference/portal، دو پنجرهٔ یک PID، scale همراه سایه و OCR پایان‌یافته پس از timeout. mockهای موفق جای تست واقعی portal/extension را نگیرند؛ دو سطح deterministic و hardware acceptance جدا گزارش شوند.
-
-### R24 — نام‌گذاری و تشخیص خطا را می‌توان پس از اصلاح رفتار ساده‌تر کرد — Low
-
-**[CONFIRMED]** عنوان «Demo» برای interpreter اصلی، تفاوت `ready` با «قابل استفاده بودن فقط accessibility»، و چند تبدیل متفاوت `None/False/UNKNOWN` فهم خطا را دشوار می‌کنند؛ [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:213)، [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:192). **پیشنهاد:** خطاهای ساخت‌یافتهٔ `permission_denied / no_match / ambiguous / stale / timeout / backend_unavailable` حفظ شوند و پیام کاربر از علت فنی جدا باشد. log مدت و کلاس خطا کافی است؛ ذخیرهٔ پیش‌فرض متن صفحه یا screenshot برای debug لازم نیست.
-
-## ۶. تشخیص دقیق مسئلهٔ کلیک و انتخاب جایگزین
-
-### چرا «متن را پیدا کن و مرکز آن را بزن» کافی نیست؟
-
-| عامل | وضعیت در این نسخه | نتیجهٔ مهندسی |
-|---|---|---|
-| کیفیت OCR و confidence | `[CONFIRMED]` محدودیت آستانه و زبان در R08؛ اصلاح quotation و overlap قبلاً انجام شده است. | patchهای حل‌شده را تکرار نکنید؛ corpus فارسی/انگلیسی و calibration لازم است. |
-| وجود متن تکراری | `[CONFIRMED]` `unique_visible_target` فقط یک تطابقِ پذیرفته‌شده می‌خواهد؛ [visible_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_control.py:79). | رد کردن ambiguity درست است؛ انتخاب اولین match راه‌حل نیست. parent/role/region/شناسهٔ پایدار برای رفع ابهام اضافه شود. |
-| fuzzy matching | `[CONFIRMED]` lookup نهایی عمومی عمدتاً literal است، اما مدل می‌تواند label دیگری را از ID برگزیند؛ R01. | شباهت املایی فقط برای ساخت candidate استفاده شود؛ بدون شواهد مستقل به مجوز کلیک تبدیل نشود. |
-| متن در برابر کنترل | `[CONFIRMED]` inventory OCR حتی متن غیرقابل کلیک را هم می‌تواند گزینه کند؛ توضیح خود تابع نیز این محدودیت را می‌گوید. | نقش، parent، شکل/ناحیه و پس‌شرط باید شواهد تکمیلی باشند. متن روی صفحه command نیست. |
-| scale و DPI | `[CONFIRMED]` قرارداد فعلی محدود و heuristic است؛ R03. | واحد screenshot pixel، OCR pixel و logical desktop pixel باید جدا باشد. |
-| crop و بزرگ‌نمایی | `[CONFIRMED]` تبدیل معکوس crop در reader وجود دارد، اما همهٔ اطلاعات هندسی تا Telegram نمی‌رسد؛ R04 و R09. | تمام تبدیل‌ها ترکیب‌پذیر و با metadata باشند؛ از double-scaling جلوگیری شود. |
-| چند مانیتور | `[CONFIRMED]` frame مختصات signed دارد؛ مبدأ منفی به‌خودی‌خود در کد ممنوع نیست. `[SPECULATION]` mixed-DPI و پنجرهٔ spanning هنوز نیازمند آزمون واقعی‌اند. | خرابی همهٔ چندمانیتورها ادعا نمی‌شود. مانیتور سمت چپ/بالا، scale متفاوت و انتقال پنجره باید جدا آزموده شوند. |
-| حرکت پنجره | `[CONFIRMED]` تغییر frame بررسی می‌شود؛ تغییر محتوای همان پنجره و هویت پنجرهٔ هم‌PID کامل پوشش ندارد؛ R05. | token و freshness مستقل از geometry لازم است. |
-| آماده نبودن UI | `[CONFIRMED]` انتظار pointer و چند خواندن پایدار Telegram وجود دارد؛ پس‌شرط عمومی و deadline واحد نیست. | به event/state مشخص یا polling محدود وابسته شوید، نه sleep ثابتِ طولانی. |
-| X11 و Wayland | `[CONFIRMED]` نشست فعلی Wayland و مسیر موجود portal/GNOME است. | adapter بر اساس قابلیت واقعی انتخاب شود؛ وجود executable معادل کارکرد آن نیست. |
-
-در X11، ابزارهایی مانند `xdotool` برای ورودی قابل استفاده‌اند؛ همان ابزار راه‌حل عمومی برنامه‌های native Wayland نیست. خود پروژهٔ xdotool این محدودیت را توضیح می‌دهد. در Wayland مسیر portal یا backend پشتیبانی‌شدهٔ compositor لازم است. [مستندات xdotool](https://github.com/jordansissel/xdotool)، [RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html).
-
-**پیشنهاد هندسی:** این تبدیل فقط برای capture با scale یکنواخت مثال است؛ اگر تصویر ترکیبی از چند مانیتور با scale متفاوت باشد، تبدیل هر ناحیه باید جدا تعریف شود.
-
-<div dir="ltr">
-
-```text
-ocr_point -> undo OCR resize -> add crop origin -> screenshot_point
-
-desktop_x = capture_origin_x + (screenshot_x - padding_left_px) / scale_x
-desktop_y = capture_origin_y + (screenshot_y - padding_top_px)  / scale_y
-
-Required metadata:
-  window_token, capture_id, captured_at_monotonic
-  coordinate_space, monitor_id, logical_rect, image_size
-  scale_x, scale_y, padding_px, crop_origin_px, ocr_resize
-```
-
-</div>
-
-`padding` در این فرمول پیکسلِ تصویر و `capture_origin` مختصات منطقی ناحیهٔ بدون padding است. اگر backend تعریف دیگری دارد، قرارداد باید همان را صریح کند؛ نام مبهم `x/y` کافی نیست. نقطهٔ نهایی باید داخل target و viewport معتبر باشد و پیش از dispatch دوباره اعتبار آن بررسی شود.
-
-### بهترین روش برای هر مورد
-
-این جدول **پیشنهاد طراحی** است؛ برتری‌های سرعت و قابلیت اعتماد، مقایسهٔ ساختاری‌اند و benchmark اندازه‌گیری‌شدهٔ این ماشین نیستند.
-
-| روش | بهترین کاربرد | مزیت | محدودیت و تصمیم پیشنهادی |
+| policy پیش از تشخیص | **[CONFIRMED]** F02؛ برای بسیاری از labelها اصلاً OCR اجرا نمی‌شود. | ابتدا error stage را بخوانید؛ مدل OCR عوض نشود. |
+| screenshot scaling / DPI | **[CONFIRMED]** converter جدید scale صریح دارد؛ producer هنوز فرض padding دارد. | آزمون زنجیرهٔ واقعی capture تا input؛ DPI metadata از scale فیزیکی جدا باشد. |
+| crop و resize | **[CONFIRMED]** Qt تبدیل معکوس دارد؛ F13. | یک بار تبدیل در مرز مشخص؛ bbox در coordinate space اعلام‌شده. |
+| multi-monitor | **[CONFIRMED]** مختصات منفی مجاز است. **[SPECULATION]** mixed-DPI/spanning تأیید نشده. | مانیتور چپ/بالا، scale متفاوت و انتقال پنجره جدا آزمایش شوند. |
+| X11/Wayland | **[CONFIRMED]** مسیر جاری GNOME/portal و نشست Wayland است. | adapter براساس capability واقعی؛ جایگزینی با xdotool برای native Wayland مناسب نیست. |
+| حرکت پنجره | **[CONFIRMED]** token/frame برای OCR جدید کنترل می‌شود. | token از آغاز درخواست و برای AT-SPI هم حفظ شود؛ F14. |
+| تغییر تصویر نامرتبط | **[CONFIRMED]** کل PNG مقایسه می‌شود. | metadata و نواحی پویا از اعتبار هدف جدا شوند؛ F01. |
+| confidence پایین | **[CONFIRMED]** حداقل ۰٫۶۵ برای هر span؛ score ناموجود رد می‌شود. | calibration و خواندن هدفمند ROI؛ افت یک کلمه در عبارت مهم است. |
+| duplicate text | **[CONFIRMED]** locator عمومی فقط match یکتا می‌پذیرد. | رد ابهام درست است؛ role/parent/region/شناسه برای رفع ابهام لازم است. |
+| fuzzy/phonetic | **[CONFIRMED]** Telegram از پیشنهاد عنوان OCR و قواعد شباهت استفاده می‌کند؛ عنوان یکتا می‌تواند مستقیماً dispatch شود. [visible_chat_grounding.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_chat_grounding.py:1)، [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:242). | یکتا بودن مشاهده، اثبات هویت مخاطب نیست؛ نام/شناسهٔ تأییدشده برای عملیات داده‌ای لازم است. |
+| آماده نبودن UI | **[CONFIRMED]** sleep و reread محدود هست، deadline واحد و پس‌شرط عمومی نیست. | انتظار برای state/event مشخص؛ retry محدود با بودجهٔ کل. |
+| text در برابر control | **[CONFIRMED]** متن OCR clickable بودن را ثابت نمی‌کند؛ خود docstring inventory این را می‌گوید. | candidate با role/parent/state یا شواهد ساختاری تکمیل شود. |
+
+پشتیبانی Wayland باید حفظ شود؛ ابزارهای X11 را نمی‌توان راه‌حل عمومی این نشست دانست. [توضیح خود xdotool](https://github.com/jordansissel/xdotool)، [قرارداد RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html).
+
+### بهترین راه برای هر حالت
+
+این جدول **پیشنهاد طراحی** است؛ مقایسهٔ سرعت، ساختاری است و benchmark این سخت‌افزار نیست.
+
+| روش | بهترین مورد استفاده | مزیت | محدودیت و جایگاه |
 |---|---|---|---|
-| API یا فرمان رسمی برنامه | عمل مشخص مانند بازکردن برنامه، ایجاد tab یا تعامل داده‌ای با سرویس | هدف و نتیجه ساخت‌یافته؛ بدون خطای pixel | معنای API باید با هدف کاربر یکی باشد؛ تغییر داده در سرویس معادل navigation پنجرهٔ دسکتاپ نیست. برای عملیات دارای API قابل اتکا، اولویت اول. |
-| keyboard shortcut | navigation ثابت و شناخته‌شده پس از تأیید focus | سریع و کم‌هزینه؛ بدون OCR | context، layout کیبورد، shortcut سفارشی و dialog مهم‌اند؛ shortcut باید در نسخهٔ هدف بررسی و نتیجه مشاهده شود. adapterهای فعلی Telegram/Ptyxis نقطهٔ شروع‌اند. |
-| AT-SPI semantic action | کنترل استاندارد با name/role/action/state معتبر | شناسایی مستقل از theme و scale؛ امکان خواندن state | همهٔ برنامه‌ها tree خوب ندارند؛ virtualized UI، widget سفارشی و تنظیم accessibility ممکن است مانع باشند. مسیر پیش‌فرض کنترل عمومی پس از اصلاح R07. |
-| OCR همراه شواهد ساختاری | کنترل دارای label که accessibility مناسبی ندارد | محلی، نسبتاً سبک، قابل استفاده برای فارسی و انگلیسی با مدل درست | متن به‌تنهایی clickable بودن را ثابت نمی‌کند؛ duplicates، segmentation و geometry باقی می‌مانند. fallback هدفمند روی ناحیهٔ کوچک. |
-| template matching / icon detection | آیکون ثابت در toolbar مشخص و theme/version معلوم | CPU کم‌هزینه و بدون LLM؛ برای عناصر بدون متن مفید | template با theme، scale و حالت hover تغییر می‌کند؛ چند scale و نمونهٔ منفی لازم است. الگوریتم match امتیاز شباهت می‌دهد، احتمال موفقیت عمل نمی‌دهد. |
-| VLM برای UI grounding | رابط سفارشی، canvas یا کنترل تصویریِ فاقد شواهد کافی | candidate تولید می‌کند و توصیف بصری را به ناحیه ربط می‌دهد | latency، VRAM، خطای مکان‌یابی و دستورهای فریبندهٔ داخل تصویر؛ فقط candidate با bbox، crop و شاهد تولید کند و از policy عبور کند. |
-| ترکیب محدود روش‌ها | استفادهٔ واقعی روزانه در چند برنامه | استفاده از ارزان‌ترین شاهد کافی؛ fallback قابل توضیح | نیازمند قرارداد واحد و ثبت علت شکست؛ اجرای همهٔ backendها در هر درخواست توصیه نمی‌شود. |
+| API/CLI رسمی برنامه | operation شناخته‌شده با پاسخ ساخت‌یافته، مانند ایجاد tab | بدون خطای pixel و اغلب سریع | معنای API باید همان خواستهٔ کاربر باشد؛ تغییر دادهٔ سرویس لزوماً navigation پنجره نیست. اولویت اول در ابزارهای مشخص. |
+| keyboard shortcut | navigation ثابت با focus و وضعیت معلوم | بسیار سبک؛ بی‌نیاز از OCR | shortcut سفارشی، layout، dialog و نسخهٔ برنامه مهم‌اند؛ باید پس‌شرط بررسی شود. |
+| AT-SPI semantic action | widget استاندارد دارای name/role/action/state | مستقل‌تر از theme/scale و قابل بررسی | widget سفارشی یا tree ناقص مانع است؛ برای کنترل عمومی قابل دسترس، انتخاب نخست. |
+| OCR هدفمند | label قابل خواندن با tree ناکافی | محلی و کم‌هزینه‌تر از VLM | متن، clickable بودن و هویت را ثابت نمی‌کند؛ duplicate، RTL و geometry لازم‌اند. |
+| template matching / icon detector | آیکون پایدار در toolbar/ROI مشخص | CPU سبک؛ مناسب عنصر بی‌متن | theme/scale/hover/version متفاوت و false match؛ چند template و نمونهٔ منفی لازم است. |
+| VLM متخصص GUI grounding | canvas یا رابط تصویری بدون شواهد کافی | از توصیف بصری candidate تولید می‌کند | latency/VRAM، hallucination مختصات، prompt injection تصویری؛ آخرین fallback با verifier مستقل. |
+| hybrid محدود | استفادهٔ روزانه در برنامه‌های متفاوت | ارزان‌ترین روشِ دارای شاهد کافی | قرارداد مشترک، علت شکست روشن و بودجهٔ recovery لازم است؛ همهٔ روش‌ها در هر درخواست اجرا نشوند. |
 
-**AT-SPI برای OpenRGB تضمین نیست.** `[CONFIRMED]` سند پروژه می‌گوید در بررسی قبلی tree فاقد کنترل‌های نام‌دار بوده است. `[SPECULATION]` ممکن است تنظیم accessibility Qt، نسخهٔ برنامه یا widget سفارشی علت باشد؛ برای تشخیص، tree همان نسخه با تنظیم فعال‌سازی accessibility بررسی شود. Qt برای Linux وضعیت accessibility روی D-Bus و متغیر `QT_LINUX_ACCESSIBILITY_ALWAYS_ON` را مستند کرده است، اما فعال‌سازی آن برای widget فاقد پیاده‌سازی مناسب معجزه نمی‌کند. [مستندات QAccessible](https://doc.qt.io/qt-6/qaccessible.html).
+API دسترس‌پذیری actionهای قابل فراخوانی دارد؛ صرف گرفتن مختصات تنها کاربرد AT-SPI نیست. مقدار true از `do_action` نیز به معنی پذیرفته‌شدن action است؛ state نهایی همچنان باید خوانده شود. [مستندات رسمی](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Action.do_action.html).
 
-برای template matching از جست‌وجوی محدود در ROI و مجموعهٔ template وابسته به theme/scale استفاده شود؛ تبدیل bbox آن باید دقیقاً از همان geometry مشترک عبور کند. منبع الگوریتم: [راهنمای رسمی OpenCV](https://docs.opencv.org/4.13.0/d4/dc6/tutorial_py_template_matching.html).
+**OpenRGB:** **[CONFIRMED]** سند پروژه از tree فاقد کنترل نام‌دار در آزمایش قبلی خبر می‌دهد؛ این بررسی آن tree را دوباره نخواند. **[SPECULATION]** علت می‌تواند تنظیم accessibility Qt یا widget سفارشی باشد. با inspector فقط‌خواندنی، نقش‌ها/stateها و فعال بودن accessibility همان نسخه بررسی شود. Qt گزینهٔ `QT_LINUX_ACCESSIBILITY_ALWAYS_ON` را مستند کرده است؛ فعال‌کردن آن تضمین پشتیبانی widget سفارشی نیست و در این کار اعمال نشد. [QAccessible](https://doc.qt.io/qt-6/qaccessible.html).
 
-برای VLM، مدل‌های تخصصی GUI مانند [UI-TARS-1.5-7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) نمونهٔ قابل ارزیابی‌اند، نه پیشنهاد نصب فوری برای GPU محدود. حتی برآورد وزن خام ۴بیتی، حافظهٔ activation، KV cache، encoder تصویر و سربار runtime را شامل نمی‌شود. `[SPECULATION]` اینکه مدل کوچک‌تر یا quantized روی این دستگاه هم سریع و هم دقیق باشد، فقط با corpus خود Kyrin مشخص می‌شود. ابتدا crop محدود و اجرای on-demand بررسی شود؛ CPU fallback برای VLM هم الزاماً interactive نیست.
+برای template matching، ROI، scale pyramid و margin میان بهترین و دومین candidate لازم است؛ score شباهت احتمال موفقیت عمل نیست. افزودن OpenCV فقط در صورت نیاز اثبات‌شده انجام شود؛ وابستگی جدید در این بررسی اضافه نشده است. [راهنمای OpenCV](https://docs.opencv.org/4.13.0/d4/dc6/tutorial_py_template_matching.html).
 
-### Telegram: کجا API بهتر است؟
+برای VLM می‌توان خانوادهٔ کوچک‌تر متخصص GUI مانند GUI-Actor-2B را در benchmark اختصاصی ارزیابی کرد؛ نتایج عمومی آن تضمین دقت فارسی، GNOME یا OpenRGB نیست. **[SPECULATION]** اینکه نسخهٔ quantized روی دستگاه حاضر latency مناسب بدهد، هنوز معلوم نیست. وزن خام ۲B در ۴bit تقریباً ۱GB است، اما encoder تصویر، activation، KV cache و runtime حافظهٔ اضافه می‌خواهند. crop هدفمند و on-demand بر مدل بزرگِ همیشه‌مقیم ترجیح دارد. [پژوهش و مدل‌های نویسندگان GUI-Actor](https://microsoft.github.io/GUI-Actor/). هیچ دانلودی توصیهٔ اجرایی یا انجام نشده است.
 
-**پیشنهاد:** برای «این chat را در Telegram Desktop نشان بده»، shortcut و adapter رابط دسکتاپ با verification مناسب‌اند. برای «فهرست chatها را بخوان» یا تعامل ساخت‌یافته با دادهٔ حساب، TDLib می‌تواند مسیر جداگانه‌ای باشد. **Bot API جای حساب شخصی را نمی‌گیرد**؛ TDLib نیز یک client با ورود، مجوز و state مستقل می‌سازد و به‌طور خودکار پنجرهٔ Telegram Desktop را روی همان صفحه نمی‌برد. تغییرات UI و تنظیمات محلی دسکتاپ لزوماً API معادل ندارند. انتخاب این مسیر باید بر اساس نیاز محصول باشد، نه صرفاً فرار از OCR. [APIهای رسمی Telegram](https://core.telegram.org/)، [شروع کار با TDLib](https://core.telegram.org/tdlib/getting-started).
+### Telegram: shortcut، Bot API و TDLib معادل نیستند
+
+**پیشنهاد:** برای «این chat را در پنجرهٔ Telegram نشان بده»، adapter دسکتاپ و shortcut رسمیِ نسخهٔ مورد استفاده با verification مناسب‌اند؛ نمونهٔ فعلی `Ctrl+0` برای Saved Messages در کد وجود دارد. برای فهرست chatها، هویت قطعی مخاطب یا عملیات ساخت‌یافتهٔ حساب، TDLib می‌تواند adapter دادهٔ جداگانه باشد.
+
+Bot API یک bot را کنترل می‌کند و جای حساب شخصی مالک نیست. TDLib یک client با authorization، storage و updateهای مستقل می‌سازد؛ پنجرهٔ Telegram Desktop را خودکار روی همان صفحه نمی‌برد و تمام تنظیمات محلی Desktop هم API معادل ندارند. هزینهٔ نگهداری نشست، `api_id/api_hash` و دادهٔ حساب باید با نیاز محصول توجیه شود. این‌ها به پروژه افزوده نشده‌اند. [راهنمای رسمی TDLib](https://core.telegram.org/tdlib/getting-started)، [مستندات botهای Telegram](https://core.telegram.org/api/bots).
 
 ### خط لولهٔ کلیک پیشنهادی
 
 <div dir="ltr">
 
 ```text
-User intent
-    -> validate operation + requested target
-    -> observe current window + capabilities
-    -> locate candidates (API / shortcut / AT-SPI / OCR / icon / VLM)
-    -> resolve ambiguity + bind target to evidence
-    -> check policy + precondition + deadline + cancellation
-    -> revalidate window/target immediately before dispatch
+Intent + source evidence
+    -> validate operation / target / direction / state
+    -> observe window token + capabilities + deadline
+    -> locate: app API / shortcut / AT-SPI / OCR / icon / VLM
+    -> resolve ambiguity; bind requested target to observed evidence
+    -> policy / confirmation / permission epoch / cancellation
+    -> refresh target after permission dialogs; revalidate before input
     -> execute once
     -> observe semantic postcondition
     -> CONFIRMED | DISPATCHED_UNVERIFIED | FAILED | CANCELLED
-                     |
-                     +-> bounded recovery only when safe
+                         |
+                         +-> bounded, safe recovery
 ```
 
 </div>
 
-۱. **مشاهده:** یک snapshot دارای token، timestamp، geometry و capability بگیرید. برای action دسترس‌پذیری، screenshot اجباری نباشد. اگر ابتدا dialog مجوز portal باز می‌شود، snapshot قبل از آن مصرف نشود؛ بعد از بازگشت دوباره مشاهده کنید.
+۱. **مشاهده:** token پنجره، capture ID، زمان monotonic، coordinate space و قابلیت‌های قابل استفاده ثبت شوند. action معنایی AT-SPI به screenshot اجباری وابسته نباشد.
 
-۲. **مکان‌یابی:** برای عمل شناخته‌شده، adapter رسمی/shortcut؛ برای کنترل عمومی، AT-SPI؛ سپس OCR یا icon در ROI؛ و فقط در صورت نیاز VLM. شکست هر روش باید `unavailable`، `no_match` یا `ambiguous` را از هم جدا کند.
+۲. **مکان‌یابی:** برای operation شناخته‌شده، ابزار برنامه/shortcut؛ برای کنترل عمومی AT-SPI؛ سپس OCR/icon در ROI و نهایتاً VLM. `unavailable/no_match/ambiguous/stale` جدا باشند.
 
-۳. **تطبیق درخواست:** `requested_target` و `observed_target` جدا حفظ شوند. similarity بالا بدون نقش/parent/operation معتبر کافی نیست. در ambiguity، نام parent یا گزینه‌ها برای رفع ابهام استفاده شود؛ انتخاب خودکار اولین یا نزدیک‌ترین متن ممنوع باشد.
+۳. **اتصال هدف:** هدف گفتار، label مشاهده‌شده، role، parent و دلیل تطابق حفظ شوند. مدل فقط candidate پیشنهاد کند؛ ID معتبر به‌تنهایی رضایت کاربر نیست. اصلاح target نامطمئن به رفع ابهام منجر شود.
 
-۴. **بررسی پیش از عمل:** پنجره، focus، generation، state، مهلت و permission دوباره بررسی شوند. اگر کاربر pointer یا focus را جابه‌جا کرده است، درخواست قدیمی دوباره locate شود یا متوقف گردد؛ ورودی کاربر نباید با تصحیح پی‌درپی pointer خنثی شود.
-
-۵. **اجرا:** `do_action/select/set_value` در صورت پشتیبانی؛ در غیر این صورت حرکت و click از actuator مشترک. در portal، `NotifyPointerMotionAbsolute` مختصات نسبت به PipeWire stream می‌خواهد؛ جایگزین مستقیم مختصات global فعلی نیست. backend باید فضای مختصات خود را اعلام کند. [قرارداد مختصات portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html).
-
-۶. **بررسی نتیجه:** برای toggle مقدار نهایی؛ برای بازکردن settings، وجود dialog یا عنوان و کنترل مشخص؛ برای chat، شناسه یا شواهد یکتای header؛ برای Apply، state قابل مشاهدهٔ برنامه در صورت دسترسی. اگر نتیجه قابل مشاهده نیست، همان `DISPATCHED_UNVERIFIED` باقی بماند. image diff به‌تنهایی معیار موفقیت نباشد.
-
-۷. **بازیابی محدود:** اگر ثابت شده input ارسال نشده، یک locate مجدد یا strategy بعدی مجاز است. اگر input ارسال شده ولی نتیجه نامعلوم است، ابتدا وضعیت فعلی بررسی شود؛ **کلیک دوبارهٔ toggle، Send، Delete یا Buy تکرار امن نیست.** برای عمل واقعاً idempotent می‌توان یک retry محدود با بودجهٔ مشترک داشت. «سه strategy، پس سه click» سیاست عمومی مناسبی نیست.
-
-**قرارداد پیشنهادی نتیجه:** به‌جای `bool` تنها، نتیجه دارای `request_id`، `strategy`، `target_evidence`، `dispatch_state`، `postcondition_state`، `failure_reason` و timings باشد. API سادهٔ `click_element(...) -> bool` می‌تواند فقط wrapper بیرونی باشد؛ حذف جزئیات در لایهٔ داخلی امکان recovery صحیح را از بین می‌برد.
-
-## ۷. خط لولهٔ صوت و تخصیص منابع
-
-### زمان‌بندی فعلی: تنظیمات با اندازه‌گیری اشتباه نشوند
-
-| مرحله | واقعیت مشاهده‌شده | اقدام پیشنهادی |
-|---|---|---|
-| بیدارباش | `[CONFIRMED]` حالت standby فرمان‌های متنیِ پس از STT را فیلتر می‌کند؛ wake-word detector صوتیِ مستقل در این مسیر نیست. [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:193)، [voice_control.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/voice_control.py:1). | اگر مصرف دائمی STT مسئله است، wake detector سبک CPU به‌صورت اختیاری اضافه شود؛ حساسیت و false wake فارسی سنجیده شود. |
-| دریافت و VAD | `[CONFIRMED]` Silero و framing ۱۶ کیلوهرتز با قاب ۵۱۲ نمونه، یعنی ۳۲ms؛ تأیید شروع پیش‌فرض ۶۴ms است. [silero_vad.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/activity/silero_vad.py:1)، [live_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/live_speech_pipeline.py:53). | VAD روی CPU بماند؛ latency صوت با timestamp capture سنجیده شود. |
-| پایان گفتار | `[CONFIRMED]` pause پیش‌فرض ۳۸۴ms و برای backend موسوم به `omnilingual` برابر ۸۰۰ms است. [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:592). | این زمان بخش مستقیم تأخیر پس از آخرین کلمه است؛ کاهش آن با نرخ جملهٔ ناقص و split فارسی ارزیابی شود. |
-| STT زنده | `[CONFIRMED]` Whisper از ۰٫۵s pre-roll و partialهای با شروع ۱٫۵s و فاصلهٔ ۲٫۵s استفاده می‌کند؛ پنجرهٔ preview تا ۸s و turn تا ۳۰s. [whisper.py](/mnt/ai_projects/KYRIN/src/kyrin/stt/backends/whisper.py:32). | partial و final محاسبات مجزا دارند؛ هزینهٔ preview سنجیده شود. برای کاربر بی‌نیاز از preview، خاموش‌کردن یا کاهش بسامد آن می‌تواند مفید باشد. |
-| transport STT | `[CONFIRMED]` timeout درخواست Whisper server برابر ۸s است. [whisper_server.py](/mnt/ai_projects/KYRIN/src/kyrin/stt/backends/whisper_server.py:187). | timeout و مدل انتخابی باید با سرعت واقعی CPU/GPU سازگار باشند؛ CPU کند با افزایش timeout به دستیار سریع تبدیل نمی‌شود. |
-| فهم فرمان | `[CONFIRMED]` fast rules از LLM عبور نمی‌کند؛ مسیر مدل timeoutهای ۶۰/۱۲۰s و گاهی دو inference دارد. | فرمان‌های رایج با قواعد باقی بمانند؛ inference در worker مستقل و با بودجهٔ زمان محصول اجرا شود. |
-| اجرای GUI | `[CONFIRMED]` inventory، capture، OCR، ساخت helper، portal و verification ممکن است چندبار پشت سر هم رخ دهند. | AT-SPI و shortcut، reuse نشست ورودی و cache فقط برای metadata پایدار؛ مختصات قدیمی cache نشوند. |
-| TTS | `[CONFIRMED]` صف مستقل وجود دارد، ولی synthesis و پخش مراحل جدا و زمان تا اولین نمونه هنوز جدا گزارش نمی‌شود. [speech.py](/mnt/ai_projects/KYRIN/src/kyrin/responses/speech.py:83). | پاسخ‌های کوتاه، TTS سبک CPU، prewarm محدود و لغو سریع؛ پاسخ توضیحی طولانی نباید مانع شنیدن فرمان شود. |
-
-مدل ذهنی اندازه‌گیریِ پیشنهادی:
+۴. **هندسه:** قرارداد جدید حفظ و producer آن آزموده شود. فرمول زیر برای یک ناحیه با scale مشخص است؛ تصویر ترکیبی با scale متفاوت به تبدیل ناحیه‌ای نیاز دارد.
 
 <div dir="ltr">
 
 ```text
-last spoken sample -> endpoint/VAD wait -> STT final
-  -> interpretation queue + inference
-  -> action queue + locate + dispatch + postcondition
+source_x = crop_origin_x + ocr_x / ocr_resize_x
+source_y = crop_origin_y + ocr_y / ocr_resize_y
+desktop_x = logical_origin_x + (source_x - padding_left_px) / scale_x
+desktop_y = logical_origin_y + (source_y - padding_top_px) / scale_y
 
-first audible response = response-ready + TTS queue + synthesis-to-first-audio
+Evidence:
+request_id, window_token, capture_id, captured_at_monotonic
+image_size, logical_rect, viewport, scale, padding, crop, resize
+target_bbox, locator_strategy, role, state, deadline, permission_epoch
 ```
 
 </div>
 
-**[CONFIRMED، منبع مستندات؛ بازاندازه‌گیری نشده]** [LIVE_PATH_COMPARISON.md](/mnt/ai_projects/KYRIN/docs/stt/LIVE_PATH_COMPARISON.md:92) برای چهار clip روی GPU گرم، تأخیر اولین final نسبت به پایان فایل را حدود `0.10s` برای `small` و `0.24s` برای `turbo-q5` گزارش می‌کند؛ همان سند برای CPU `small` حدود `10.4–11.4s` و برای درخواست مستقیم دیگر `8.23s` inference گزارش کرده است. این‌ها latency پایان‌به‌پایان فرمان یا آمار عمومی فارسی نیستند. [CONVERSATION_MEMORY.md](/mnt/ai_projects/KYRIN/docs/commands/CONVERSATION_MEMORY.md:75) نیز یک آزمایش warm با executor بی‌اثر و زمان حدود `1100.60ms` از شروع تأییدشدهٔ گفتار دارد؛ زمان واقعی بازشدن Telegram را اندازه نمی‌گیرد.
+اگر bbox از قبل به source image تبدیل شده، crop/resize دوباره اعمال نشوند. point باید داخل bbox معتبر و viewport بماند. مختصات global را بدون تطبیق قرارداد به `NotifyPointerMotionAbsolute` ندهید؛ این method به PipeWire stream و فضای منطقی آن وابسته است. [قرارداد portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html).
 
-**هدف اولیهٔ پیشنهادی، نه ادعای عملکرد فعلی:** برای فرمان کوتاهِ مسیر قواعد، p95 از آخرین نمونهٔ گفتار تا آغاز اجرای عمل حدود ۱٫۵ ثانیه یا کمتر هدف‌گذاری شود؛ برای قطع خروجی صوتی پس از تشخیص گفتار معتبر، حدود ۲۰۰ms یا کمتر. اگر سخت‌افزار/زبان این هدف را نمی‌دهد، stageهای اندازه‌گیری‌شده نشان دهند کدام بخش باید تغییر کند. برای کل عملیات GUI، زمان پس‌شرط جدا گزارش شود؛ اعلام «انجام شد» را جلو نیندازید تا عدد latency زیباتر شود.
+۵. **پیش از اجرا:** focus/token/frame، permission epoch، state، cancellation و budget کنترل شوند. dialog مجوز می‌تواند هدف را قدیمی کند؛ بعد از بسته‌شدن آن دوباره locate شود.
 
-### محلی یا ابری، CPU یا GPU؟
+۶. **اجرا و تأیید:** action معنایی در صورت پشتیبانی؛ در غیر این صورت input از broker مشترک. سپس checked state، صفحهٔ مقصد یا هویت chat بررسی شود. image diff شاهد کمکی است؛ blinking cursor می‌تواند diff بسازد و Apply موفق ممکن است تغییر بصری کمی داشته باشد.
 
-این جدول **پیشنهاد برای محدودیت VRAM** است؛ انتخاب قطعی مدل به benchmark محلی نیاز دارد.
+۷. **retry:** اگر ثابت است input ارسال نشده، locate/strategy بعدی مجاز است. اگر dispatch شده ولی نتیجه نامعلوم است، ابتدا state خوانده شود؛ تکرار toggle، Send، Delete یا Buy امن نیست. سقف تلاش و deadline کل مشخص باشد؛ سه strategy لزوماً به معنی سه click نیست.
 
-| جزء | انتخاب پیشنهادی | دلیل و شرط |
+**قرارداد نتیجهٔ پیشنهادی:** `request_id, strategy, target_evidence, dispatch_state, postcondition_state, failure_reason, timings`. تابع بیرونی `click_element(...) -> bool` می‌تواند wrapper باشد؛ داخل سیستم bool به‌تنهایی برای recovery کافی نیست.
+
+## ۶. خط لولهٔ صوت، تأخیر و منابع محدود
+
+### latency هر مرحله: مقدار تنظیمی با اندازه‌گیری اشتباه نشود
+
+| مرحله | وضعیت فعلی با شواهد | اقدام پیشنهادی |
 |---|---|---|
-| VAD و wake detector اختیاری | CPU، مدل کوچک و همیشه آماده | نباید برای منابع با STT رقابت کند. openWakeWord نمونهٔ متن‌باز قابل بررسی است، ولی مدل‌های آمادهٔ فعلی آن طبق مستندات عمدتاً انگلیسی‌اند؛ بیدارباش فارسی/نام Kyrin نیازمند ارزیابی یا آموزش اختصاصی است. [مخزن رسمی](https://github.com/dscripka/openWakeWord). |
-| STT | GPU برای کوچک‌ترین مدل چندزبانه‌ای که آزمون فارسی را می‌گذراند | تشخیص نفی، نام برنامه و نام مخاطب از امتیاز WER کلی مهم‌تر است. quantization را با افت دقت بسنجید؛ `whisper.cpp` رسماً quantization را پشتیبانی می‌کند. [مخزن رسمی](https://github.com/ggml-org/whisper.cpp#quantization). |
-| فهم فرمان رایج | قواعد روی CPU | latency و رفتار قابل آزمون؛ مسیر موجود حفظ شود. |
-| فهم انعطاف‌پذیر | مدل محلی کوچک با خروجی schemaدار؛ CPU یا بارگذاری محدود GPU | اگر GPU فقط یک مدل تعاملی را جا می‌دهد، STT اولویت دارد. کوچک بودن مدل، نیاز به validator مستقل را حذف نمی‌کند. |
-| TTS | backend سبک موجود، ترجیحاً CPU و یک یا دو صدای لازم | کیفیت صدای لوکس نباید باعث قطع شنیدن یا جابه‌جایی مداوم STT شود. فارسی باید با صدای دارای پشتیبانی واقعی آزمایش شود. |
-| OCR | Tesseract یا recognizer سبک روی CPU و crop هدفمند | backend سندی/VLM سنگین را برای هر کلیک روشن نکنید؛ latency cold و warm جدا سنجیده شود. |
-| VLM | on-demand، بعد از شکست روش‌های ارزان | قبل از load، ظرفیت حافظه و امکان آزادسازی مدل غیرضروری بررسی شود؛ residency هم‌زمان همهٔ مدل‌ها مطلوب نیست. |
-| cloud | مسیر اختیاریِ صریح برای نیاز مشخص، نه پیش‌فرض | ممکن است compute محلی را کم کند، اما شبکه، هزینه، دسترسی سرویس و انتقال صوت/تصویر به آن وابسته می‌شوند. برتری latency یا رایگان‌بودن دائمی فرض نشود. |
+| wake word | **[CONFIRMED]** standby پس از STT متن را فیلتر می‌کند؛ detector صوتی مستقل در این مسیر نیست. [voice_control.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/voice_control.py:1)، [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:193). | اگر مصرف دائم STT مهم است، wake detector سبک CPU به‌صورت اختیاری؛ false wake/miss فارسی سنجیده شود. |
+| capture/VAD | **[CONFIRMED]** Silero با ۱۶kHz و قاب ۵۱۲ نمونه، حدود ۳۲ms؛ start confirmation پیش‌فرض ۶۴ms. [silero_vad.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/activity/silero_vad.py:1)، [live_speech_pipeline.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/live_speech_pipeline.py:53). | CPU؛ timestamp صوت تا VAD حفظ شود. این اعداد بودجهٔ الگوریتم‌اند، benchmark کل نیستند. |
+| endpoint | **[CONFIRMED]** pause عادی ۳۸۴ms و Omnilingual برابر ۸۰۰ms. [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:592). | کاهش فقط همراه سنجش split و جملهٔ ناقص، به‌ویژه فارسی. |
+| STT | **[CONFIRMED]** Whisper pre-roll حدود ۰٫۵s، partial نخست ۱٫۵s، فاصلهٔ ۲٫۵s، preview هشت‌ثانیه و turn حداکثر ۳۰s دارد. [whisper.py](/mnt/ai_projects/KYRIN/src/kyrin/stt/backends/whisper.py:32). | preview و final inference جدا هزینه دارند؛ فایل partial ندارد، live هنوز دارد. |
+| transport STT | **[CONFIRMED]** inference server timeout هشت‌ثانیه و startup تا ۳۰ ثانیه. [whisper_server.py](/mnt/ai_projects/KYRIN/src/kyrin/stt/backends/whisper_server.py:121). | انتخاب مدل با real-time factor و p95؛ افزایش timeout به‌تنهایی سرعت را بهبود نمی‌دهد. |
+| understanding | **[CONFIRMED]** قواعد fast path؛ fallback همگام ۶۰/۱۲۰s و گاهی دوبار inference؛ F07. | فقط final؛ worker مستقل، prompt محدود و لغو واقعی. |
+| action | **[CONFIRMED]** OCR تکراری، راه‌اندازی process/portal و verification تصویر دارد؛ F01/F08. | semantic action، reuse کنترل‌شدهٔ session و snapshot تازه. مختصات قدیمی cache نشود. |
+| TTS | **[CONFIRMED]** صف مستقل، synthesis مدل و سپس playback؛ F16. | پاسخ کوتاه، مدل سبک CPU، زمان تا اولین صوت و امکان interrupt اندازه‌گیری شود. |
 
-**پیشنهاد barge-in:** capture و VAD هنگام synthesis/pخش زنده بمانند؛ AEC از خروجی واقعی مرجع بگیرد؛ آغاز گفتار معتبر فقط TTS را متوقف کند، سپس STT ادامهٔ فرمان را بفهمد. فرمان لغوِ عمل از interrupt خروجی جدا باشد. هنگام نبود AEC، قابلیت half-duplex و توقف دستی واضح‌تر و قابل اعتمادتر از ادعای شنیدن هم‌زمان است.
+در این بررسی latency واقعی مدل و میکروفون اندازه‌گیری نشد. اعداد تاریخی مانند ۱۲٫۳ ثانیه برای بازشدن chat، گزارش مالک دربارهٔ نسخهٔ قبلی‌اند؛ baseline نسخهٔ فعلی نیستند. [PROJECT_CONTEXT.md](/mnt/ai_projects/KYRIN/PROJECT_CONTEXT.md:202).
 
-## ۸. امنیت و شکست نیمه‌کاره
+<div dir="ltr">
 
-| موضوع | ارزیابی مبتنی بر کد | تصمیم پیشنهادی |
+```text
+last spoken sample
+  -> VAD endpoint wait
+  -> final STT inference / transport
+  -> interpretation queue / model
+  -> action queue / locate / policy / dispatch
+  -> postcondition
+
+first audible answer
+  = response-ready + TTS queue + synthesis-to-first-audio
+```
+
+</div>
+
+**پیشنهاد تخصیص منابع:**
+
+| جزء | پیش‌فرض پیشنهادی | شرط تغییر |
 |---|---|---|
-| allowlist | `[CONFIRMED]` `ActionPolicy` فهرست برنامه و operation دارد و policy خالی منع می‌کند؛ [gate.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/gate.py:25). | این مرز حفظ و تا endpoint مجری امتداد داده شود؛ خروجی مدل مستقیماً capability نسازد. |
-| shell و sudo | `[CONFIRMED]` مسیر آزاد shell از voice در این checkout دیده نشد؛ Ptyxis آرگومان‌های ثابت دارد. | اگر بعداً افزوده شد، ابزارهای محدود با argv نوع‌دار، cwd مشخص، timeout و پیش‌نمایش عمل حساس ارائه شوند. `subprocess.run([...])` به‌تنهایی محتوای خطرناک argv یک shell را امن نمی‌کند. |
-| بستن برنامهٔ دارای دادهٔ ذخیره‌نشده | `[CONFIRMED]` تأیید ویژهٔ Terminal وجود دارد؛ برای هر برنامهٔ مجاز چنین تأییدی در `_review_window_action` نیست. [demo_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:1081). GNOME از `window.delete` استفاده می‌کند، نه kill اجباری. | `[LIKELY]` برنامه ممکن است dialog ذخیره نشان دهد؛ تشخیص unsaved state عمومی تضمین نشده است. بسته‌شدن پنجره یا dialog تأیید باید مشاهده شود؛ force close خودکار افزوده نشود. |
-| خاموشی و restart | `[CONFIRMED]` جریان مستقل دو تأییدی با timeout و لغو دارد؛ [flow.py](/mnt/ai_projects/KYRIN/src/kyrin/system_power/flow.py:120). | الگوی request-bound و expiry آن برای اعمال حساس دیگر مفید است؛ «هیچ تأییدی وجود ندارد» دربارهٔ پروژه صحیح نیست. |
-| تزریق از متن گفتار | `[CONFIRMED]` shell interpolation از transcript پیدا نشد، اما مرز معنایی R01/R02 ناقص است. | حمله یا خطای زبانی می‌تواند بدون shell injection هم به عمل نامطلوب برسد؛ schema و target binding هر دو لازم‌اند. |
-| prompt injection از صفحه یا history | `[CONFIRMED]` context مدل شامل نام‌ها/متن و سابقه است. `[SPECULATION]` میزان موفقیت دستورهای فریبندهٔ داخل label، chat یا حافظه در این نسخه اندازه‌گیری نشده است. | محتوای صفحه و تاریخچه دادهٔ غیرقابل‌اعتماد باشند، نه دستور؛ corpus با labelهایی شبیه «ignore previous instructions» و خروجی مدل متناقض بسازید. policy مستقل باید اثر آن را محدود کند. |
-| میکروفون و وب‌کم | `[CONFIRMED]` standby کنونی الزاماً به معنی بسته بودن میکروفون یا توقف STT نیست؛ R15 و بخش صوت. مسیر وب‌کم/تشخیص گوینده پیاده‌سازی‌شده دیده نشد. | UI میان «میکروفون خاموش»، «منتظر بیدارباش» و «فرمان فعال» فرق بگذارد. وب‌کم آینده مجوز و نشانگر مستقل، پردازش محلی و retention مشخص داشته باشد. |
-| اطلاعات محرمانه | `[CONFIRMED]` تاریخچه متن را نگه می‌دارد؛ screenshot عادی از مسیر حافظه عبور می‌کند. tokenهای محلی و permission فایل به‌تنهایی sandbox در برابر فرایند مخرب همان user نیستند. [permission_token.py](/mnt/ai_projects/KYRIN/src/kyrin/app/permission_token.py:1). | transcript، screenshot و labelهای کامل پیش‌فرض وارد log نشوند. capture debug فقط opt-in، محدود و قابل حذف باشد؛ در صورت افزودن TDLib، session credential جدا از تاریخچه و log نگهداری شود. |
-| قطع permission یا خرابی وسط عمل | `[CONFIRMED]` چند executor نتیجهٔ `UNKNOWN` را از failure قطعی جدا می‌کنند؛ R06 و R14 نشان می‌دهند همهٔ lifecycleها یکپارچه نیستند. | اگر ارسال input محتمل است، retry کور نکنید. read-back یا reconciliation انجام شود؛ گزارش شامل مرحلهٔ آخرِ قطعی باشد. |
+| capture، resample، VAD، wake detector | CPU | معمولاً GPU لازم ندارند؛ مصرف CPU اندازه‌گیری شود. |
+| STT تعاملی | GPU در صورت runtime سالم و برتری p95؛ در غیر این صورت مدل سبک CPU | دقت فارسی/انگلیسی و نام برنامه‌ها، real-time factor و VRAM واقعی. |
+| command understanding | قواعد برای فرمان رایج؛ مدل کوچک محلی با context محدود | CPU اگر latency قابل قبول است؛ در غیر این صورت سهم محدود GPU یا offload مدیریت‌شده. |
+| OCR UI | Tesseract/روش سبک روی ROI و CPU؛ AT-SPI قبل از آن | مدل سنگین فقط برای شواهدی که روش سبک نمی‌دهد. |
+| TTS | Piper/VITS/Kokoro سبک روی CPU، مطابق زبان و کیفیت مورد قبول | GPU وقتی هزینهٔ رقابت با STT اندازه‌گیری و توجیه شود. |
+| VLM و وب‌کم آینده | on-demand، نرخ پایین و process قابل توقف | بعد از baseline و budget مشترک؛ روی هر frame همهٔ مدل‌ها اجرا نشوند. |
 
-**پیشنهاد دربارهٔ هویت:** تشخیص چهره یا گوینده در آینده می‌تواند context و تجربهٔ کاربری را بهتر کند، اما به‌تنهایی مجوز shell، حذف فایل یا ارسال پیام نباشد. احراز هویت و تشخیص اینکه «چه کسی احتمالاً صحبت کرد» دو قرارداد متفاوت‌اند. این یک پیشنهاد طراحی است؛ آسیب‌پذیری مربوط به قابلیت هنوز پیاده‌سازی‌نشده ادعا نمی‌شود.
+**local در برابر cloud:** پیشنهاد فعلی local است: هزینهٔ تکرارشونده و انتقال صوت/صفحه ندارد و وابستگی شبکه کمتر است. cloud می‌تواند accuracy یا زبان را بهبود دهد، ولی latency شبکه، قطعی، هزینه و افشای محتوای صفحه/صوت اضافه می‌کند؛ fallback خودکارِ بی‌اطلاع مناسب نیست. هیچ provider خاصی بدون benchmark و تصمیم محصول توصیه یا اضافه نشده است.
 
-## ۹. معماری پیشنهادی و مقایسه با وضع موجود
+**وقفهٔ کاربر:** AEC باید echo خود دستگاه را از گفتار تازه جدا کند؛ سپس VAD پاسخ را قطع کند و pre-roll حفظ شود. VAD فقط نشانهٔ شروع گفتار است، نه consent یا هویت گوینده. synthesis، playback و action cancellation سه lifecycle متفاوت‌اند و باید جدا کنترل شوند.
 
-**[CONFIRMED] وضع موجود:** لایه‌های audio/STT/command/action از هم جدا هستند، Protocol و dependency injection استفاده شده و action worker ترتیب اجرا را حفظ می‌کند. ضعف اصلی در قرارداد مشترک state، deadline، geometry، cancellation و verification است. بنابراین مهاجرت تدریجی کم‌ریسک‌تر از ساخت مجدد کل پروژه است.
+## ۷. امنیت، مجوز و رفتار در شکست
 
-| گزینه | نسبت به وضع موجود | مزایا | هزینه و محدودیت | ارزیابی |
+| پرسش | پاسخ مبتنی بر کد و اقدام لازم |
+|---|---|
+| allowlist برنامه هست؟ | **[CONFIRMED]** بله؛ policy خالی همه را رد می‌کند، action execution پیش‌فرض خاموش است و IDهای desktop صریح‌اند. [gate.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/gate.py:25)، [settings.py](/mnt/ai_projects/KYRIN/src/kyrin/app/settings.py:167). |
+| shell دلخواه یا sudo از گفتار هست؟ | **[CONFIRMED]** در مسیر فعلی پیدا نشد؛ subprocessها عمدتاً argv ثابت یا ID/متن محدود دارند. ادعای command injection عمومی از STT با شواهد فعلی صحیح نیست. |
+| اگر بعداً shell اضافه شود؟ | **پیشنهاد:** ابزارهای typed مانند list/create/read با ریشهٔ فایل مجاز؛ preview اثر و تأیید عملیات مخرب. raw transcript هرگز shell command نباشد؛ argv و `shell=False` به‌تنهایی جلوی خطر خود executable را نمی‌گیرند. |
+| بستن/حذف/ارسال/پرداخت؟ | **[CONFIRMED]** generic sensitive/unknown رد می‌شود؛ flow تأیید عمومی ندارد؛ close اختصاصی برنامه‌ها یکسان نیست؛ F02/F11. |
+| خاموشی سیستم؟ | **[CONFIRMED]** مجوز جدا، دو مرحله، phrase مشخص و expiry؛ درخواست عادی GNOME، بدون force. [flow.py](/mnt/ai_projects/KYRIN/src/kyrin/system_power/flow.py:291)، [gnome.py](/mnt/ai_projects/KYRIN/src/kyrin/system_power/gnome.py:43). پذیرفته‌شدن درخواست با خاموشی واقعی متفاوت گزارش می‌شود. |
+| prompt injection از صفحه/مدل؟ | **[CONFIRMED]** مدل اجازهٔ مستقیم اجرای OS ندارد و validator مستقل هست؛ R01 نیز اصلاح شده. **[LIKELY]** گسترش VLM/حافظه بدون حفظ این مرز خطر دارد؛ OCR و متن صفحه دادهٔ نامطمئن‌اند، نه دستور سیستم یا consent. |
+| microphone و webcam؟ | **[CONFIRMED]** میکروفون هنگام session باز می‌شود؛ standby همچنان STT دارد؛ OFF با توقف کامل متفاوت است. webcam در مسیر اجرایی نیست. **پیشنهاد:** نشانگر روشنِ دریافت، قطع واقعی device و مجوز مستقل دوربین در آینده. |
+| احراز هویت گوینده؟ | **[CONFIRMED]** speaker verification عملی در مسیر فرمان نیست. **[LIKELY]** صدای فرد دیگر/پخش صوت می‌تواند مانند گفتار کاربر پردازش شود؛ wake name یا STT confidence احراز هویت نیست. برای اثر حساس، تأیید قابل مشاهده و هویت نشست OS حفظ شود. |
+| فایل صوتی واردشده؟ | **[CONFIRMED]** همان gate و مجوزهای جاری را مستقیم مصرف می‌کند؛ منبع فایل در تصمیم اعتماد جدا نمی‌شود. [audio_file_import.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/audio_file_import.py:112)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:264). **پیشنهاد:** provenance و حالت پیش‌نمایش برای فایل نامطمئن؛ تغییر رفتار محصول نیازمند تصمیم آگاهانه است. |
+| secrets و logging؟ | **[CONFIRMED]** tokenها permission محدود و atomic replace دارند؛ history متن plaintext محلی است؛ screenshot مسیر عادی در حافظه است. [permission_token.py](/mnt/ai_projects/KYRIN/src/kyrin/app/permission_token.py:82)، [screen_text_reader.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/screen_text_reader.py:222). **پیشنهاد:** log فقط stage/error/timing؛ ذخیرهٔ screenshot/text برای debug اختیاری، با redact و retention. بررسی فایل‌های secret محلی انجام نشد. |
+| password field؟ | **[CONFIRMED]** API عمومی تایپ دلخواه وجود ندارد، اما تایپ search در Telegram و جهش focus F10 نیازمند field binding است؛ تضمین عمومیِ تشخیص/عدم ورود به فیلد رمز در actuator دیده نشد. |
+| شکست نیمه‌راه؟ | **[CONFIRMED]** UNKNOWN و FAILED جدا هستند و exception boundary اغلب UNKNOWN می‌دهد؛ این درست است. cancellation/timeout سراسری و journal مرحله‌ها کامل نیست. **پیشنهاد:** پس از dispatch نامعلوم، مشاهده قبل از retry؛ compensation فقط برای عملی که بازگشت‌پذیری‌اش اثبات شده است. |
+
+دسترسی AT-SPI یا subprocess هم‌user، sandbox کامل در برابر بدافزار همان user نیست. token و allowlist برای جلوگیری از اشتباه عامل مفیدند؛ نباید به‌عنوان جداسازی کامل امنیت سیستم توصیف شوند.
+
+## ۸. معماری مناسب و گزینه‌های جایگزین
+
+### ارزیابی معماری فعلی
+
+**[CONFIRMED]** جدایی acquisition/STT/understanding/action/response و Protocolها مناسب است. acquisition میکروفون داخل constructor مدل تصمیم‌گیر پنهان نشده و dependency injection در بخش‌های مهم وجود دارد. مشکل اصلی، تعداد لایه‌ها نیست؛ یکسان نبودن قرارداد request/result و مالکیت lifecycle در مرزهاست. [audio_input.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/audio_input.py:1)، [microphone/input.py](/mnt/ai_projects/KYRIN/src/kyrin/audio/microphone/input.py:1)، [ubuntu.py](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:221).
+
+| گزینه | نسبت به معماری فعلی | مزیت | هزینه/ضعف | مهاجرت |
 |---|---|---|---|---|
-| **۱. یکپارچهٔ ماژولار و رویدادمحور با ابزارهای نوع‌دار** | مصرف صوت و کنترل فوری از inference جدا؛ یک broker مالک ورودی OS؛ locator/actuator/verifier قابل تعویض | استفادهٔ مجدد از بیشتر کد؛ لغو و مشاهدهٔ منسجم؛ تست قرارداد ساده‌تر؛ مناسب latency و VRAM محدود | نیازمند تعریف lifecycle و تبدیل تدریجی executorها؛ async/thread correctness باید آزموده شود | **پیشنهاد اصلی.** تلاش متوسط، قابل تقسیم به گام‌های کوچک. |
-| **۲. معماری ابزارمحور با adapter عمیق برای برنامه‌های منتخب** | API/shortcut/AT-SPI اختصاصی پشت همان Tool interface؛ مثلاً TDLib برای نیاز داده‌ای Telegram | قابلیت اعتماد بالاتر در چند کار پرتکرار؛ کاهش OCR و inference | توسعه و نگهداری adapterها، ورود و credentialهای API، پوشش محدودتر برنامه‌ها؛ API همیشه UI را کنترل نمی‌کند | مکمل گزینهٔ ۱ برای کارهای پرتکرار. تلاش متوسط تا زیاد به ازای هر integration. |
-| **۳. agent تصویری با حلقهٔ VLM در مرکز** | screenshot و مدل، اقدام بعدی را در هر مرحله پیشنهاد می‌کنند | انعطاف رابط‌های ناشناخته؛ کاهش ruleهای برخی layoutها | latency و VRAM بیشتر، رفتار کم‌قطعیت‌تر، هزینهٔ validation و recovery؛ همچنان به geometry/policy/verification نیاز دارد | برای مرحلهٔ فعلی توصیه نمی‌شود. بعداً fallback محدود یا آزمایش جدا. تلاش زیاد. |
+| A. هماهنگ‌کنندهٔ رویدادمحور با state machine و DesktopInputBroker | حفظ بیشتر قراردادها و adapterها؛ inference و ورودی صاحب lifecycle مشخص می‌شوند | لغو/ترتیب قابل اثبات، تست deterministic، latency مسیرهای مستقل | event schema، ownership و timeout باید دقیق طراحی شوند | متوسط؛ مرحله‌ای و پیشنهاد اصلی |
+| B. هستهٔ عمدتاً async با TaskGroup و subprocessهای async | بازآرایی runtime و transportها، اتصال به Qt | deadline و structured concurrency یکدست‌تر | کتابخانهٔ native مسدودکننده با async خودکار لغو نمی‌شود؛ اتصال دو event loop و هزینهٔ بازنویسی | زیاد؛ فعلاً سود آن کمتر از A است |
+| C. برنامه‌ریز محدود با registry ابزار و چرخهٔ observe-plan-act-verify | مدل plan typed پیشنهاد می‌کند؛ ابزار contract و policy دارد | گسترش حافظه/بینایی و ابزارها، کنترل وابستگی، recovery روشن | replan می‌تواند تکرار اثر و هزینهٔ مدل بسازد؛ نیازمند budget و journal | متوسط تا زیاد؛ پس از A و به‌صورت محدود |
 
-این برآوردها نسبی‌اند؛ زمان تقویمی بدون اندازهٔ تیم، سطح آشنایی و acceptance matrix قابل اتکا نیست. افزودن framework چندعاملی یا orchestration سنگین برای رفع مشکلات فعلی ضروری نیست.
+این‌ها **پیشنهاد** هستند؛ A و C می‌توانند ترکیب شوند. رویدادمحوربودن الزاماً به معنی framework بزرگ، microservice یا تبدیل همه‌چیز به async نیست. threadهای فعلی capture/native model می‌توانند حفظ شوند.
 
-### مرزهای پیشنهادی گزینهٔ اول
+### طراحی پیشنهادی A و سپس بخش محدود C
 
-- **Audio service:** فقط acquisition، preprocessing، VAD و transcript event؛ جدایی `AudioInput` و `MicrophoneInput` حفظ شود.
-- **Interaction controller:** state machine روشن برای standby، listening، interpreting، executing، waiting-confirmation و stopping؛ eventهای لغو اولویت داشته باشند.
-- **Interpreter worker:** rules یا مدل، فقط پیشنهاد `ToolCall` نوع‌دار؛ بدون دسترسی مستقیم به ماوس، shell یا مجوزها.
-- **Tool registry:** برای هر ابزار schema، permission، risk، precondition، postcondition، deadline و retry policy ثبت شود. plugin به معنی ماژول داخلی با قرارداد ثابت است؛ سیستم نصب افزونهٔ پیچیده فعلاً لازم نیست.
-- **Observation service:** AT-SPI، screenshot/OCR و اطلاعات پنجره با token و timestamp مشترک؛ cache فقط تا وقتی اعتبار آن اثبات می‌شود.
-- **Action broker:** تنها نویسندهٔ ورودی سیستم‌عامل، دارای capability و cancellation؛ adapterها تعیین می‌کنند «چه عملی»، broker تضمین می‌کند «با چه مجوز و کدام مشاهده».
-- **Verifier:** نتیجهٔ معنایی را تعیین کند و وضعیت نامعلوم را حفظ کند؛ ابزار بعدی تنها با dependency تحقق‌یافته اجرا شود.
-- **Resource manager:** بودجهٔ CPU/GPU و residency مدل‌ها؛ warm-up قابل مشاهده و قابل لغو.
+<div dir="ltr">
 
-### حلقهٔ عامل و حافظه
+```text
+Audio worker -> transcript events -> Interpretation worker -> validated intent
+                                                   |
+                                           Session orchestrator
+                                           /        |         \
+                                  Dialogue FSM   Tool registry  Memory
+                                                   |
+                                       Policy + permission epoch
+                                                   |
+                                    DesktopInputBroker (single owner)
+                                                   |
+                              app / AT-SPI / OCR / portal adapters
+                                                   |
+                                    Postcondition observer + journal
+                                                   |
+                                        final response / TTS
+```
 
-**پیشنهاد حلقهٔ عامل:** `observe -> propose -> validate -> execute -> verify -> update state`، با سقف تعداد گام و deadline مشترک. plan بلند از یک screenshot ساخته و بی‌وقفه اجرا نشود. پس از هر عملِ تغییردهندهٔ UI، مراحل وابسته با وضعیت تازه resolve شوند. recovery هم ابزار و policy داشته باشد؛ «وقتی شکست خورد هرچه مدل گفت انجام بده» fallback معتبر نیست.
+</div>
 
-**پیشنهاد حافظه:** SQLite فعلی حفظ شود و سه مفهوم جدا شود: تاریخچهٔ خام اختیاری، رویدادهای ساخت‌یافتهٔ عمل/نتیجه، و ترجیحات صریح کاربر. هر مورد provenance، زمان، TTL و سطح اعتماد داشته باشد. retrieval برای فهم «همان برنامه» مفید است، ولی نباید از گفت‌وگوی قدیمی مجوز تازه استخراج کند. برای این اندازهٔ پروژه، افزودن vector database پیش از تعریف semantics حافظه ضرورتی ندارد.
+**پیشنهاد قرارداد ابزار:** schema ورودی، capability، risk، precondition، postcondition، deadline، cancellation و idempotency مشخص باشد. مدل plan پیشنهاد کند؛ orchestrator اجرا و policy را کنترل کند. هر اجرا request ID مستقل و eventهای `queued/started/dispatched/verified/failed/cancelled` داشته باشد.
 
-**پیشنهاد وب‌کم آینده:** پردازش frame با نرخ و صف محدود، حذف frame قدیمی، worker مستقل و مدل سبک CPU/ONNX در صورت کفایت؛ frameهای vision نباید صوت را عقب بیندازند. eventهای gesture و identity نیز مثل transcript صرفاً شواهد باشند و از همان gate عبور کنند. این مرحله بعد از پایدارشدن ابزار و cancel اجرا شود.
+**پیشنهاد حافظه:** متن مکالمه از fact مشاهده‌شده، ترجیح کاربر و نتیجهٔ عمل جدا باشد. «گفتم Settings باز شود» factِ «Settings باز است» نیست. state دسکتاپ کوتاه‌عمر با TTL؛ ترجیح پایدار با provenance و امکان ویرایش/حذف؛ دادهٔ شخصی فقط در retrieval محدود و با source روشن. برای شروع SQLite موجود کافی است؛ vector database پیش‌نیاز نیست.
 
-## ۱۰. برنامهٔ اقدام و مهاجرت
+**پیشنهاد وب‌کم آینده:** منبع مستقل تصویر، sampling محدود و eventهایی مثل `gesture_candidate`؛ تصمیم و مجوز در orchestrator باقی بمانند. face/speaker recognition به‌تنهایی مجوز عمل حساس نباشد. افزودن vision داخل MicrophoneInput یا OCR داخل planner وابستگی نامناسب ایجاد می‌کند.
 
-### فهرست اولویت اجرایی
+## ۹. برنامهٔ اقدام اولویت‌بندی‌شده
 
-جزئیات «محل، علت و اصلاح» هر مورد در Rهای بالا آمده است؛ این جدول ترتیب انجام را مشخص می‌کند.
+### Critical
 
-| اولویت | موارد | خروجی مورد انتظار |
+**[CONFIRMED]** مسیر اجرای arbitrary shell، دورزدن اثبات‌شدهٔ مجوز برای عملیات مخرب، یا افشای secret در این بازبینی کشف نشد؛ بنابراین یافته‌ای با قطعیت و شدت Critical اعلام نمی‌شود. F05 و F11 باید پیش از گسترش عملیات مخرب رفع شوند؛ افزایش دامنهٔ عمل، شدت اثرشان را بیشتر می‌کند.
+
+### High
+
+| شناسه | محل اصلی | چرا مهم است و اصلاح |
 |---|---|---|
-| **Critical** | R01 | خروجی متناقض مدل نتواند هدف دیگری را به عمل تبدیل کند. |
-| **High — نوبت اول** | R03، R04، R05، R06، R07 | کلیک با geometry مشترک، هویت پنجره، AT-SPI واقعی و پس‌شرط؛ رفع مسئلهٔ اصلی محصول. |
-| **High — هم‌زمان با مرز اجرای امن** | R02، R11، R12، R13 | نفی محترم بماند، standby اثر فوری روی صف داشته باشد، EOF فرمان را حذف نکند، کنترل حساس بدون policy عبور نکند. |
-| **High — نوبت دوم** | R08، R09، R10، R14، R15 | OCR سازگارتر، UI آماده، مدل غیرمسدودکننده، deadline واقعی و قطع پاسخ صوتی قابل اتکا. |
-| **Medium** | R16 تا R23 | مجوز endpoint، retention، metrics دقیق، مدیریت منابع، نسخهٔ نصب‌شده و تست اتصال اجزا. |
-| **Low** | R24 | نام‌گذاری و پیام خطای روشن، پس از تثبیت قراردادهای رفتاری. |
+| F01 | [capture extension:425](/mnt/ai_projects/KYRIN/integrations/gnome-shell/window-capture-prototype@kyrin.local/extension.js:425) | false stale حتی با تصویر ثابت؛ decoded ROI/هدف معنایی، نه کل PNG. |
+| F02 | [desktop_control.py:44](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:44) | بسیاری از کلیک‌ها اصلاً به OCR نمی‌رسند؛ risk/confirmation واقعی و capability روشن. |
+| F03 | [desktop_control_helper.py:288](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:288)، [plan_runner.py:78](/mnt/ai_projects/KYRIN/src/kyrin/actions/plan_runner.py:78) | نبود پس‌شرط و ادامهٔ وابستگی پس از dispatch؛ وضعیت نتیجه و verifier هر ابزار. |
+| F04 | [desktop_control_inventory.py:61](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_inventory.py:61) | وابستگی بی‌مورد accessibility به OCR؛ semantic action و window/state صحیح. |
+| F05/F06 | [queued_dispatch.py:187](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:187)، [telegram_selection.py:384](/mnt/ai_projects/KYRIN/src/kyrin/actions/telegram_selection.py:384) | عمل پس از توقف و ورودی هم‌پوشان؛ broker واحد، cancellation و epoch. |
+| F07 | [model_interpreter.py:320](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:320) | inference روی partial و انسداد stop/final؛ worker فقط برای final. |
+| F08 | [chat_verifier.py:192](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:192) | timeout ظاهری و OCR باقی‌مانده؛ deadline و cancellation سراسری. |
+| F09 | [model_interpreter.py:416](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:416) | جهت معکوس scroll؛ استخراج و تطبیق مستقل پارامترها. |
+| F10 | [telegram_portal_helper.py:281](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram_portal_helper.py:281) | layout ثابت و تایپ پس از تغییر focus؛ locator زنده و field binding. |
+| F11 | [demo_interpreter.py:1081](/mnt/ai_projects/KYRIN/src/kyrin/commands/demo_interpreter.py:1081) | وضعیت نامعلوم کار ذخیره‌نشده؛ تأیید close وابسته به پنجره/پیامد. |
 
-### مراحل مهاجرت پیشنهادی
+### Medium
 
-۱. **ثبت baseline قابل تکرار.** نسخهٔ source و extension فعال، session، scale، مدل و compute device را ثبت کنید. مجموعه‌ای کوچک از سناریوهای واقعی OpenRGB، Telegram و یک برنامهٔ استاندارد بسازید. خروجی هر آزمایش شامل موفقیت وظیفه، کلیک اشتباه، ambiguity، abstention و latency باشد. معیار اتمام: شکست‌های شناخته‌شده قبل از اصلاح، با ورودی و نسخهٔ مشخص قابل توضیح باشند.
-
-۲. **بستن مرز اعتبارسنجی و صف.** R01/R02/R11/R12/R13 با تست‌های ساختگیِ مستقل از دسکتاپ اصلاح شوند. `drain` و `cancel` جدا شوند؛ generation در interpret و dispatch بررسی شود. معیار اتمام: بازتولیدهای گزارش دیگر عمل نامعتبر تولید نکنند و پایان فایل تمام فرمان‌های پذیرفته‌شده را تعیین تکلیف کند.
-
-۳. **یکسان‌کردن Observation و Geometry.** token پنجره، زمان، capture transform و target evidence مشترک شوند؛ Telegram و کنترل عمومی همان قرارداد را مصرف کنند. معیار اتمام: scaleهای مختلف، سایه، crop، مبدأ منفی و پنجرهٔ جابه‌جاشده در آزمون هندسی مستقل پاس شوند؛ یک acceptance زنده روی Wayland هم نتیجه را تأیید کند.
-
-۴. **جداکردن Locate، Execute و Verify.** AT-SPI action را به مسیر اول کنترل عمومی تبدیل کنید؛ OCR و icon فقط fallback باشند. برای چند operation پرکاربرد پس‌شرط واقعی تعریف کنید. معیار اتمام: dispatch بدون نتیجهٔ مشاهده‌شده موفقیت قطعی اعلام نشود و عمل dependent قبل از پس‌شرط شروع نشود.
-
-۵. **یکپارچه‌کردن lifecycle و deadline.** inference از event consumer جدا، OCR قابل لغو و broker ورودی دارای token شود. worker پایدار برای backend سنگین فقط پس از داشتن shutdown صحیح اضافه شود. معیار اتمام: stop در هنگام OCR، inference و portal، خروجی قدیمی را از dispatch منع کند؛ worker منقضی مانع درخواست بعدی نماند.
-
-۶. **بهینه‌سازی صوت بر اساس عدد.** markerهای R18، بار منابع، هزینهٔ partial و AEC برای میکروفون انتخابی بررسی شوند. مدل کوچک‌تر با آزمون دقت فارسی/نفی انتخاب شود. معیار اتمام: p50/p95 مرحله‌ای، نرخ false wake و رفتار interruption معلوم باشد؛ تنظیم جدید هم دقت و هم latency قابل قبول بدهد.
-
-۷. **تثبیت محصول و سپس توسعه.** startup capability/version probe، retention، manifest وابستگی و تست پذیرش extension اضافه شوند. سپس adapterهای API و حافظهٔ ساخت‌یافته؛ وب‌کم و VLM پس از این مرحله. معیار اتمام: کاربر بداند کدام قابلیت واقعاً آماده است و نبود هر backend مسیر شکست مشخص داشته باشد.
-
-### کارهای کوچک و مؤثر برای امروز
-
-این‌ها پیشنهادند و در این بررسی اجرا نشده‌اند:
-
-- در [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:379)، تناقض ID و هدف صریح را ببندید و تست `Settings -> Quit` اضافه کنید؛ شاخهٔ scroll را نیز از بررسی نفی عبور دهید.
-- در [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:103) و [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:293)، EOF طبیعی را از cancel کاربر جدا کنید؛ این اصلاح کوچک به قابلیت تازهٔ فایل صوتی اثر مستقیم دارد.
-- برای هر شکست کلیک فقط metadata کم‌حساسیت ثبت کنید: backend، reason، geometry، scale شناخته‌شده/نامعلوم و زمان هر مرحله؛ به‌جای افزودن sleep یا پایین‌آوردن confidence، علت شکست را قابل تفکیک کنید.
-- آستانه و normalization گزینه‌سازی را با هدف‌یابی دقیق مشترک کنید و همان نمونهٔ فارسی RTL را به تست اضافه کنید؛ از بازنویسی کامل OCR شروع نکنید.
-- در خروجی محصول، `LAUNCH_ACCEPTED` را «ورودی ارسال شد؛ نتیجه تأیید نشده» نشان دهید و برای toggle یک read-back اضافه کنید؛ این تغییر کوچک از اعلام موفقیت اشتباه جلوگیری می‌کند.
-- یک probe خواندنی برای نسخهٔ extension فعال، session و قابلیت‌های portal/accessibility طراحی کنید؛ فایل جدید آن بخشی از کار بعدی است، نه این گزارش.
-
-### ماتریس پذیرش پیشنهادی
-
-| محور | حالت‌های لازم | انتظار |
+| شناسه | محل اصلی | اصلاح |
 |---|---|---|
-| هندسه | scaleهای ۱، ۱٫۲۵، ۱٫۵ و ۲؛ سایه؛ crop؛ مانیتور با مبدأ منفی؛ mixed-DPI | نقطه داخل target درست یا توقف صریح به علت transform نامعلوم؛ هیچ حدس خاموشی انجام نشود. |
-| هویت | دو پنجره از یک PID، dialog جدید، حرکت پنجره در زمان OCR/permission | snapshot قدیمی به input تبدیل نشود. |
-| متن | فارسی RTL، انگلیسی، mixed script، quotation، overlap، دو label یکسان، label کوتاه | تطابق و ambiguity قابل توضیح؛ fuzzy بدون شواهد اجرا نشود. |
-| مدل | ID نامرتبط، عملیات مخالف نفی، JSON معتبر ولی معنای نامعتبر، context فریبنده | validator مستقل جلوی action را بگیرد. |
-| lifecycle | stop/standby در هر مرحله، EOF با action کند، timeout OCR، قطع portal | نتیجهٔ هر درخواست تعیین تکلیف شود؛ helper رهاشده بعداً کلیک نکند. |
-| پس‌شرط | click بی‌اثر، dialog موفق، toggle ازقبل‌تنظیم‌شده، نتیجهٔ نامعلوم | تنها حالت اثبات‌شده `CONFIRMED` شود؛ retry غیرایمن انجام نشود. |
-| صوت | صحبت روی TTS، میکروفون انتخابی، AEC ناموجود، سکوت درون جملهٔ فارسی | interruption و segmentation سنجیده شوند؛ حذف گفتار پنهان نماند. |
+| F12 | [visible_control.py:37](/mnt/ai_projects/KYRIN/src/kyrin/actions/visible_control.py:37) | یک phrase assembler برای RTL/LTR، confidence کالیبره و زبان هدفمند. |
+| F13/F14 | [capture_geometry.py:19](/mnt/ai_projects/KYRIN/src/kyrin/vision/capture_geometry.py:19)، [model_interpreter.py:463](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:463) | آزمون geometry تولیدکننده و token از intent تا تمام actuatorها. |
+| F15 | [desktop_control.py:211](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:211) | protocol ساخت‌یافتهٔ خطا؛ حفظ علت content/stale/token. |
+| F16 | [ubuntu.py:528](/mnt/ai_projects/KYRIN/src/kyrin/app/platforms/ubuntu.py:528) | AEC ورودی انتخاب‌شده، interrupt playback و تست echo/barge-in. |
+| F17 | [history.py:103](/mnt/ai_projects/KYRIN/src/kyrin/memory/history.py:103) | retention فعال/آرشیو، کنترل ذخیره و حذف واقعی. |
+| F18 | [latency.py:31](/mnt/ai_projects/KYRIN/src/kyrin/runtime/latency.py:31) | هویت کامل عمل و stage timings. |
+| F19 | [ollama_engine.py:352](/mnt/ai_projects/KYRIN/src/kyrin/commands/ollama_engine.py:352) | budget مشترک RAM/VRAM/token و residency. |
+| F20 | [main.py:366](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/main.py:366) | نسخهٔ capability، probe/recovery و نصب بازتولیدپذیر/CI. |
+| F21 | [document_worker.py:145](/mnt/ai_projects/KYRIN/src/kyrin/vision/ocr/backends/document_worker.py:145) | provenance/hash و محدودکردن worker مدل محلی. |
 
-در corpus پذیرشِ اولیه، **کلیک روی هدف اشتباه باید صفر باشد**؛ abstention صریح از کلیک اشتباه بهتر است. صفر مورد در یک مجموعهٔ محدود، تضمین آماریِ نبود خطا در همهٔ برنامه‌ها نیست؛ تعداد نمونه و دامنهٔ شرایط همراه نتیجه گزارش شود. برای سنجش پیشرفت، نرخ موفقیت وظیفه و نرخ توقف بی‌مورد نیز ثبت شوند تا صرفاً با «هرگز کلیک نکردن» معیار ایمنی پاس نشود.
+### Low
+
+F22: یکدست‌کردن سازندهٔ observation، شکستن تدریجی توابع بزرگ، نام‌گذاری و قالب‌بندی؛ پس از تثبیت رفتار و بدون refactor وسیع هم‌زمان با اصلاح کلیک.
+
+## ۱۰. نقشهٔ مهاجرت مرحله‌به‌مرحله
+
+این مراحل **پیشنهاد اجرایی آینده** هستند؛ در این بررسی پیاده نشده‌اند. ترتیب با اولویت «قابلیت اطمینان، سپس سرعت، سپس امنیت» تنظیم شده، با حفظ مرزهای ضروری ایمنی.
+
+۱. **baseline و خطای قابل مشاهده.** F15 و stage timings را اضافه کنید؛ نسخهٔ loaded extension، strategy، cold/warm و علت رد را ثبت کنید. معیار پایان: شکست policy، OCR، geometry، content و postcondition از یکدیگر قابل تشخیص باشند؛ هیچ متن شخصی در log پیش‌فرض نباشد.
+
+۲. **رفع F01 و تعیین پوشش واقعی F02.** مقایسهٔ metadata/تصویر را اصلاح، unknown risk را با confirmation محدود مدیریت و قابلیت‌های واقعاً فعال را نمایش دهید. معیار پایان: metadata متفاوت target ثابت را رد نکند؛ Apply تأییدشده قابل آزمایش باشد؛ Send/Delete بدون تأیید اجرا نشوند.
+
+۳. **DesktopInputBroker و lifecycle مشترک.** keyboard/pointer، completion Telegram و scroll را زیر مالک واحد ببرید؛ cancellation و permission epoch را به helperها برسانید. معیار پایان: توقف در هر نقطه پیش از input، ورودی تازه را متوقف کند؛ plan شروع‌شده پس از لغو مرحلهٔ بعد نرود؛ timeout به helper یتیم منجر نشود.
+
+۴. **AT-SPI-first واقعی.** مستقل از OCR، node پنجرهٔ صحیح را resolve و semantic action را اجرا کنید. معیار پایان: سه کنترل استاندارد بدون OCR و با checked state صحیح کار کنند؛ کنترل hidden/defunct و پنجرهٔ دیگر رد شوند.
+
+۵. **یکپارچه‌سازی locator و geometry.** phrase assembler، crop/resize و metadata در مسیر عمومی/Telegram مشترک شوند؛ producer و legacy جدا آزموده شوند. معیار پایان: scaleهای ۱۰۰/۱۲۵/۱۵۰/۲۰۰٪، سایه، مبدأ منفی و انتقال پنجره پوشش deterministic و سپس آزمون واقعی داشته باشند.
+
+۶. **پس‌شرط و recovery.** ابزارهای navigation/toggle/chat پس‌شرط داشته باشند؛ plan وابسته تا verified منتظر بماند. معیار پایان: action نامعلوم دوباره کور تکرار نشود؛ failure بعد از dispatch با failure پیش از dispatch فرق کند.
+
+۷. **فهم فرمان مستقل و لغوشونده.** partial فقط قواعد ارزان؛ final در worker؛ جهت/state و target مستقل بررسی شوند. معیار پایان: صفر inference برای partial، پاسخ سریع stop، و رد model proposal معکوس یا متناقض.
+
+۸. **بهینه‌سازی صوت و residency.** endpoint، partial STT، AEC و TTS CPU با corpus واقعی اندازه‌گیری شوند؛ budget GPU بر اساس peak، نه فایل وزن. معیار پایان: p50/p95 و دقت/نرخ false action پیش و پس از تغییر قابل مقایسه باشند.
+
+۹. **حافظه و توسعهٔ ابزارها.** provenance و retention، سپس registry و plan محدود؛ VLM/icon/webcam فقط برای شکاف اثبات‌شده اضافه شوند. معیار پایان: افزودن یک ابزار جدید، policy/verification/lifecycle موجود را دور نزند.
+
+### آزمون پذیرش پیشنهادی
+
+| گروه | نمونه‌های لازم | معیار |
+|---|---|---|
+| هندسه | دو resolution، scaleهای مختلف، mixed-DPI، پنجرهٔ جابه‌جاشده، Wayland/XWayland | point صحیح یا رد صریح؛ بدون کلیک خارج target. |
+| محتوا | PNG با metadata متفاوت، caret، spinner خارج ROI، target تغییرکرده | عدم رد بی‌مورد و عدم پذیرش target قدیمی. |
+| ابهام | دو Settings، دو پنجرهٔ هم‌PID، متن روی صفحهٔ غیرقابل کلیک | clarification/رد؛ انتخاب اولین match ممنوع. |
+| عمل | toggle از قبل تنظیم‌شده، click بدون اثر، dialog کند، header دیررس | پس‌شرط درست؛ موفقیت جعلی و دوبار toggle نداشته باشد. |
+| lifecycle | stop حین مدل/OCR/portal، revocation، EOF فایل، crash worker | بدون عمل دیررس؛ منابع آزاد؛ failure قابل تشخیص. |
+| زبان | فارسی، انگلیسی، mixed script، کلمهٔ کوتاه و نفی/نقل‌قول | حفظ جهت/state/target و رد جملهٔ غیرامری. |
+| صوت | حرف‌زدن وسط TTS، echo، میکروفون مشخص، STT کند | قطع قابل اتکا، حفظ آغاز گفتار، بدون feedback loop. |
+| برنامه‌ها | حداقل سه نوع برنامه: GTK، Qt و رابط سفارشی؛ شامل Telegram | نتیجهٔ هر backend جدا ثبت شود؛ موفقیت یک برنامه تعمیم داده نشود. |
+
+**[CONFIRMED]** پروژه ۱۰۱۲ تعریف تابع تست دارد؛ parametrization این عدد را به تعداد caseهای بیشتری تبدیل می‌کند. تست فراوان موجود است؛ شکاف اصلی، اتصال اجزا و پذیرش واقعی backend است. [test_desktop_control_helper.py](/mnt/ai_projects/KYRIN/tests/actions/test_desktop_control_helper.py:1)، [test_capture_geometry_flow.py](/mnt/ai_projects/KYRIN/tests/actions/test_capture_geometry_flow.py:1)، [test_queued_dispatch.py](/mnt/ai_projects/KYRIN/tests/actions/test_queued_dispatch.py:1). عدد تاریخی `1331 passed` نتیجهٔ اجرای فعلی این بررسی نیست.
+
+## ۱۱. کارهای کم‌هزینه برای امروز
+
+این فهرست **پیشنهاد** است؛ تغییرات انجام نشده‌اند.
+
+- ابتدا error code را بررسی کنید: برای `Apply All Devices` در این checkout، تغییر OCR مسیر policy را باز نمی‌کند. این تمایز را در پیام/diagnostic نمایش دهید.
+- علت‌های `content/window_token/stale_capture` را در parser نتیجه حفظ کنید؛ اصلاح کوچک با ارزش تشخیصی بالا.
+- تست PNG هم‌پیکسل با metadata متفاوت و تست انیمیشن خارج target را پیش از اصلاح F01 اضافه کنید.
+- fallback مدل را برای partial قطع و آزمون «جهت مدل عمداً معکوس» را اضافه کنید.
+- تا تکمیل AT-SPI، برای navigation شناخته‌شده از shortcut موجود و verification استفاده کنید؛ threshold OCR را سراسری پایین نیاورید.
+- برای آزمایش latency، animation داشبورد را خاموش و TTS سبک CPU را امتحان کنید؛ این‌ها متغیر آزمایش‌اند، نه علت اثبات‌شدهٔ کندی.
+- یک corpus کوچک از targetهای بدون اطلاعات شخصی بسازید: متن تکراری، فارسی RTL، آیکون، سایه و scale. ذخیرهٔ screenshot واقعی فقط با رضایت و پاک‌سازی محتوای حساس.
+- نصب و cacheها در صورت کار آینده مطابق [LOCAL_DATA_STORAGE.md](/mnt/ai_projects/KYRIN/docs/app/LOCAL_DATA_STORAGE.md:1) روی `/mnt/ai_projects/KYRIN/local-data/` و مدل‌های توسعه روی `models/local/` بمانند؛ مسیر مختص این ماشین داخل هستهٔ قابل حمل hard-code نشود.
 
 ## Top 5 things to do first
 
-۱. **هدف مدل را به درخواست واقعی ببندید.** R01 و R02: ID معتبر یا JSON معتبر کافی نیست؛ گزینهٔ نامرتبط و فرمان منفی باید پیش از gate رد شوند. [model_interpreter.py](/mnt/ai_projects/KYRIN/src/kyrin/commands/model_interpreter.py:365).
+۱. **F01:** برابری بایت‌های PNG را از اعتبار هدف حذف و مقایسهٔ پیکسل/ناحیهٔ هدف را جایگزین کنید؛ تفاوت زمان ساخت PNG نباید کلیک را متوقف کند.
 
-۲. **قرارداد مشترک geometry و هویت پنجره بسازید.** R03 تا R05: یک تبدیل صریح برای scale، سایه و crop؛ همان قرارداد برای Telegram و کنترل عمومی، با token و زمان مشاهده. [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:164)، [telegram.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/telegram.py:767).
+۲. **F02 و F15:** پوشش سیاست کلیک را روشن کنید؛ unknown risk به تأیید محدود و قابل انقضا برسد و علت policy با شکست OCR اشتباه نشود.
 
-۳. **از AT-SPI برای اجرای معنایی استفاده کنید.** R07: name/role/state/window درست را بررسی کنید، سپس action واقعی را صدا بزنید؛ OCR فقط fallbackِ نیازمند شواهد بیشتر باشد. [desktop_control_helper.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control_helper.py:55).
+۳. **F04:** AT-SPI را مسیر نخست و مستقل از OCR کنید؛ action معنایی، پنجرهٔ دقیق و state واقعی کنترل را به کار بگیرید.
 
-۴. **نتیجهٔ عمل را قبل از اعلام موفقیت و ادامهٔ plan بررسی کنید.** R06: پس‌شرط معنایی و retry محدود؛ image diff و dispatch به‌تنهایی موفقیت نیستند. [desktop_control.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/platforms/desktop_control.py:220)، [plan_runner.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/plan_runner.py:78).
+۴. **F03، F05 و F06:** ورودی دسکتاپ یک مالک داشته باشد؛ لغو تا لحظهٔ input و میان مراحل plan مؤثر باشد و پس‌شرط پیش از ادامه بررسی شود.
 
-۵. **لغو، deadline و پایان طبیعی را درست کنید.** R10 تا R12 و R14: standby فرمان قدیمی را باطل کند، EOF صف را drain کند و timeout کار پس‌زمینه را رها نکند. [command_runtime.py](/mnt/ai_projects/KYRIN/src/kyrin/runtime/command_runtime.py:166)، [queued_dispatch.py](/mnt/ai_projects/KYRIN/src/kyrin/actions/queued_dispatch.py:103)، [chat_verifier.py](/mnt/ai_projects/KYRIN/src/kyrin/app/qt/chat_verifier.py:192).
+۵. **F07 تا F09:** مدل فقط final را در worker قابل لغو پردازش کند؛ deadline مشترک تا OCR/portal برسد و جهت/state پیشنهاد مدل مستقل تأیید شود.
 
 </div>

@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from kyrin.operations import OperationStopped, run_process
 from kyrin.vision.ocr.backends.tesseract import OcrInferenceError, OcrUnavailableError
 from kyrin.vision.ocr.contracts import (
     OcrCapabilities,
@@ -92,7 +93,7 @@ class PaddleOcrEngine:
             PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True",
         )
         try:
-            process = subprocess.run(
+            process = run_process(
                 [str(self._runtime_python), "-I", str(worker), *arguments],
                 input=image,
                 capture_output=True,
@@ -100,7 +101,7 @@ class PaddleOcrEngine:
                 check=False,
                 env=environment,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
+        except (OSError, subprocess.TimeoutExpired, OperationStopped) as error:
             raise OcrInferenceError("PaddleOCR process did not finish") from error
         if process.returncode != 0:
             raise OcrInferenceError("PaddleOCR inference failed")

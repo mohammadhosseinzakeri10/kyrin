@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.commands.models import CommandKind
 
 
@@ -22,13 +23,20 @@ class OpenWindowPickerExecutor:
         self._desktop_ids = dict(desktop_ids)
         self._close_desktop_ids = dict(close_desktop_ids or {})
         self._picker_open = False
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def execute(self, request: ActionRequest) -> ActionResult:
         intent = request.intent
+        if intent.kind is CommandKind.CLOSE_SHOWN_WINDOW:
+            # Only the outer WindowControlExecutor may confirm and close.
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="window_close_confirmation_required",
+            )
         kinds = {
             CommandKind.SHOW_ALL_WINDOWS,
             CommandKind.SELECT_APP_WINDOW,
-            CommandKind.CLOSE_SHOWN_WINDOW,
             CommandKind.SELECT_OPEN_APP_WINDOW,
             CommandKind.HIDE_APP_WINDOWS,
         }
@@ -49,17 +57,6 @@ class OpenWindowPickerExecutor:
                     request.key, ActionOutcome.FAILED, error_code="app_not_configured"
                 )
             method, args = "ActivateShownOpenApp", ("s", desktop_id)
-        elif intent.kind is CommandKind.CLOSE_SHOWN_WINDOW:
-            if not self._picker_open or not self._close_desktop_ids:
-                return ActionResult(
-                    request.key, ActionOutcome.FAILED, error_code="window_state_changed"
-                )
-            assert intent.window_index is not None
-            ids = tuple(sorted(self._close_desktop_ids.values()))
-            method, args = (
-                "CloseShownOpenWindow",
-                ("uas", str(intent.window_index), str(len(ids)), *ids),
-            )
         elif intent.kind is CommandKind.SHOW_ALL_WINDOWS:
             ids = tuple(sorted(self._desktop_ids.values()))
             method, args = "ShowOpenWindows", ("as", str(len(ids)), *ids)
@@ -75,32 +72,44 @@ class OpenWindowPickerExecutor:
                 ActionOutcome.UNKNOWN,
                 error_code="window_state_changed"
                 if status in {"stale", "not_shown", "no_window"}
-                else "multiple_windows" if status == "ambiguous"
+                else "multiple_windows"
+                if status == "ambiguous"
+                else "backend:" + self.backend_status.reason
+                if not self.backend_status.ready
                 else "window_unverified",
             )
         self._picker_open = intent.kind is CommandKind.SHOW_ALL_WINDOWS
         return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
 
-    @staticmethod
-    def _call(method: str, *args: str) -> str | None:
+    def _call(self, method: str, *args: str) -> str | None:
+        self.backend_status = probe_gnome("ActiveApp", {method}, run=subprocess.run)
+        if not self.backend_status.ready:
+            return None
         try:
             result = subprocess.run(
                 [
-                    "busctl", "--user", "--json=short", "call", "org.gnome.Shell",
-                    "/org/kyrin/ActiveApp", "org.kyrin.ActiveApp", method, *args,
+                    "busctl",
+                    "--user",
+                    "--json=short",
+                    "call",
+                    "org.gnome.Shell",
+                    "/org/kyrin/ActiveApp",
+                    "org.kyrin.ActiveApp",
+                    method,
+                    *args,
                 ],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=False,
                 timeout=5.0,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             return None
         if result.returncode != 0:
             return None
         try:
             response = json.loads(result.stdout)
             status = response["data"][0]
-        except (ValueError, KeyError, IndexError, TypeError):
+        except ValueError, KeyError, IndexError, TypeError:
             return None
         return status if isinstance(status, str) else None

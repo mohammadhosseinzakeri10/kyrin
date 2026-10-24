@@ -1,15 +1,16 @@
 """Bridge Qt's asynchronous screen grant to replaceable, offline OCR."""
 
 from collections.abc import Callable
-from dataclasses import replace
-from struct import unpack_from
 from threading import Thread
+from time import monotonic
 from typing import Literal
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Signal
 from PySide6.QtGui import QImage
 
 from kyrin.app.qt.screen_access import ScreenAccess
+from kyrin.model_resources import MODEL_RESOURCES, ModelResources, Workload
+from kyrin.operations import Operation, activate, current_operation
 from kyrin.vision.ocr.contracts import (
     OcrEngine,
     OcrOptions,
@@ -21,19 +22,17 @@ from kyrin.vision.screen_capture import IdentifiedWindowImage
 from kyrin.vision.text_reader import IdentifiedWindowText
 
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
-ReadRegion = Literal[
-    "left_menu", "left_chat_list", "left_chat_list_fast", "chat_header",
-    "settings_pane", "settings_header"
-] | None
-
-
-def _png_size(image: bytes) -> tuple[int, int] | None:
-    if len(image) < 24 or image[12:16] != b"IHDR":
-        return None
-    width, height = unpack_from(">II", image, 16)
-    if not (0 < width <= 20000 and 0 < height <= 20000):
-        return None
-    return width, height
+ReadRegion = (
+    Literal[
+        "left_menu",
+        "left_chat_list",
+        "left_chat_list_fast",
+        "chat_header",
+        "settings_pane",
+        "settings_header",
+    ]
+    | None
+)
 
 
 def _crop_png(image: bytes, region: ReadRegion) -> tuple[bytes, int] | None:
@@ -77,9 +76,11 @@ def _chat_list_png(image: bytes) -> bytes | None:
     if source.isNull() or source.width() < 300 or source.height() < 300:
         return None
     width = min(source.width(), int(source.width() * 0.36))
-    cropped = source.copy(0, 0, width, source.height()).scaled(
-        width * 2, source.height() * 2
-    ).convertToFormat(QImage.Format.Format_RGB888)
+    cropped = (
+        source.copy(0, 0, width, source.height())
+        .scaled(width * 2, source.height() * 2)
+        .convertToFormat(QImage.Format.Format_RGB888)
+    )
     output = QByteArray()
     buffer = QBuffer(output)
     if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
@@ -140,8 +141,11 @@ class ScreenTextReader(QObject):
         identity_reader: WindowIdentityReader,
         options: OcrOptions,
         parent: QObject | None = None,
+        *,
+        resources: ModelResources = MODEL_RESOURCES,
     ) -> None:
         super().__init__(parent)
+        self._resources = resources
         self._access = access
         self._engine = engine
         self._identity_reader = identity_reader
@@ -150,6 +154,9 @@ class ScreenTextReader(QObject):
         self._busy = False
         self._generation = 0
         self._closed = False
+        self._operation: Operation | None = None
+        self._worker_generation: int | None = None
+        self._worker: Thread | None = None
         # A worker may finish after this reader closes. Keep its signal source
         # alive in the worker rather than letting Qt delete it with this parent.
         self._events = _WorkerEvents()
@@ -179,10 +186,12 @@ class ScreenTextReader(QObject):
 
     def set_engine(self, engine: OcrEngine | None) -> None:
         """Switch after saving settings; discard any result from the old engine."""
+        self.cancel()
         self._generation += 1
         self._engine = engine
         self._select_supported_default()
-        self._finish()
+        if self._worker_generation is None:
+            self._finish()
         self.busy_changed.emit(self._busy)
 
     def _select_supported_default(self) -> None:
@@ -209,6 +218,11 @@ class ScreenTextReader(QObject):
         if self._engine is None:
             self.failed.emit("ocr_unavailable")
             return False
+        parent = current_operation()
+        if parent is not None and parent.stopped:
+            return False
+        self._generation += 1
+        self._operation = parent or Operation(monotonic() + 18)
         self._busy = True
         self.busy_changed.emit(True)
         generation = self._generation
@@ -227,6 +241,10 @@ class ScreenTextReader(QObject):
     ) -> None:
         if generation != self._generation or self._closed:
             return
+        if self._operation is None or self._operation.stopped:
+            self._finish()
+            self.failed.emit("cancelled")
+            return
         if image is None:
             self._finish()
             self.failed.emit("capture_unavailable")
@@ -234,7 +252,6 @@ class ScreenTextReader(QObject):
         engine = self._engine
         assert engine is not None
         events = self._events
-        original_size = _png_size(image.image)
         scale = 2 if region == "left_chat_list" else 1
         if region == "left_chat_list":
             focused = _chat_list_png(image.image)
@@ -247,42 +264,58 @@ class ScreenTextReader(QObject):
             return
         ocr_image, left_offset = cropped if cropped is not None else (image.image, 0)
 
+        operation = self._operation
+        self._worker_generation = generation
+
         def work() -> None:
             try:
-                result = _window_coordinates(
-                    engine.recognize(ocr_image, selected_options), left_offset, scale
-                )
-                identity = self._identity_reader()
+                with activate(operation):
+                    operation.remaining()
+                    with self._resources.use(
+                        Workload.OCR,
+                        f"ocr:{type(engine).__name__}:{selected_options.device.value}",
+                    ):
+                        result = _window_coordinates(
+                            engine.recognize(ocr_image, selected_options),
+                            left_offset,
+                            scale,
+                        )
+                    operation.remaining()
+                    identity = self._identity_reader()
+                    operation.remaining()
                 if identity != (image.platform_app_id, image.process_id):
                     events.failed.emit(generation, "window_changed")
                     return
-                observation = IdentifiedWindowText(
-                    image.platform_app_id,
-                    image.process_id,
+                observation = IdentifiedWindowText.from_capture(
+                    image,
                     result,
-                    original_size,
-                    image.capture_rect,
-                    image.frame_rect,
-                    replace(
-                        image.geometry,
-                        crop_origin=(left_offset, 0),
-                        ocr_resize=(scale, scale),
-                    ) if image.geometry is not None else None,
+                    crop_origin=(left_offset, 0),
+                    ocr_resize=(scale, scale),
                 )
                 events.completed.emit(generation, observation)
             except Exception:
                 # This boundary also contains failures from future OCR plugins.
                 events.failed.emit(generation, "ocr_failed")
 
-        Thread(target=work, name="kyrin-screen-ocr", daemon=True).start()
+        self._worker = Thread(target=work, name="kyrin-screen-ocr", daemon=True)
+        self._worker.start()
 
     def _completed(self, generation: int, observation: object) -> None:
+        if self._worker_generation == generation:
+            self._worker_generation = None
+            self._finish()
         if generation != self._generation or self._closed:
+            return
+        if self._operation is not None and self._operation.stopped:
+            self.failed.emit("cancelled")
             return
         self._finish()
         self.completed.emit(observation)
 
     def _failed(self, generation: int, reason: str) -> None:
+        if self._worker_generation == generation:
+            self._worker_generation = None
+            self._finish()
         if generation != self._generation or self._closed:
             return
         self._finish()
@@ -290,9 +323,22 @@ class ScreenTextReader(QObject):
 
     def _access_changed(self, granted: bool) -> None:
         if not granted:
+            was_busy = self._busy
+            self.cancel()
             self._generation += 1
-            if self._busy:
+            if was_busy:
                 self.failed.emit("access_off")
+            if self._worker_generation is None:
+                self._finish()
+
+    def cancel(self, operation: Operation | None = None) -> None:
+        """Stop this read only; retain native worker ownership until it exits."""
+        if operation is not None and self._operation is not operation:
+            return
+        if self._operation is not None:
+            self._operation.cancel()
+        if self._worker_generation is None:
+            self._generation += 1
             self._finish()
 
     def _finish(self) -> None:
@@ -301,6 +347,8 @@ class ScreenTextReader(QObject):
             self.busy_changed.emit(False)
 
     def close(self) -> None:
+        self.cancel()
         self._closed = True
         self._generation += 1
-        self._finish()
+        if self._worker_generation is None:
+            self._finish()

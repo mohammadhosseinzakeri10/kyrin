@@ -626,3 +626,63 @@ def test_persian_chat_uses_bilingual_ocr_only_when_installed(
     reader.last_options = None
     assert not _call_from_worker(app, search)
     assert reader.last_options is None
+
+
+def test_late_completion_never_starts_visible_ocr_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.app.qt.chat_verifier import _Request
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    access = Access()
+    reader = Reader(_observation())
+    calls: list[object] = []
+    reader.read = lambda *args, **kwargs: calls.append(args) or True
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, access), cast(ScreenTextReader, reader)
+    )
+    request = _Request(
+        "telegram.desktop", 123, "Absent", choices=True, visible_choices=True
+    )
+    verifier._start(request)
+    assert len(calls) == 1
+    # The caller has already stopped waiting. A queued worker callback arrives.
+    request.finished.set()
+    verifier._completed(_observation())
+    assert len(calls) == 1
+    assert verifier._pending is None
+    assert request.result is None
+    assert app is not None
+
+
+def test_caller_timeout_cancels_carried_budget_and_clears_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.app.qt.chat_verifier import _Request
+    from kyrin.operations import current_operation
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    access = Access()
+    reader = Reader(_observation())
+    carried = []
+    cancelled = []
+    reader.read = lambda *args, **kwargs: carried.append(current_operation()) or True
+    reader.cancel = lambda operation: cancelled.append(operation)
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, access), cast(ScreenTextReader, reader)
+    )
+    request = _Request(
+        "telegram.desktop", 123, "Absent", choices=True, visible_choices=True
+    )
+    assert not _call_from_worker(app, lambda: verifier._ask(request, timeout_s=0.05))
+    app.processEvents()
+    assert len(carried) == 1
+    assert carried[0] is request.operation
+    assert request.operation is not None and request.operation.stopped
+    assert cancelled == [request.operation]
+    assert verifier._pending is None
+    verifier._completed(_observation())
+    assert len(carried) == 1

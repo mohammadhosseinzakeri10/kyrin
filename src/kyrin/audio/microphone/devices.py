@@ -20,6 +20,7 @@ class MicrophoneConfiguration:
     index: int
     audio_format: AudioFormat
     frames_per_chunk: int
+    device_key: str | None = None
 
 
 class MicrophoneResolver(Protocol):
@@ -105,6 +106,10 @@ class PortAudioMicrophoneResolver:
             if index < 0:
                 raise MicrophoneError("default microphone is not configured")
             details = sd.query_devices(index, "input")
+            resolved_key = microphone_key(
+                str(sd.query_hostapis()[int(details["hostapi"])]["name"]),
+                str(details["name"]),
+            )
             sample_rate = int(round(details["default_samplerate"]))
             sd.check_input_settings(
                 device=index, channels=1, dtype="int16", samplerate=sample_rate
@@ -117,4 +122,5 @@ class PortAudioMicrophoneResolver:
             index,
             AudioFormat(sample_rate, 1, AudioSampleFormat.INT16),
             max(1, round(sample_rate * 0.02)),
+            resolved_key,
         )

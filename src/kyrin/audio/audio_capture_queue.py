@@ -1,8 +1,10 @@
 """Move blocking audio capture to a worker with bounded buffering."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from queue import Empty, Full, Queue
 from threading import Event, Thread
+from time import perf_counter_ns
 from types import TracebackType
 
 from kyrin.audio.audio_data import AudioData
@@ -23,6 +25,7 @@ class AudioCaptureQueue:
         *,
         max_chunks: int = 8,
         stop_timeout_s: float = 1.0,
+        clock_ns: Callable[[], int] = perf_counter_ns,
     ) -> None:
         if max_chunks <= 0:
             raise ValueError("max_chunks must be positive")
@@ -30,6 +33,7 @@ class AudioCaptureQueue:
             raise ValueError("stop_timeout_s must be positive")
 
         self._source = source
+        self._clock_ns = clock_ns
         self._queue: Queue[AudioData] = Queue(maxsize=max_chunks)
         self._stop_requested = Event()
         self._done = Event()
@@ -66,6 +70,15 @@ class AudioCaptureQueue:
                 if self._stop_requested.is_set():
                     break
                 try:
+                    if chunk.capture_start_ns is None:
+                        frames = len(chunk.data) // chunk.audio_format.bytes_per_frame
+                        chunk = replace(
+                            chunk,
+                            capture_start_ns=self._clock_ns()
+                            - (
+                                frames * 1_000_000_000 // chunk.audio_format.sample_rate
+                            ),
+                        )
                     self._queue.put_nowait(chunk)
                 except Full:
                     self._error = AudioQueueOverflowError(

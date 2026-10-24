@@ -4,6 +4,7 @@ import json
 import subprocess
 from collections.abc import Mapping
 
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.window_presence import WindowPresence
 
 _BUS_NAME = "org.gnome.Shell"
@@ -14,10 +15,14 @@ _INTERFACE = "org.kyrin.ActiveApp"
 class GnomeAppWindowPresence:
     def __init__(self, desktop_ids: Mapping[str, str]) -> None:
         self._desktop_ids = dict(desktop_ids)
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def _call(self, method: str, app_id: str) -> tuple[str, object] | None:
         desktop_id = self._desktop_ids.get(app_id)
         if desktop_id is None:
+            return None
+        self.backend_status = probe_gnome("ActiveApp", {method}, run=subprocess.run)
+        if not self.backend_status.ready:
             return None
         try:
             result = subprocess.run(

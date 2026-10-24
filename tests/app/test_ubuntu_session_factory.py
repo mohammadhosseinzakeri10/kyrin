@@ -2,17 +2,24 @@
 
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event, Thread
 from typing import cast
 
 import pytest
 
+from kyrin.actions.control_policy import ControlCapability, ControlConfirmation
+from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import (
     ActionFeedback,
+    ActionKey,
     ActionOutcome,
     ActionRequest,
     ActionResult,
 )
+from kyrin.actions.platforms.telegram import ChatVerifier
+from kyrin.actions.telegram_selection import TelegramChatSelection
+from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
+from kyrin.actions.visible_control import VisibleControlTarget
 from kyrin.app.platforms import ubuntu
 from kyrin.app.settings import (
     AllowedApp,
@@ -21,11 +28,17 @@ from kyrin.app.settings import (
     CommandModelSelection,
     SttSelection,
 )
+from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.audio.file_input import FILE_AUDIO_FORMAT, AudioFileInput
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
-from kyrin.commands.models import CommandKind, ResponseKind, ResponseRequest
+from kyrin.commands.models import (
+    CommandIntent,
+    CommandKind,
+    ResponseKind,
+    ResponseRequest,
+)
 from kyrin.commands.understanding import (
     MeaningStep,
     ProposedMeaning,
@@ -35,11 +48,15 @@ from kyrin.commands.understanding import (
 )
 from kyrin.desktop.app_activation import ActivationAttempt
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from kyrin.desktop.window_control import WindowControlStatus, WindowOperation
+from kyrin.desktop.window_observation import WindowObservation
 from kyrin.desktop.window_presence import WindowPresence
 from kyrin.memory.history import SqliteConversationHistory
+from kyrin.model_resources import MemorySnapshot, ModelResources
 from kyrin.responses.visual_status import VisualPresentation, VisualStatus
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.stt.capabilities import SpeechToTextCapabilities
+from kyrin.stt.contracts import SpeechToTextEngine
 from kyrin.stt.device import ComputeDevice, DevicePreference
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
@@ -57,6 +74,9 @@ def isolate_conversation_history(
 ) -> None:
     """Fake live sessions must never write into the user's XDG data store."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setattr(
+        ubuntu, "MODEL_RESOURCES", ModelResources(memory=lambda: MemorySnapshot())
+    )
 
 
 class FakeMicrophones:
@@ -179,11 +199,163 @@ def _catalog(tmp_path: Path) -> XdgDesktopAppCatalog:
 
 def _settings(tmp_path: Path, **changes: object) -> AppSettings:
     base = AppSettings(
+        history_enabled=True,
         microphone_device_key='["PulseAudio","USB Mic"]',
         stt=SttSelection("fake", tmp_path / "model", "en"),
         allowed_apps=(AllowedApp("telegram", "telegram.desktop"),),
     )
     return replace(base, **changes)
+
+
+@pytest.mark.parametrize("existing", [True, False])
+@pytest.mark.parametrize("file_source", [True, False])
+def test_disabled_history_never_opens_creates_reads_or_changes_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: bool,
+    file_source: bool,
+) -> None:
+    from datetime import UTC, datetime
+
+    from kyrin.memory.history import ConversationTurn, default_history_path
+
+    path = default_history_path()
+    if existing:
+        history = SqliteConversationHistory(path)
+        history.append(ConversationTurn("private", "en", datetime.now(UTC), "s", 0, 0))
+        history.close()
+    before = path.read_bytes() if existing else None
+
+    def forbidden_path() -> Path:
+        pytest.fail("disabled history must not even resolve the database path")
+
+    monkeypatch.setattr(ubuntu, "default_history_path", forbidden_path)
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", FakeSpeechController)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: cast(SpeechToTextEngine, FakeEngine())},
+        on_event=lambda event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: cast(VoiceActivityDetector, object()),
+    )
+    session_factory = (
+        factory.for_audio_file(tmp_path / "unused.wav") if file_source else factory
+    )
+    with session_factory(_settings(tmp_path, history_enabled=False)) as runtime:
+        runtime.run()
+    assert (path.read_bytes() if path.exists() else None) == before
+
+
+def test_session_applies_selected_active_and_archive_retention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from kyrin.memory.history import (
+        ConversationTurn,
+        HistoryRetention,
+        default_history_path,
+    )
+
+    path = default_history_path()
+    history = SqliteConversationHistory(path)
+    for segment in range(3):
+        history.append(
+            ConversationTurn(f"old {segment}", "en", datetime.now(UTC), "s", 0, segment)
+        )
+    history.archive_active()
+    history.close()
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", FakeSpeechController)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: cast(SpeechToTextEngine, FakeEngine())},
+        on_event=lambda event: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: cast(VoiceActivityDetector, object()),
+    )
+    policy = HistoryRetention(active_max_turns=1, archived_max_turns=1)
+    with factory(_settings(tmp_path, history_retention=policy)) as runtime:
+        runtime.run()
+    history = SqliteConversationHistory(path)
+    try:
+        assert [turn.text for turn in history.recent()] == ["Open Browser"]
+        assert [turn.text for turn in history.archived_page()] == ["old 2"]
+    finally:
+        history.close()
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_live_close_uses_shared_confirmation_and_close_permission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: bool
+) -> None:
+    from collections.abc import Iterator
+    from time import monotonic
+
+    from kyrin.app.events import ApplicationEvent
+
+    completed = Event()
+    events: list[ApplicationEvent] = []
+    prompts: list[ControlConfirmation] = []
+    closed: list[WindowObservation] = []
+
+    class CloseSpeechController(FakeSpeechController):
+        def events(self) -> Iterator[TranscriptUpdate]:
+            yield TranscriptUpdate(0, "Close Telegram", TranscriptStatus.FINAL, "en")
+            assert completed.wait(2)
+
+    class Controller:
+        def control(
+            self, app_id: str, operation: WindowOperation
+        ) -> WindowControlStatus:
+            pytest.fail("close must never use app-only control")
+
+        def prepare_close(
+            self, app_id: str, window_index: int | None = None
+        ) -> WindowObservation:
+            assert app_id == "telegram" and window_index is None
+            now = monotonic()
+            return WindowObservation(app_id, 42, "17", "close", now, now + 10)
+
+        def close_confirmed(self, window: WindowObservation) -> WindowControlStatus:
+            closed.append(window)
+            return WindowControlStatus.CONFIRMED
+
+    def confirm(prompt: ControlConfirmation) -> bool:
+        prompts.append(prompt)
+        return approved
+
+    def receive(event: ApplicationEvent) -> None:
+        events.append(event)
+        if isinstance(event, ActionFeedback):
+            completed.set()
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", CloseSpeechController)
+    fallback = RecordingExecutor()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda _s: cast(SpeechToTextEngine, FakeEngine())},
+        on_event=receive,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: cast(VoiceActivityDetector, object()),
+        executor_factory=lambda _paths: fallback,
+        window_controller_factory=lambda _ids: Controller(),
+        control_confirmation=confirm,
+    )
+    settings = _settings(
+        tmp_path, action_execution_enabled=True, allowed_close_apps=("telegram",)
+    )
+    with factory(settings) as runtime:
+        runtime.run()
+    assert len(prompts) == 1
+    assert prompts[0].capability is ControlCapability.CLOSE_WINDOW
+    assert closed == ([prompts[0].window] if approved else [])
+    assert not fallback.requests
+    feedback = [event for event in events if isinstance(event, ActionFeedback)]
+    assert len(feedback) == 1
+    assert feedback[0].outcome is (
+        ActionOutcome.CONFIRMED if approved else ActionOutcome.FAILED
+    )
 
 
 def test_power_reply_during_voice_playback_is_accepted_with_echo_cancellation(
@@ -196,7 +368,7 @@ def test_power_reply_during_voice_playback_is_accepted_with_echo_cancellation(
     class ReadyEchoCancellation:
         closed = False
 
-        def start(self) -> bool:
+        def start(self, microphone_key: str | None = None) -> bool:
             return True
 
         def close(self) -> None:
@@ -237,7 +409,7 @@ def test_cleanup_closes_stt_even_if_echo_cancellation_close_fails(
     tmp_path: Path,
 ) -> None:
     class FaultyEchoCancellation:
-        def start(self) -> bool:
+        def start(self, microphone_key: str | None = None) -> bool:
             return True
 
         def close(self) -> None:
@@ -424,8 +596,9 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
     )
 
 
+@pytest.mark.parametrize("with_ocr", [False, True])
 def test_visible_click_reaches_unselected_focused_app(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_ocr: bool
 ) -> None:
     completed = Event()
     requested: list[ActionRequest] = []
@@ -446,6 +619,7 @@ def test_visible_click_reaches_unselected_focused_app(
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", ControlSpeechController)
     monkeypatch.setattr(ubuntu, "DesktopControlExecutor", ControlExecutor)
+    monkeypatch.setattr(ubuntu, "read_active_window_token", lambda: "window-7")
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=lambda _event: None,
@@ -454,7 +628,7 @@ def test_visible_click_reaches_unselected_focused_app(
         detector_factory=lambda: object(),
         executor_factory=lambda paths: RecordingExecutor(),
         focused_window=lambda: ("unselected.desktop", 42),
-        chat_verifier=cast(ubuntu.ChatVerifier, object()),
+        chat_verifier=cast(ChatVerifier, object()) if with_ocr else None,
     )
     settings = _settings(
         tmp_path,
@@ -486,7 +660,9 @@ def test_selected_command_model_reaches_live_transcript_without_executing(
             pass
 
     class FakeCommandModel:
-        def __init__(self, endpoint: str, model: str, device: DevicePreference):
+        def __init__(
+            self, endpoint: str, model: str, device: DevicePreference, **kwargs: object
+        ) -> None:
             assert endpoint == "http://127.0.0.1:11435"
             assert model == "qwen3.5:4b"
             assert device is DevicePreference.CPU
@@ -1034,3 +1210,379 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
         assert gate is not None
         assert gate.policy.allowed_chat_apps == frozenset({"telegram"})
         assert CommandKind.OPEN_CHAT in gate.policy.supported_kinds
+
+
+@pytest.mark.parametrize("active_route", ("normal", "selection", "paging"))
+@pytest.mark.parametrize(
+    "contender", (CommandKind.SCROLL_DOWN, CommandKind.VISIBLE_CONTROL)
+)
+def test_all_input_routes_share_compound_ownership(
+    active_route: str,
+    contender: CommandKind,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real composition and selection threads must not overlap fake OS input."""
+    import subprocess
+
+    entered = Barrier(2)
+    release = Event()
+    attempted = Event()
+    interleaved = Event()
+    log: list[str] = []
+    errors: list[BaseException] = []
+    executors: list[ActionExecutor] = []
+    selections: list[TelegramChatSelection] = []
+    choices = ChatSearchChoices(
+        ChatSearchMatch(60, 120, 80, 20, 1000, 800),
+        (),
+        other_local_results=(ChatSearchMatch(60, 180, 80, 20, 1000, 800),),
+        global_section_verified=True,
+        view_signature="first",
+    )
+
+    class Verifier:
+        def observe_active_app(self) -> str:
+            return "telegram"
+
+        def ready(self) -> bool:
+            return True
+
+        def find_search_choices(self, *_args: object) -> ChatSearchChoices:
+            return choices
+
+        def choice_status(self) -> str:
+            return "classified"
+
+        def verify(self, *_args: object) -> bool:
+            return True
+
+        def find_visible_control(self, *_args: object) -> VisibleControlTarget:
+            from time import monotonic
+
+            from kyrin.vision.capture_geometry import CaptureGeometry
+
+            return VisibleControlTarget(
+                60,
+                120,
+                80,
+                20,
+                1000,
+                800,
+                geometry=CaptureGeometry(
+                    "logical_desktop",
+                    0,
+                    (0, 0, 1000, 800),
+                    (1000, 800),
+                    1,
+                    1,
+                    (0, 0, 0, 0),
+                    (0, 0),
+                    (1, 1),
+                    "window-7",
+                    "capture-1",
+                    monotonic(),
+                    (0, 0, 1000, 800),
+                ),
+            )
+
+    def transport(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        helper = Path(args[1]).name
+        # The first call belongs to the active Telegram operation. Hold a
+        # compound keyboard/pointer sequence open while another route arrives.
+        if not log:
+            log.append("telegram:press")
+            entered.wait(3)
+            assert release.wait(3)
+            log.append("telegram:release")
+            if active_route == "normal":
+                marker = "SHORTCUT_DISPATCHED"
+            elif active_route == "selection":
+                marker = "CHAT_RESULT_CLICKED"
+            else:
+                marker = "SCROLL_DISPATCHED"
+        else:
+            if not release.is_set():
+                interleaved.set()
+            log.append("generic:input")
+            marker = (
+                "CLICK_DISPATCHED"
+                if helper == "desktop_control_helper.py"
+                else "SCROLL_DISPATCHED"
+            )
+        return subprocess.CompletedProcess(args, 0, marker, "")
+
+    monkeypatch.setattr(
+        "kyrin.actions.platforms.desktop_control.read_active_window_token",
+        lambda: "window-7",
+    )
+    original_runtime = LiveCommandRuntime
+
+    def capture_runtime(*args: object, **kwargs: object) -> LiveCommandRuntime:
+        executors.append(cast(ActionExecutor, kwargs["executor"]))
+        selections.append(cast(TelegramChatSelection, kwargs["telegram_selection"]))
+        # Keep the actual runtime; no microphone or action worker is started.
+        return original_runtime(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ubuntu, "LiveCommandRuntime", capture_runtime)
+    monkeypatch.setattr(subprocess, "run", transport)
+    for adapter in ("telegram", "desktop_control", "desktop_scroll"):
+        monkeypatch.setattr(f"kyrin.actions.platforms.{adapter}.run_process", transport)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda _: cast(SpeechToTextEngine, FakeEngine())},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: cast(VoiceActivityDetector, object()),
+        executor_factory=lambda _: RecordingExecutor(),
+        chat_verifier=cast(ChatVerifier, Verifier()),
+        observer_factory=lambda *_: Verifier(),
+        focused_window=lambda: ("telegram.desktop", 12),
+    )
+    settings = _settings(
+        tmp_path,
+        action_execution_enabled=True,
+        allowed_chat_apps=("telegram",),
+        remember_telegram_pointer=True,
+        allow_desktop_scroll=True,
+        allow_desktop_control=True,
+    )
+
+    def _window_evidence_for_control() -> WindowObservation:
+        from time import monotonic
+
+        from kyrin.desktop.window_observation import WindowObservation
+
+        now = monotonic()
+        return WindowObservation(
+            "telegram.desktop", 12, "window-7", "initial", now, now + 10
+        )
+
+    def run_contender() -> None:
+        attempted.set()
+        try:
+            result = executors[0].execute(
+                ActionRequest(
+                    ActionKey(0, 2),
+                    CommandIntent(
+                        contender,
+                        "Advanced"
+                        if contender is CommandKind.VISIBLE_CONTROL
+                        else "telegram.desktop",
+                        control_observation=(
+                            _window_evidence_for_control()
+                            if contender is CommandKind.VISIBLE_CONTROL
+                            else None
+                        ),
+                    ),
+                )
+            )
+            assert result.outcome is (
+                ActionOutcome.DISPATCHED_UNVERIFIED
+                if contender is CommandKind.VISIBLE_CONTROL
+                else ActionOutcome.LAUNCH_ACCEPTED
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_normal() -> None:
+        try:
+            assert executors[0].execute(request).outcome is ActionOutcome.CONFIRMED
+        except BaseException as exc:
+            errors.append(exc)
+
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(CommandKind.OPEN_CHAT, "Saved Messages", "telegram"),
+    )
+    active: Thread | None = None
+    other = Thread(target=run_contender, daemon=True)
+    with factory(settings):
+        selection = selections[0]
+        if active_route == "normal":
+            active = Thread(target=run_normal, daemon=True)
+            active.start()
+        else:
+            assert selection.begin(request, ("telegram.desktop", 12), "Alice", choices)
+            assert selection.on_final_speech(
+                "one" if active_route == "selection" else "next"
+            )
+        try:
+            entered.wait(3)
+            other.start()
+            assert attempted.wait(2)
+            broker = factory._input_brokers[0]
+            with broker._condition:
+                assert broker._condition.wait_for(lambda: len(broker._waiting) == 1, 2)
+            assert not interleaved.is_set(), "another route entered compound input"
+        finally:
+            release.set()
+            if other.ident is not None:
+                other.join(3)
+            if active is not None:
+                active.join(3)
+            selection.cancel()
+        assert not other.is_alive()
+    assert errors == []
+    assert log == ["telegram:press", "telegram:release", "generic:input"]
+
+
+def test_timed_out_input_owner_blocks_next_session_and_audio_file_clone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.actions.cancellation import ActionCancelled
+    from kyrin.actions.desktop_input import DesktopInputBroker
+
+    engine = FakeEngine()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda _: cast(SpeechToTextEngine, engine)},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: cast(VoiceActivityDetector, object()),
+        executor_factory=lambda _: RecordingExecutor(),
+    )
+    clone = factory.for_audio_file(tmp_path / "unused.wav")
+    settings = _settings(tmp_path, action_execution_enabled=True)
+    entered = Barrier(2)
+    release = Event()
+    errors: list[BaseException] = []
+
+    def active_operation() -> None:
+        entered.wait(3)
+        assert release.wait(3)
+
+    def run() -> None:
+        try:
+            factory._input_brokers[0].run(active_operation)
+        except BaseException as exc:
+            errors.append(exc)
+
+    original_close = DesktopInputBroker.close
+    monkeypatch.setattr(
+        DesktopInputBroker,
+        "close",
+        lambda broker: original_close(broker, timeout_s=0.01),
+    )
+    thread = Thread(target=run, daemon=True)
+    try:
+        with pytest.raises(RuntimeError, match="did not stop"):
+            with factory(settings):
+                thread.start()
+                entered.wait(3)
+        assert engine.closed
+        for next_factory in (factory, clone):
+            with pytest.raises(RuntimeError, match="did not stop"):
+                with next_factory(settings):
+                    pytest.fail("a new session overlapped the old input owner")
+        with pytest.raises(ActionCancelled):
+            factory._input_brokers[0].run(lambda: pytest.fail("closed broker reopened"))
+    finally:
+        release.set()
+        thread.join(3)
+    assert not thread.is_alive() and errors == []
+    with clone(settings):
+        assert len(factory._input_brokers) == 1
+
+
+@pytest.mark.parametrize("aec_available", [False, True])
+@pytest.mark.parametrize("saved_key", [None, '["PulseAudio","USB Mic"]'])
+def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aec_available: bool,
+    saved_key: str | None,
+) -> None:
+    from kyrin.app.events import AudioDuplexChanged
+    from kyrin.audio.activity.speech_activity_monitor import (
+        SpeechActivityFrame,
+        SpeechState,
+        SpeechTransition,
+    )
+    from kyrin.audio.audio_data import AudioData
+    from kyrin.audio.playback_guard import PlaybackGuardInput
+
+    selected = '["PulseAudio","USB Mic"]'
+    keys: list[str | None] = []
+    events: list[object] = []
+    sources: list[object] = []
+    callbacks: list[object] = []
+    executor = RecordingExecutor()
+
+    class Microphones(FakeMicrophones):
+        def resolve(self, key):
+            return replace(super().resolve(key), device_key=selected)
+
+    class Speaker:
+        is_active = True
+        is_playing = True
+        interrupts = 0
+
+        def interrupt(self):
+            self.interrupts += 1
+
+    class Source:
+        audio_format = AudioFormat(16000, 1, AudioSampleFormat.INT16)
+
+    class Echo:
+        def start(self, key):
+            keys.append(key)
+            return aec_available
+
+        def input(self):
+            return source
+
+        def close(self):
+            pass
+
+    class Controller(FakeSpeechController):
+        def events(self):
+            self.factory()
+            yield SpeechActivityFrame(
+                AudioData(bytes(320), source.audio_format),
+                True,
+                SpeechState.SPEAKING,
+                SpeechTransition.STARTED,
+            )
+
+    def pipeline(actual_source, *args, **kwargs):
+        sources.append(actual_source)
+        callback = kwargs["on_speech_started"]
+        callbacks.append(callback)
+        if callback is not None:
+            callback()
+        return object()
+
+    source = Source()
+    speaker = Speaker()
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", Controller)
+    monkeypatch.setattr(ubuntu, "LiveSpeechPipeline", pipeline)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=events.append,
+        microphones=Microphones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=lambda: object(),
+        source_factory=lambda config: source,
+        response_speaker=cast(ubuntu.ResponseSpeaker, speaker),
+        echo_cancellation_factory=lambda: cast(ubuntu.PipeWireEchoCancellation, Echo()),
+        executor_factory=lambda bindings: executor,
+    )
+    with factory(
+        _settings(
+            tmp_path,
+            microphone_device_key=saved_key,
+            action_execution_enabled=True,
+        )
+    ) as runtime:
+        runtime.run()
+    assert keys == [selected]
+    assert AudioDuplexChanged(aec_available) in events
+    assert speaker.interrupts == int(aec_available)
+    assert (callbacks[0] is not None) is aec_available
+    assert (sources[0] is source) is aec_available
+    assert isinstance(sources[0], PlaybackGuardInput) is (not aec_available)
+    assert executor.requests == []

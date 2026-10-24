@@ -259,6 +259,7 @@ class VisualStatusController:
         status = {
             ActionOutcome.CONFIRMED: VisualStatus.CONFIRMED,
             ActionOutcome.LAUNCH_ACCEPTED: VisualStatus.UNVERIFIED,
+            ActionOutcome.DISPATCHED_UNVERIFIED: VisualStatus.UNVERIFIED,
             ActionOutcome.UNKNOWN: VisualStatus.UNVERIFIED,
             ActionOutcome.FAILED: VisualStatus.FAILED,
         }[output.outcome]

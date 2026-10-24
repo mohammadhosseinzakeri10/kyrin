@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.commands.models import CommandKind
 from kyrin.desktop.window_presence import AppWindowPresence
 
@@ -33,17 +34,29 @@ class PtyxisActionExecutor:
         self._entry = entry
         self._window_presence = window_presence
         self._picker_open = False
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def _dismiss_picker(self) -> None:
         if not self._picker_open:
             return
         self._picker_open = False
+        self.backend_status = probe_gnome(
+            "ActiveApp", {"HideAppWindows"}, run=subprocess.run
+        )
+        if not self.backend_status.ready:
+            return
         try:
             subprocess.run(
                 [
-                    "busctl", "--user", "call", "org.gnome.Shell",
-                    "/org/kyrin/ActiveApp", "org.kyrin.ActiveApp",
-                    "HideAppWindows", "s", self._entry.name,
+                    "busctl",
+                    "--user",
+                    "call",
+                    "org.gnome.Shell",
+                    "/org/kyrin/ActiveApp",
+                    "org.kyrin.ActiveApp",
+                    "HideAppWindows",
+                    "s",
+                    self._entry.name,
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -51,17 +64,22 @@ class PtyxisActionExecutor:
                 check=False,
                 timeout=0.5,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             pass
 
     def execute(self, request: ActionRequest) -> ActionResult:
         intent = request.intent
+        if intent.kind is CommandKind.CLOSE_SHOWN_WINDOW:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="window_close_confirmation_required",
+            )
         if intent.kind not in (
             *_FLAGS,
             CommandKind.SHOW_ALL_WINDOWS,
             CommandKind.SHOW_APP_WINDOWS,
             CommandKind.SELECT_APP_WINDOW,
-            CommandKind.CLOSE_SHOWN_WINDOW,
             CommandKind.HIDE_APP_WINDOWS,
         ):
             self._dismiss_picker()
@@ -69,10 +87,6 @@ class PtyxisActionExecutor:
         if intent.target != self._app_id:
             return ActionResult(
                 request.key, ActionOutcome.FAILED, error_code="app_not_configured"
-            )
-        if intent.kind is CommandKind.CLOSE_SHOWN_WINDOW and not self._picker_open:
-            return ActionResult(
-                request.key, ActionOutcome.FAILED, error_code="window_state_changed"
             )
         if intent.kind is CommandKind.NEW_APP_TAB and (
             self._window_presence is None
@@ -82,9 +96,11 @@ class PtyxisActionExecutor:
                 request.key, ActionOutcome.UNKNOWN, error_code="window_state_changed"
             )
         if intent.kind is CommandKind.SHOW_APP_WINDOWS:
-            if self._window_presence is None or (
-                count := self._window_presence.count(self._app_id)
-            ) is None or count < 2:
+            if (
+                self._window_presence is None
+                or (count := self._window_presence.count(self._app_id)) is None
+                or count < 2
+            ):
                 return ActionResult(
                     request.key,
                     ActionOutcome.UNKNOWN,
@@ -94,29 +110,37 @@ class PtyxisActionExecutor:
             CommandKind.SHOW_ALL_WINDOWS,
             CommandKind.SHOW_APP_WINDOWS,
             CommandKind.SELECT_APP_WINDOW,
-            CommandKind.CLOSE_SHOWN_WINDOW,
             CommandKind.HIDE_APP_WINDOWS,
         ):
             method = {
                 CommandKind.SHOW_ALL_WINDOWS: "ShowAllWindows",
                 CommandKind.SHOW_APP_WINDOWS: "ShowAppWindows",
                 CommandKind.SELECT_APP_WINDOW: "ActivateShownAppWindow",
-                CommandKind.CLOSE_SHOWN_WINDOW: "CloseShownAppWindow",
                 CommandKind.HIDE_APP_WINDOWS: "HideAppWindows",
             }[intent.kind]
+            self.backend_status = probe_gnome("ActiveApp", {method}, run=subprocess.run)
+            if not self.backend_status.ready:
+                return ActionResult(
+                    request.key,
+                    ActionOutcome.FAILED,
+                    error_code="backend:" + self.backend_status.reason,
+                )
             command = [
-                "busctl", "--user", "--json=short", "call", "org.gnome.Shell",
-                "/org/kyrin/ActiveApp", "org.kyrin.ActiveApp", method,
+                "busctl",
+                "--user",
+                "--json=short",
+                "call",
+                "org.gnome.Shell",
+                "/org/kyrin/ActiveApp",
+                "org.kyrin.ActiveApp",
+                method,
             ]
             if intent.kind in (
                 CommandKind.SHOW_APP_WINDOWS,
                 CommandKind.HIDE_APP_WINDOWS,
             ):
                 command.extend(("s", self._entry.name))
-            elif intent.kind in (
-                CommandKind.SELECT_APP_WINDOW,
-                CommandKind.CLOSE_SHOWN_WINDOW,
-            ):
+            elif intent.kind is CommandKind.SELECT_APP_WINDOW:
                 assert intent.window_index is not None
                 command.extend(("su", self._entry.name, str(intent.window_index)))
         else:
@@ -146,13 +170,12 @@ class PtyxisActionExecutor:
         if intent.kind in (
             CommandKind.SHOW_APP_WINDOWS,
             CommandKind.SELECT_APP_WINDOW,
-            CommandKind.CLOSE_SHOWN_WINDOW,
             CommandKind.HIDE_APP_WINDOWS,
         ):
             try:
                 response = json.loads(result.stdout)
                 status = response["data"][0]
-            except (ValueError, KeyError, IndexError, TypeError):
+            except ValueError, KeyError, IndexError, TypeError:
                 status = "unknown"
             if status != "requested":
                 return ActionResult(

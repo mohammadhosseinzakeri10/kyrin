@@ -26,10 +26,13 @@ pipeline without the microphone's real-time queue or playback delay. Total
 time depends on decoding and the selected STT model, and can be shorter than
 the file's duration. The microphone is still stopped before import so the two
 sessions cannot load competing models into GPU memory.
-File command submission waits for action-queue capacity. At natural end of
-input, pending commands drain for up to 60 seconds; explicit user cancellation
-discards commands that have not started. An action already running is not
-rolled back.
+File command submission waits for both understanding-queue and action-queue
+capacity. Natural EOF preserves accepted finals: understanding drains before
+the action queue, with a separate 60-second limit for each worker. Explicit
+user cancellation wakes capacity waits, discards queued understanding/actions,
+and invalidates in-flight understanding results. Understanding has a one-second
+stop/join budget; timeout is an error, not proof the model thread stopped.
+An action already running is not rolled back.
 For Whisper file sessions, provisional previews are disabled: the model
 transcribes each completed speech turn once instead of reprocessing intermediate
 previews. Microphone sessions retain their live preview behavior.

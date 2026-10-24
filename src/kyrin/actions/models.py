@@ -1,8 +1,9 @@
 """Language-neutral action requests, policy notices, and observed results."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
+from kyrin.actions.cancellation import ActionExecutionContext
 from kyrin.commands.models import CommandIntent, ResponseChannel
 
 
@@ -26,6 +27,9 @@ class ActionRequest:
     key: ActionKey
     intent: CommandIntent
     language: str | None = None
+    context: ActionExecutionContext | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 class ActionNoticeReason(StrEnum):
@@ -52,10 +56,11 @@ ActionDecision = ActionRequest | ActionNotice
 
 
 class ActionOutcome(StrEnum):
-    """Separate a confirmed action from a launch request or unknown result."""
+    """Keep observed completion, issued input and uncertain transport distinct."""
 
     CONFIRMED = "confirmed"
     LAUNCH_ACCEPTED = "launch_accepted"
+    DISPATCHED_UNVERIFIED = "dispatched_unverified"
     UNKNOWN = "unknown"
     FAILED = "failed"
 
@@ -82,7 +87,11 @@ class ActionResult:
             raise ValueError("observed_active_app must not be empty")
         if self.error_code is not None and not self.error_code.strip():
             raise ValueError("error_code must not be empty")
-        if self.outcome in (ActionOutcome.CONFIRMED, ActionOutcome.LAUNCH_ACCEPTED):
+        if self.outcome in (
+            ActionOutcome.CONFIRMED,
+            ActionOutcome.LAUNCH_ACCEPTED,
+            ActionOutcome.DISPATCHED_UNVERIFIED,
+        ):
             if self.error_code is not None:
                 raise ValueError(
                     "confirmed or accepted actions cannot report an error_code"

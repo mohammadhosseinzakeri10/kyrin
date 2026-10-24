@@ -67,6 +67,15 @@ ENGLISH: dict[str, str] = {
     "scene_hint": "Created by KAILARIN",
     "status": "System status",
     "feedback_default": "Responses and errors will appear here.",
+    "stop_speech": "Stop spoken response",
+    "audio_aec": (
+        "Echo-cancelled input: speech can interrupt spoken responses. "
+        "Acoustic quality needs a hardware test."
+    ),
+    "audio_half_duplex": (
+        "Half-duplex: microphone audio is suppressed during voice playback. "
+        "Use Stop spoken response, then speak after the short echo tail."
+    ),
     "audio_heading": "Audio input",
     "audio_caption": "Choose the microphone KYRIN listens to.",
     "microphone": "Microphone",
@@ -239,15 +248,21 @@ ENGLISH: dict[str, str] = {
         "Read the active window with a separate offline model. Save Changes remembers "
         "the document model and CPU/GPU choice. Clicking Read captures the "
         "KYRIN window if it is in front. This can take minutes on CPU. Results "
-        "are text only and never used to click or run commands."
+        "are text only and never used to click or run commands. "
+        "Only independently approved models can run, with working platform "
+        "protection. No document model is approved yet. Auto currently uses CPU; "
+        "GPU access is disabled in this protection profile."
     ),
     "screen_document_device": "Document model compute device",
-    "screen_document_device_auto": "Auto (GPU if available)",
+    "screen_document_device_auto": "Auto (protected CPU)",
     "screen_document_device_cpu": "CPU",
-    "screen_document_device_gpu": "GPU (CUDA required)",
+    "screen_document_device_gpu": "GPU (protection unavailable)",
     "screen_document_gpu_unavailable": (
-        "CUDA GPU is unavailable for this document model. "
-        "Choose CPU or install its CUDA runtime."
+        "GPU access is disabled in the document protection profile. Choose CPU."
+    ),
+    "screen_document_protection_unavailable": (
+        "Document model approval or platform protection is unavailable. "
+        "The model was not loaded."
     ),
     "screen_document_gpu_memory": (
         "The GPU ran out of memory while reading this window. "
@@ -297,10 +312,48 @@ ENGLISH: dict[str, str] = {
     "startup_unavailable": "Installed KYRIN launcher is unavailable.",
     "import_language": "Add language pack…",
     "language_help": "Language packs can be added here without changing code.",
+    "history_enabled": "Save final speech text on this device",
+    "history_active_max_turns": "Active: maximum transcripts",
+    "history_active_max_age_days": "Active: maximum age (days)",
+    "history_archived_max_turns": "Archive: maximum transcripts",
+    "history_archived_max_age_days": "Archive: maximum age (days)",
+    "history_unlimited": "Unlimited",
+    "history_retention_help": (
+        "Zero means unlimited. Age starts at the original recording time, even "
+        "after archiving or restoring. Limits permanently delete older text on "
+        "session start, writes and history reads; no background timer runs while "
+        "KYRIN is closed. Save changes below to apply. Turning saving off stops "
+        "history reads/writes for microphone and file sessions and preserves "
+        "saved text."
+    ),
+    "history_archive": "Archive active text (remove from context)…",
+    "history_delete_all": "Delete all saved text (active and archive)…",
+    "history_archive_question": (
+        "Move active text out of conversation context into the archive? "
+        "Text remains restorable subject to your archive retention limits. "
+        "The visible diagnostics and archive preview will also be cleared."
+    ),
+    "history_delete_all_question": (
+        "Permanently delete ALL active AND archived transcripts in this database? "
+        "This cannot be undone. Visible diagnostics and archive previews are cleared. "
+        "Separate backups, snapshots and audio source files are not deleted."
+    ),
+    "history_retention_question": (
+        "These tighter limits can permanently delete existing active or archived "
+        "text the next time history is used. Keep only the newest rows by insertion "
+        "and delete text older than the selected age since recording? "
+        "Separate backups and snapshots are not deleted."
+    ),
+    "history_stop_first": (
+        "Turn the microphone fully off and finish or cancel audio-file processing "
+        "before changing stored history."
+    ),
+    "history_changed": (
+        "History updated; visible diagnostics and archive preview cleared."
+    ),
     "conversation_memory_heading": "Conversation memory",
     "conversation_memory_caption": (
-        "KYRIN keeps a bounded active history of final speech transcripts "
-        "on this device. "
+        "Optional local history keeps final speech transcripts on this device. "
         "Audio is not stored. Earlier words never authorize a new action."
     ),
     "conversation_memory_clear": "Clear active conversation memory…",
@@ -319,16 +372,19 @@ ENGLISH: dict[str, str] = {
     "conversation_memory_clear_title": "Clear active conversation memory?",
     "conversation_memory_clear_question": (
         "Delete active speech transcripts? Archived history remains preserved. "
-        "This cannot be undone."
+        "This cannot be undone. Visible diagnostics and archive previews are cleared."
     ),
     "conversation_memory_cleared": "Active conversation memory cleared.",
-    "conversation_memory_unavailable": "Conversation memory could not be cleared.",
+    "conversation_memory_unavailable": (
+        "Conversation memory is unavailable or the active retention limit "
+        "prevents restoration."
+    ),
     "power_safe_preview": "Test power confirmation safely (no shutdown)…",
     "power_safe_preview_busy": (
         "Power confirmation preview is already active or unavailable."
     ),
-    "diagnostics_latency": "Speech onset to action result",
-    "diagnostics_final_to_result": "final text to result",
+    "diagnostics_latency": "Audio capture onset to command completion",
+    "diagnostics_final_to_result": "final text to command completion",
     "language_added": "Language pack added.",
     "ui_saved": "Interface preferences saved.",
     "state_stopped": "Stopped",
@@ -408,9 +464,7 @@ class UiTranslations:
             return UiPreferences()
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise TranslationError("UI preferences could not be read") from exc
-        valid_fields = {
-            "locale", "dashboard_animation_enabled", "dashboard_renderer"
-        }
+        valid_fields = {"locale", "dashboard_animation_enabled", "dashboard_renderer"}
         if (
             not isinstance(data, dict)
             or "locale" not in data

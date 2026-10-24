@@ -31,6 +31,20 @@ class _PlainText(HTMLParser):
             self.parts.append(data.strip())
 
 
+def _process_limits() -> None:
+    """Contain accidental resource use; namespaces provide the access boundary."""
+    for kind, limit in (
+        (resource.RLIMIT_CORE, 0),
+        (resource.RLIMIT_NOFILE, 128),
+        (resource.RLIMIT_NPROC, 256),
+        (resource.RLIMIT_FSIZE, 16 * 1024 * 1024),
+        (resource.RLIMIT_CPU, 240),
+    ):
+        _soft, hard = resource.getrlimit(kind)
+        bounded = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
+        resource.setrlimit(kind, (bounded, bounded))
+
+
 def _memory_limit() -> None:
     # This machine has no swap. A single experimental model must not exhaust it.
     limit = 18_000_000_000
@@ -205,6 +219,7 @@ def _dots(model_path: Path, image: Image.Image, device: str) -> str:
 
 
 def main() -> None:
+    _process_limits()
     from PIL import Image
 
     if (

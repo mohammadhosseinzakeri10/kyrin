@@ -5,6 +5,7 @@ import math
 import subprocess
 from collections.abc import Mapping
 
+from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.app_activation import ActivationAttempt
 
 _BUS_NAME = "org.gnome.Shell"
@@ -17,24 +18,9 @@ class GnomeExistingAppActivator:
 
     @staticmethod
     def available() -> bool:
-        try:
-            result = subprocess.run(
-                [
-                    "busctl",
-                    "--user",
-                    "introspect",
-                    _BUS_NAME,
-                    _OBJECT_PATH,
-                    _INTERFACE,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=0.5,
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False
-        return result.returncode == 0 and "ActivateExistingApp" in result.stdout
+        return probe_gnome(
+            "ActiveApp", {"ActivateExistingApp"}, run=subprocess.run
+        ).ready
 
     def __init__(
         self, desktop_ids: Mapping[str, str], *, timeout_s: float = 1.0
@@ -50,10 +36,16 @@ class GnomeExistingAppActivator:
             raise ValueError("activation requires registered desktop IDs")
         self._desktop_ids = dict(desktop_ids)
         self._timeout_s = timeout_s
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def activate_existing_app(self, app_id: str) -> ActivationAttempt:
         desktop_id = self._desktop_ids.get(app_id)
         if desktop_id is None:
+            return ActivationAttempt.UNKNOWN
+        self.backend_status = probe_gnome(
+            "ActiveApp", {"ActivateExistingApp"}, run=subprocess.run
+        )
+        if not self.backend_status.ready:
             return ActivationAttempt.UNKNOWN
         try:
             completed = subprocess.run(

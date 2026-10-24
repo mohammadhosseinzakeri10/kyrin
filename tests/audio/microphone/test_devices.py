@@ -66,7 +66,9 @@ def test_default_and_selected_microphone_resolve_at_current_index(
     assert selected.index == 1
     assert selected.audio_format.sample_rate == 44100
     assert selected.frames_per_chunk == 882
-    assert fake.checked == [1, 1]
+    assert selected.device_key == available[0].key
+    assert resolver.resolve(None).device_key == available[0].key
+    assert fake.checked == [1, 1, 1]
 
 
 def test_missing_ambiguous_and_malformed_selection_fail_closed(

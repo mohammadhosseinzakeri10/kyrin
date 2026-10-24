@@ -3,14 +3,22 @@
 import logging
 import re
 from collections import OrderedDict
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from importlib import import_module, util
 from pathlib import Path
 from subprocess import SubprocessError
 from threading import Lock, Thread
+from time import monotonic
 from typing import Any, Protocol
 
+from kyrin.model_resources import (
+    MODEL_RESOURCES,
+    ModelResources,
+    ResourceUnavailable,
+    Workload,
+)
 from kyrin.responses.speech import SpeechDispatcherSynthesizer, SpeechSynthesisError
 from kyrin.stt.device import DevicePreference
 from kyrin.tts.chatterbox import ChatterboxAdapter
@@ -263,7 +271,9 @@ class ConfiguredSpeechSynthesizer:
         self,
         selection: TtsSelection,
         routes: tuple[TtsLanguageRoute, ...] = (),
+        *, resources: ModelResources = MODEL_RESOURCES,
     ) -> None:
+        self._resources = resources
         self._selection = selection
         self._routes = routes
         self._lock = Lock()
@@ -275,8 +285,25 @@ class ConfiguredSpeechSynthesizer:
         self._playback_lock = Lock()
         self._playback_generation = 0
         self._active_playback: Any | None = None
-        # Keep two commonly used language voices warm without retaining every model.
+        self._system_speech: SpeechDispatcherSynthesizer | None = None
+        self._last_playback_end = 0.0
+        # Models live only during admitted synthesis; playback owns samples only.
         self._loaded: OrderedDict[tuple[str, Path, str], Any] = OrderedDict()
+
+    @property
+    def is_playing(self) -> bool:
+        with self._playback_lock:
+            return self._active_playback is not None or (
+                self._system_speech is not None and self._system_speech.is_playing
+            )
+
+    @property
+    def last_playback_end(self) -> float:
+        with self._playback_lock:
+            return max(
+                self._last_playback_end,
+                self._system_speech.last_playback_end if self._system_speech else 0.0,
+            )
 
     def configure(
         self,
@@ -333,7 +360,7 @@ class ConfiguredSpeechSynthesizer:
         with self._models_lock:
             self._retire_cached_models_locked()
 
-    def _retire_cached_models_locked(self) -> None:
+    def _retire_cached_models_locked(self, *, strict: bool = False) -> None:
         with self._lock:
             if not self._retire_requested:
                 return
@@ -347,6 +374,11 @@ class ConfiguredSpeechSynthesizer:
                     close()
                 except (OSError, RuntimeError, SubprocessError) as exc:
                     _LOGGER.warning("Could not release retired TTS model: %s", exc)
+                    if strict:
+                        self._resources.block()
+                        raise SpeechSynthesisError(
+                            "TTS cleanup failed; restart required"
+                        ) from exc
 
     def speak(self, text: str, language: str) -> None:
         self.speak_if_current(text, language, lambda: True)
@@ -381,13 +413,7 @@ class ConfiguredSpeechSynthesizer:
             # The selected English model must not pronounce unrelated languages.
             selection = TtsSelection(speed=selection.speed)
         if selection.backend == "speech-dispatcher":
-            if not is_current():
-                return
-            SpeechDispatcherSynthesizer(
-                rate=round((selection.speed - 1.0) * 100),
-                timeout_s=25,
-                voice_type=selection.voice,
-            ).speak(text, language)
+            self._speak_system(text, language, selection, generation, is_current)
             return
         self._speak_model(
             text,
@@ -402,6 +428,9 @@ class ConfiguredSpeechSynthesizer:
         """Invalidate pending model audio and stop playback already in progress."""
         with self._playback_lock:
             self._playback_generation += 1
+            system_speech = self._system_speech
+            if system_speech is not None:
+                system_speech.interrupt()
             playback = self._active_playback
             if playback is not None:
                 try:
@@ -410,19 +439,88 @@ class ConfiguredSpeechSynthesizer:
                     pass
 
     def speak_preview(
-        self, text: str, language: str, selection: TtsSelection
+        self,
+        text: str,
+        language: str,
+        selection: TtsSelection,
+        *,
+        is_current: Callable[[], bool] | None = None,
     ) -> None:
         """Play one draft selection without changing the saved voice routes."""
         if not text.strip():
             return
         if selection.backend == "speech-dispatcher":
-            SpeechDispatcherSynthesizer(
-                rate=round((selection.speed - 1.0) * 100),
-                timeout_s=25,
-                voice_type=selection.voice,
-            ).speak(text, language)
+            with self._playback_lock:
+                generation = self._playback_generation
+            self._speak_system(
+                text, language, selection, generation, is_current or (lambda: True)
+            )
             return
-        self._speak_model(text, selection, language.replace("_", "-").casefold())
+        if is_current is None:
+            self._speak_model(text, selection, language.replace("_", "-").casefold())
+        else:
+            self._speak_model(
+                text,
+                selection,
+                language.replace("_", "-").casefold(),
+                is_current=is_current,
+            )
+
+    def _speak_system(
+        self,
+        text: str,
+        language: str,
+        selection: TtsSelection,
+        generation: int,
+        is_current: Callable[[], bool],
+    ) -> None:
+        backend = SpeechDispatcherSynthesizer(
+            rate=round((selection.speed - 1.0) * 100),
+            timeout_s=25,
+            voice_type=selection.voice,
+        )
+        with self._playback_lock:
+            if generation != self._playback_generation or not is_current():
+                return
+            if self._system_speech is not None and self._system_speech.is_playing:
+                raise SpeechSynthesisError(
+                    "previous system playback stop is unconfirmed"
+                )
+            self._system_speech = backend
+        try:
+            backend.speak_if_current(
+                text,
+                language,
+                lambda: generation == self._playback_generation and is_current(),
+            )
+        finally:
+            with self._playback_lock:
+                self._last_playback_end = max(
+                    self._last_playback_end,
+                    backend.last_playback_end,
+                )
+                if self._system_speech is backend and not backend.is_playing:
+                    self._system_speech = None
+
+    @contextmanager
+    def _model_lease(
+        self, key: tuple[str, Path, str], current: Callable[[], bool]
+    ) -> Iterator[None]:
+        try:
+            with self._resources.use(
+                Workload.TTS,
+                f"tts:{key[0]}:{key[1]}:{key[2]}",
+                cancelled=lambda: self._closed or not current(),
+            ):
+                with self._models_lock:
+                    try:
+                        yield
+                    finally:
+                        with self._lock:
+                            self._retire_requested = True
+                        self._retire_cached_models_locked(strict=True)
+        except ResourceUnavailable as exc:
+            raise SpeechSynthesisError(str(exc)) from exc
 
     def _speak_model(
         self,
@@ -439,11 +537,20 @@ class ConfiguredSpeechSynthesizer:
             with self._playback_lock:
                 generation = self._playback_generation
         try:
+            if (
+                selection.backend in TTS_FAMILY_BY_KEY
+                and selection.device is DevicePreference.AUTO
+            ):
+                # Lightweight ONNX families default to CPU; explicit GPU stays explicit.
+                selection = replace(selection, device=DevicePreference.CPU)
+            assert selection.model_path is not None
             validate_tts_selection(selection)
             adapter = _ADAPTERS[selection.backend]
             provider = adapter.provider(selection)
             key = (selection.backend, selection.model_path, provider)
-            with self._models_lock:
+            with self._model_lease(
+                key, lambda: generation == self._playback_generation and is_current()
+            ):
                 self._retire_cached_models_locked()
                 if configuration_version is not None:
                     with self._lock:
@@ -456,38 +563,27 @@ class ConfiguredSpeechSynthesizer:
                     with self._lock:
                         if self._closed:
                             raise SpeechSynthesisError("TTS synthesizer is closed")
-                if key not in self._loaded:
-                    folder = selection.model_path
-                    model = inspect_tts_model(folder)
-                    self._loaded[key] = adapter.load(model, folder, provider)
-                    if len(self._loaded) > 2:
-                        _, retired = self._loaded.popitem(last=False)
-                        close = getattr(retired, "close", None)
-                        if callable(close):
-                            close()
-                self._loaded.move_to_end(key)
-                tts = self._loaded[key]
-                with self._lock:
-                    if self._closed:
-                        return
-                    self._active_worker = (
-                        tts if isinstance(tts, IsolatedTtsWorker) else None
-                    )
+                folder = selection.model_path
+                model = inspect_tts_model(folder)
+                tts = adapter.load(model, folder, provider)
+                self._loaded[key] = tts
                 try:
+                    with self._lock:
+                        if self._closed:
+                            return
+                        self._active_worker = (
+                            tts if isinstance(tts, IsolatedTtsWorker) else None
+                        )
+                    if generation != self._playback_generation or not is_current():
+                        return
                     samples, sample_rate = adapter.generate(
                         tts, text, selection.voice, selection.speed, language
                     )
-                except (SpeechSynthesisError, RuntimeError, ValueError):
-                    # A CUDA assertion leaves the worker's CUDA context unusable.
-                    self._loaded.pop(key, None)
-                    close = getattr(tts, "close", None)
-                    if callable(close):
-                        close()
-                    raise
                 finally:
                     with self._lock:
                         if self._active_worker is tts:
                             self._active_worker = None
+                    del tts
             if len(samples) == 0:
                 raise SpeechSynthesisError("Local TTS model produced no audio")
             try:
@@ -503,6 +599,7 @@ class ConfiguredSpeechSynthesizer:
                     with self._playback_lock:
                         if self._active_playback is playback:
                             self._active_playback = None
+                            self._last_playback_end = monotonic()
             except Exception as exc:
                 if generation != self._playback_generation:
                     return

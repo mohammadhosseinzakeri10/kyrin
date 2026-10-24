@@ -396,3 +396,78 @@ def test_turn_aware_session_receives_audio_then_boundaries_in_order() -> None:
         for event in events
     )
     assert session.finished and session.closed
+
+
+def test_speech_start_interrupts_before_slow_stt_and_preserves_preroll() -> None:
+    from kyrin.audio.activity.speech_activity_monitor import SpeechTransition
+    from kyrin.stt.backends.whisper import WhisperSession
+
+    interrupted = Event()
+    inferred: list[bytes] = []
+    pcm = [bytes([i, 0]) * 160 for i in range(1, 7)]
+
+    def infer(data: bytes, language: str) -> str:
+        assert interrupted.is_set()
+        inferred.append(data)
+        return "hello"
+
+    class SlowSession(WhisperSession):
+        def accept_audio(self, chunk: AudioData) -> Sequence[TranscriptUpdate]:
+            assert interrupted.wait(2)
+            return super().accept_audio(chunk)
+
+    session = SlowSession(infer, "en", lambda: None, emit_partials=False)
+    pipeline = LiveSpeechPipeline(
+        Source([AudioData(chunk, FORMAT) for chunk in pcm]),
+        FORMAT,
+        Detector([False, True, True, True, False, False]),
+        Engine(session),  # type: ignore[arg-type]
+        start_confirm_ms=20,
+        pause_confirm_ms=20,
+        on_speech_started=interrupted.set,
+    )
+    with pipeline.open() as stream:
+        events = list(stream)
+    assert interrupted.is_set()
+    assert inferred == [b"".join(pcm)]
+    assert [e.transition for e in events if isinstance(e, SpeechActivityFrame)] == [
+        SpeechTransition.STARTED,
+        SpeechTransition.PAUSED,
+    ]
+
+
+def test_half_duplex_echo_never_starts_turn_or_generates_transcript() -> None:
+    from kyrin.audio.playback_guard import PlaybackGuardInput
+    from kyrin.stt.backends.whisper import WhisperSession
+
+    class Playback:
+        is_playing = True
+
+    class SignalDetector:
+        input_format = FORMAT
+        frames_per_window = 160
+
+        def detect(self, window: AudioData) -> bool:
+            return any(window.data)
+
+        def reset(self) -> None:
+            pass
+
+    session = WhisperSession(
+        lambda pcm, language: pytest.fail("echo must not create an STT turn"),
+        "en",
+        lambda: None,
+        emit_partials=False,
+    )
+    pipeline = LiveSpeechPipeline(
+        PlaybackGuardInput(
+            Source([AudioData(b"\x01\x00" * 160, FORMAT)] * 4), Playback()
+        ),
+        FORMAT,
+        SignalDetector(),
+        Engine(session),  # type: ignore[arg-type]
+        start_confirm_ms=10,
+        on_speech_started=lambda: pytest.fail("echo must not interrupt playback"),
+    )
+    with pipeline.open() as stream:
+        assert not list(stream)

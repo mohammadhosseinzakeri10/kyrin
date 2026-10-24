@@ -2,8 +2,10 @@
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
+from time import perf_counter_ns
 from typing import cast
 
 from kyrin.audio.activity.speech_activity_monitor import (
@@ -20,6 +22,7 @@ from kyrin.audio.audio_format import AudioFormat
 from kyrin.audio.audio_framer import AudioFramer
 from kyrin.audio.audio_input import AudioInput
 from kyrin.audio.sample_rate_converter import SampleRateConverter
+from kyrin.audio.speech_timing import SpeechTiming, TimedSpeechBoundary
 from kyrin.stt.contracts import (
     CancellableSpeechToTextEngine,
     SpeechToTextEngine,
@@ -54,6 +57,8 @@ class LiveSpeechPipeline:
         pause_confirm_ms: int = 384,
         on_compute_device: Callable[[ComputeDevice], None] | None = None,
         on_audio_ready: Callable[[], None] | None = None,
+        on_speech_started: Callable[[], None] | None = None,
+        clock_ns: Callable[[], int] = perf_counter_ns,
     ) -> None:
         vad_converter = SampleRateConverter(
             source_format, detector.input_format.sample_rate
@@ -62,6 +67,7 @@ class LiveSpeechPipeline:
             raise ValueError("audio source cannot be converted to detector format")
         if max_capture_chunks <= 0:
             raise ValueError("max_capture_chunks must be positive")
+        self._clock_ns = clock_ns
         self.source = source
         self.source_format = source_format
         self.detector = detector
@@ -75,6 +81,7 @@ class LiveSpeechPipeline:
         self.pause_confirm_ms = pause_confirm_ms
         self.on_compute_device = on_compute_device
         self.on_audio_ready = on_audio_ready
+        self.on_speech_started = on_speech_started
         self._vad_converter = vad_converter
         self._session_lock = Lock()
         self._stop_requested = Event()
@@ -151,15 +158,21 @@ class LiveSpeechPipeline:
                             continue
 
                 def stt_worker() -> None:
+                    timing = SpeechTiming(self._clock_ns)
                     try:
 
-                        def on_marker(marker: BacklogMarker) -> None:
+                        def on_marker(
+                            marker: BacklogMarker | TimedSpeechBoundary,
+                        ) -> None:
+                            if isinstance(marker, TimedSpeechBoundary):
+                                timing.boundary(marker.frame, marker.queued_ns)
+                                marker = marker.marker
                             if turn_session is None:
                                 return
-                            updates = (
-                                turn_session.start_turn()
+                            updates = timing.call(
+                                turn_session.start_turn
                                 if marker is BacklogMarker.SPEECH_STARTED
-                                else turn_session.end_turn()
+                                else turn_session.end_turn
                             )
                             for update in updates:
                                 publish(update)
@@ -170,10 +183,12 @@ class LiveSpeechPipeline:
                         for chunk in converted:
                             if stopped.is_set():
                                 return
-                            for update in session.accept_audio(chunk):
+                            for update in timing.call(
+                                partial(session.accept_audio, chunk)
+                            ):
                                 publish(update)
                         if not stopped.is_set() and not errors:
-                            for update in session.finish():
+                            for update in timing.call(session.finish):
                                 publish(update)
                     except Exception as exc:
                         errors.append(exc)
@@ -209,15 +224,35 @@ class LiveSpeechPipeline:
                         converted = self._vad_converter.convert(source_chunks(capture))
                         for window in framer.frame(converted):
                             frame = monitor.process(window)
+                            # Playback interruption must not wait behind STT or the
+                            # UI event queue. All windows still enter STT in order,
+                            # including the onset before VAD confirmation.
+                            if (
+                                frame.transition is SpeechTransition.STARTED
+                                and self.on_speech_started is not None
+                            ):
+                                self.on_speech_started()
                             if turn_aware:
                                 with notice_lock:
                                     notice = backlog.put(window)
                                     if notice is not None:
                                         publish(notice)
                                     if frame.transition is SpeechTransition.STARTED:
-                                        backlog.put_marker(BacklogMarker.SPEECH_STARTED)
+                                        backlog.put_marker(
+                                            TimedSpeechBoundary(
+                                                BacklogMarker.SPEECH_STARTED,
+                                                frame,
+                                                self._clock_ns(),
+                                            )
+                                        )
                                     elif frame.transition is SpeechTransition.PAUSED:
-                                        backlog.put_marker(BacklogMarker.SPEECH_PAUSED)
+                                        backlog.put_marker(
+                                            TimedSpeechBoundary(
+                                                BacklogMarker.SPEECH_PAUSED,
+                                                frame,
+                                                self._clock_ns(),
+                                            )
+                                        )
                             if frame.transition is not None:
                                 publish(frame)
                         if errors:
@@ -246,7 +281,9 @@ class LiveSpeechPipeline:
                 vad_thread: Thread | None = None
                 try:
                     with AudioCaptureQueue(
-                        self.source, max_chunks=self.max_capture_chunks
+                        self.source,
+                        max_chunks=self.max_capture_chunks,
+                        clock_ns=self._clock_ns,
                     ) as capture:
                         vad_thread = Thread(
                             target=vad_worker,
@@ -293,10 +330,10 @@ def _backlog_chunks(
     backlog: AudioBacklog,
     notice_lock: Lock,
     publish: Callable[[LiveSpeechEvent], None],
-    on_marker: Callable[[BacklogMarker], None],
+    on_marker: Callable[[BacklogMarker | TimedSpeechBoundary], None],
 ) -> Iterator[AudioData]:
     while (item := backlog.get()) is not None:
-        if isinstance(item, BacklogMarker):
+        if isinstance(item, (BacklogMarker, TimedSpeechBoundary)):
             on_marker(item)
             continue
         yield item

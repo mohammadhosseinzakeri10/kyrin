@@ -18,40 +18,68 @@ requested channel. Persian and English messages currently exist. The live
 approximate app-name clarification use `TEXT_ONLY`, so the user can immediately
 repeat or answer without waiting for a spoken prompt. For `TEXT_AND_VOICE`,
 `ResponseSpeaker` also queues it for `SpeechDispatcherSynthesizer`. The backend
-runs Ubuntu's local `spd-say` with the `espeak-ng` output module, the response
-language, and `--wait` so playback completion is observable. It uses no network
-or new Python package. The speech contract is separate from STT and can be
+uses a dedicated local Unix SSIP connection to Speech Dispatcher with the
+`espeak-ng` output module and response language. BEGIN/END/CANCEL notifications
+track actual playback; cancellation uses `CANCEL SELF`, never a global stop.
+`spd-say --list-output-modules` is used only to autospawn the existing service
+when its local socket is absent. No Python dependency or remote service is added. The speech contract is separate from STT and can be
 implemented by another offline backend later. `TEXT_ONLY` responses are never
 sent to speech output.
 
 If speech output is missing, fails, or its bounded queue is full, the text is
-still shown and a diagnostic warning is printed. A successful `spd-say` exit
-means the local service accepted/completed the request; whether the speaker
-actually heard it requires a human listening check.
+still shown and a diagnostic warning is printed. Completion notifications
+report the local service's lifecycle; audible output still requires a human
+listening check. If a submitted message loses its cancellation acknowledgement,
+playback remains uncertain and the half-duplex microphone guard remains active.
+Restore the local speech service and restart KYRIN before relying on capture;
+service disconnection is not treated as proof that playback stopped.
 At diagnostic shutdown, queued voice gets a bounded chance to finish; if it
 does not, the text remains visible and a warning reports the incomplete voice.
 
 ## Preventing self-hearing
 
-`ResponseSpeaker` marks playback active as soon as a voice response is queued.
-`PlaybackGuardInput` replaces microphone chunks captured during playback and
-for a short trailing interval with silence of the same format and length.
-Microphone acquisition stays open. The guard sits outside `MicrophoneInput`,
-so capture, VAD, STT, command interpretation, and TTS remain separate.
-Speech from the user during KYRIN's other spoken replies is also suppressed;
-this diagnostic does not support interrupting its own voice (barge-in). The guard
-does not provide acoustic echo cancellation for every speaker/microphone setup.
+<div dir="rtl" lang="fa">
 
-The Ubuntu desktop application now tries a temporary PipeWire WebRTC
-echo-cancellation source when the default microphone is selected. PipeWire
-removes output from the default speaker monitor before the audio reaches VAD
-and STT. While that source is available, KYRIN keeps capturing user speech
-through its own voice playback. The source exists only for the listening
-session and is removed on shutdown. If PipeWire tools or the source are
-unavailable, or an explicit microphone is selected, the existing playback
-guard stays active. This path does not change the desktop's default devices.
-Its real acoustic performance depends on the selected microphone, speaker,
-room, and PipeWire routing and needs an owner speech-over-playback test.
+**قرارداد فعلی F16 ــ ۲۰۲۶/۱۰/۲۴:** حالت مشغول (`is_active`) شامل صف و تولید
+صوت است؛ محافظ ورودی از وضعیت پخش (`is_playing`) و دنبالهٔ ۳۵۰ میلی‌ثانیه‌ای
+استفاده می‌کند. صف و تولید صوتِ مدل، میکروفون را ساکت نمی‌کنند. backend فاقد
+گزارش وضعیت پخش، محافظ محافظه‌کارانهٔ قبلی را نگه می‌دارد. جایگزینی صوت با
+سکوت، طول، قالب و زمان دریافت را حفظ می‌کند و خارج از `MicrophoneInput` است.
+
+نشست Ubuntu، هویت واقعیِ حل‌شدهٔ ورودی پیش‌فرض یا انتخاب‌شده را به PipeWire
+می‌رساند. مسیرهای پشتیبانی‌شده، نگاشت یکتای کارت/دستگاه ALSA، نام یا شرح
+یکتای منبع PulseAudio و پل‌های مشخص `pulse`/`pipewire` با فرادادهٔ منبع
+پیش‌فرض هستند. نام مبهم، ورودی ناشناخته و alias عمومیِ غیرقابل‌اثبات، AEC
+را فعال نمی‌کنند. `target.object` هدف دریافت را تثبیت می‌کند و fallback،
+جابه‌جایی و اتصال دوباره به هدف دیگر غیرفعال‌اند. وجود منبع مجازی و اتصال‌های
+میکروفون و مرجع بلندگو، پیش از اعلام فراهم‌بودن مسیر بررسی می‌شوند.
+
+در مسیر AEC، شروع تأییدشدهٔ گفتار مستقیماً در worker تشخیص فعالیت، پاسخ
+صوتی را قطع می‌کند؛ این callback پشت STT یا صف رابط منتظر نمی‌ماند. همهٔ
+پنجره‌های صوتی به‌ترتیب به STT می‌رسند و بافر نیم‌ثانیه‌ای ابتدای گفتار در
+backendهای مبتنی بر نوبت حفظ می‌شود. تشخیص فعالیت گفتار (VAD) فقط پاسخ
+صوتی را متوقف می‌کند؛ اجازهٔ عملیات، هویت گوینده یا تأیید dialog نیست.
+تصمیم‌گیری و مجوز عملیات همچنان به متن نهایی و سیاست‌های قبلی وابسته‌اند.
+
+بدون AEC، رابط حالت **نیمه‌دوطرفه** را نشان می‌دهد و صدای میکروفون هنگام
+پخش و دنبالهٔ پژواک ساکت می‌شود. دکمهٔ **توقف پاسخ صوتی** در تمام صفحه‌ها
+مستقیماً پاسخ جاری و صف صوت را باطل می‌کند؛ پس از مکث کوتاه می‌توان صحبت
+کرد. این دکمه میکروفون، مجوزها و عملیات در حال اجرا را لغو نمی‌کند. صوتی
+که پس از وقفه دیر آماده شود پخش نمی‌شود؛ تولید درون‌پردازه‌ای ممکن است تا
+پایان فراخوانی ادامه یابد. این رفتار با توقف پخش و لغو عملیات سه چرخهٔ
+مجزا دارد. پیش‌نمایش صدا و اعلان مرحلهٔ تأیید نیز همین اعتبارسنجی را دارند.
+
+مرجع حذف پژواک، monitor بلندگوی پیش‌فرض PipeWire است؛ خروجی واقعی باید از
+همان مسیر عبور کند. هیچ پیش‌فرض سراسری تغییر نمی‌کند. منبع موقت با نشست
+بسته می‌شود. ابزار خط فرمان همچنان فقط محافظ نیمه‌دوطرفه دارد. آزمون‌های
+ساختگی، نگاشت، اتصال، صف، وقفه، صوت دیررس، حفظ آغاز گفتار، سکوت پژواک و
+استقلال توقف دستی را پوشش می‌دهند. این آزمون‌ها کیفیت صوتی را ثابت نمی‌کنند.
+**آزمون زندهٔ میکروفون/بلندگو، سرویس صوتی نصب‌شده، میزان حذف پژواک و
+قطع گفتار واقعی انجام نشده است.** گام بعد، آزمون صاحب دستگاه با ورودی
+انتخاب‌شده، گفتار روی پاسخ و بررسی شنیده‌شدن اولین واژه و نبود فرمان کاذب
+است؛ مسیر بدون AEC و توقف دستی نیز باید روی همان دستگاه بررسی شوند.
+
+</div>
 
 On desktop exit, the synthesizer interrupts playback and stops an active
 isolated model worker. If in-process CPU generation still holds the model lock,
@@ -97,5 +125,17 @@ and device output depend on local configuration. Windows, macOS, and mobile
 speech adapters remain future platform work. This is an offline voice
 prototype, not a packaged cross-platform TTS installation.
 
-The use of `--language`, `--output-module`, and `--wait` follows the upstream
-[Speech Dispatcher `spd-say` manual](https://github.com/brailcom/speechd/blob/master/doc/spd-say.texi).
+The local speech lifecycle follows the upstream
+[SSIP protocol](https://github.com/brailcom/speechd/blob/master/doc/ssip.texi).
+AEC configuration follows the official [Echo Cancel module](https://docs.pipewire.org/page_module_echo_cancel.html),
+[stream target properties](https://docs.pipewire.org/page_man_pipewire-props_7.html)
+and [ALSA identity keys](https://docs.pipewire.org/group__spa__keys.html).
+
+<div dir="rtl" lang="fa">
+
+**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
+[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
+تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
+سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
+
+</div>

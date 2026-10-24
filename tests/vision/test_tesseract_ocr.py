@@ -40,7 +40,7 @@ def test_tesseract_parses_word_positions_and_confidence(tmp_path: Path) -> None:
         "5\t30\t40\t20\t10\t-1\t \n"
     )
     with patch(
-        "kyrin.vision.ocr.backends.tesseract.subprocess.run",
+        "kyrin.vision.ocr.backends.tesseract.run_process",
         return_value=CompletedProcess([], 0, output.encode(), b""),
     ) as run:
         result = engine.recognize(b"image", OcrOptions("eng"))
@@ -69,7 +69,7 @@ def test_tesseract_passes_installed_language_pair_to_cli(tmp_path: Path) -> None
     engine = _engine(tmp_path)
     output = b"level\tleft\ttop\twidth\theight\tconf\ttext\n"
     with patch(
-        "kyrin.vision.ocr.backends.tesseract.subprocess.run",
+        "kyrin.vision.ocr.backends.tesseract.run_process",
         return_value=CompletedProcess([], 0, output, b""),
     ) as run:
         engine.recognize(b"image", OcrOptions("fas+eng"))
@@ -82,7 +82,7 @@ def test_tesseract_uses_block_layout_only_when_requested(tmp_path: Path) -> None
     engine = _engine(tmp_path)
     output = b"level\tleft\ttop\twidth\theight\tconf\ttext\n"
     with patch(
-        "kyrin.vision.ocr.backends.tesseract.subprocess.run",
+        "kyrin.vision.ocr.backends.tesseract.run_process",
         return_value=CompletedProcess([], 0, output, b""),
     ) as run:
         engine.recognize(b"image", OcrOptions("eng", layout="block"))
@@ -93,7 +93,7 @@ def test_tesseract_uses_block_layout_only_when_requested(tmp_path: Path) -> None
 def test_tesseract_rejects_malformed_output(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     with patch(
-        "kyrin.vision.ocr.backends.tesseract.subprocess.run",
+        "kyrin.vision.ocr.backends.tesseract.run_process",
         return_value=CompletedProcess([], 0, b"bad\tcolumns\n", b""),
     ):
         with pytest.raises(OcrInferenceError, match="position"):

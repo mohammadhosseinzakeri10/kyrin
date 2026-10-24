@@ -92,6 +92,9 @@ def test_visible_chat_titles_require_time_and_preview_anchors() -> None:
     choices = visible_chat_choices(observation, "telegram.desktop", 123, "My Mother")
     assert choices is not None
     assert choices.source == "visible"
+    assert choices.local_results[0].evidence_regions == (
+        (70, 200, 95, 18), (455, 200, 42, 16), (70, 227, 60, 15),
+    )
     assert tuple(item.top for item in choices.local_results) == (200, 280)
     lower_case_choices = visible_chat_choices(
         observation, "telegram.desktop", 123, "my mother"
@@ -415,7 +418,9 @@ def test_menu_item_needs_a_second_menu_label_in_same_frame() -> None:
         ),
         (1600, 900),
     )
-    assert telegram_menu_item(observation, "telegram.desktop", 123, "Settings")
+    target = telegram_menu_item(observation, "telegram.desktop", 123, "Settings")
+    assert target is not None
+    assert target.evidence_regions == ((75, 150, 95, 24), (75, 92, 116, 24))
 
 
 def test_menu_item_rejects_chat_named_settings_without_menu_context() -> None:
@@ -453,9 +458,11 @@ def test_settings_item_requires_heading_unique_row_and_same_window() -> None:
         ),
         (1600, 900),
     )
-    assert telegram_settings_item(
+    target = telegram_settings_item(
         observation, "telegram.desktop", 123, "Privacy and Security"
-    ) is not None
+    )
+    assert target is not None
+    assert target.evidence_regions == ((540, 205, 205, 24), (510, 45, 95, 24))
     assert telegram_settings_item(
         observation, "telegram.desktop", 123, "privacyandsecurity"
     ) is not None
@@ -621,6 +628,9 @@ def test_search_result_rejects_ambiguous_matches() -> None:
     assert choices is not None
     assert choices.own_chat is not None
     assert tuple(item.top for item in choices.global_results) == (200,)
+    assert choices.own_chat.evidence_regions == (
+        (60, 92, 172, 24), (60, 45, 172, 13),
+    )
     assert (
         unique_search_result(observation, "telegram.desktop", 123, "Saved Messages")
         == choices.own_chat

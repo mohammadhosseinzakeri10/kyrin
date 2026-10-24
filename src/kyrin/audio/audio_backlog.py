@@ -1,9 +1,15 @@
 """Bound audio waiting for an independent processing worker by audio duration."""
 
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Condition
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kyrin.audio.speech_timing import TimedSpeechBoundary
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_errors import AudioQueueOverflowError
@@ -47,7 +53,7 @@ class AudioBacklog:
         self.warning_ms = warning_ms
         self.recovery_ms = recovery_ms
         self.maximum_ms = maximum_ms
-        self._chunks: deque[AudioData | BacklogMarker] = deque()
+        self._chunks: deque[AudioData | BacklogMarker | TimedSpeechBoundary] = deque()
         self._condition = Condition()
         self._pending_frames = 0
         self._warned = False
@@ -81,7 +87,7 @@ class AudioBacklog:
                 return BacklogNotice(BacklogState.WAIT, self._duration_ms())
         return None
 
-    def put_marker(self, marker: BacklogMarker) -> None:
+    def put_marker(self, marker: BacklogMarker | TimedSpeechBoundary) -> None:
         """Queue a zero-duration marker after all preceding audio."""
         with self._condition:
             if self._closed or self._aborted:
@@ -89,7 +95,7 @@ class AudioBacklog:
             self._chunks.append(marker)
             self._condition.notify()
 
-    def get(self) -> AudioData | BacklogMarker | None:
+    def get(self) -> AudioData | BacklogMarker | TimedSpeechBoundary | None:
         with self._condition:
             while not self._chunks and not self._closed and not self._aborted:
                 self._condition.wait()

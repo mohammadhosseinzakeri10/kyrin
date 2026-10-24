@@ -1,23 +1,29 @@
 """Permission-aware Telegram chat navigation with fresh visual verification."""
 
+import json
 import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event
 from time import monotonic, sleep
 from typing import Protocol
 
+from kyrin.actions.cancellation import ActionCancelled, execute_with_budget
+from kyrin.actions.desktop_input import DesktopInputBroker
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
 from kyrin.actions.visible_control import VisibleControlTarget, VisibleTextOption
+from kyrin.backend_protocol import BackendStatus, BackendUnavailable
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
+from kyrin.operations import OperationStopped, budget, check_operation, run_process
 from kyrin.text_normalization import fold_case
+from kyrin.timing import timed_stage
 
 TELEGRAM_PORTAL_HELPER = Path(__file__).with_name("telegram_portal_helper.py")
 _SAVED_MESSAGES_TARGETS = frozenset(
@@ -169,6 +175,7 @@ class TelegramSavedMessagesExecutor:
         remember_pointer: bool = False,
         system_python: str = "/usr/bin/python3",
         helper_path: Path = TELEGRAM_PORTAL_HELPER,
+        input_broker: DesktopInputBroker | None = None,
     ) -> None:
         self._delegate = delegate
         self._telegram_desktop_id = telegram_desktop_id
@@ -176,14 +183,30 @@ class TelegramSavedMessagesExecutor:
         self._verifier = verifier
         self._selection = selection
         self._remember_pointer = remember_pointer
-        self._lock = Lock()
+        self._input_broker = input_broker or DesktopInputBroker()
         self._choice_status = "not_requested"
         self._system_python = system_python
         self._helper_path = helper_path
+        self.backend_status = BackendStatus(False, "not_probed")
 
     def execute(self, request: ActionRequest) -> ActionResult:
-        with self._lock:
-            return self._execute(request)
+        self.backend_status = BackendStatus(False, "not_probed")
+        result = execute_with_budget(
+            request,
+            lambda: self._input_broker.run(
+                lambda: self._execute(request),
+                cancelled=lambda: (
+                    request.context is not None and request.context.cancelled
+                ),
+            ),
+        )
+        if self.backend_status.reason != "not_probed" and not self.backend_status.ready:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="backend:" + self.backend_status.reason,
+            )
+        return result
 
     def _execute(self, request: ActionRequest) -> ActionResult:
         intent = request.intent
@@ -304,12 +327,36 @@ class TelegramSavedMessagesExecutor:
         ):
             return self._telegram_input_result(request, completed)
         if request.intent.kind is CommandKind.TELEGRAM_SEARCH and (
-            self._verifier.has_search_query(*identity, request.intent.target)
+            self._wait_postcondition(
+                identity,
+                lambda: self._verifier.has_search_query(
+                    *identity, request.intent.target
+                ),
+            )
         ):
             return ActionResult(
                 request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
             )
-        return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+        return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
+
+    @timed_stage("postcondition")
+    def _wait_postcondition(
+        self, identity: tuple[str, int], observed: Callable[[], bool]
+    ) -> bool:
+        """Read only; every attempt shares the operation's cancellation/deadline."""
+        for attempt in range(3):
+            check_operation()
+            if self._identity_reader() != identity:
+                return False
+            confirmed = observed()
+            check_operation()
+            if self._identity_reader() != identity:
+                return False
+            if confirmed:
+                return True
+            if attempt < 2:
+                sleep(0.1)
+        return False
 
     def _open_telegram_setting(
         self, request: ActionRequest, identity: tuple[str, int]
@@ -323,7 +370,9 @@ class TelegramSavedMessagesExecutor:
                 or "ESCAPE_DISPATCHED" not in completed.stdout
             ):
                 return self._telegram_input_result(request, completed)
-            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+            # Escape has no generic destination: it may dismiss a dialog or go
+            # back. Report input only instead of guessing a product postcondition.
+            return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
 
         contextual = destination.startswith("visible:")
         label = (
@@ -356,12 +405,12 @@ class TelegramSavedMessagesExecutor:
                     or "ESCAPE_DISPATCHED" not in returned.stdout
                 ):
                     return self._telegram_input_result(request, returned)
+                previous_header = header
                 header = self._verifier.settings_page_header(*identity)
-                if header is None:
+                if header is None or header == previous_header:
                     return ActionResult(
                         request.key,
-                        ActionOutcome.FAILED,
-                        error_code="telegram_settings_navigation_uncertain",
+                        ActionOutcome.DISPATCHED_UNVERIFIED,
                     )
             if header is not None and header != "settings":
                 return ActionResult(
@@ -381,10 +430,7 @@ class TelegramSavedMessagesExecutor:
                 intent=CommandIntent(CommandKind.TELEGRAM_VIEW, "settings"),
             )
             opened = self._open_telegram_view(settings_request, identity)
-            if opened.outcome not in {
-                ActionOutcome.CONFIRMED,
-                ActionOutcome.LAUNCH_ACCEPTED,
-            }:
+            if opened.outcome is not ActionOutcome.CONFIRMED:
                 return opened
             match = self._stable_settings_item(identity, label)
         # My Account is the first fixed row. Scrolling cannot reveal it when
@@ -417,6 +463,11 @@ class TelegramSavedMessagesExecutor:
                 )
             ),
             *(
+                ("evidence=" + json.dumps(match.evidence_regions),)
+                if match.geometry is not None and match.evidence_regions is not None
+                else ()
+            ),
+            *(
                 ("geometry=" + match.geometry.to_json(),)
                 if match.geometry is not None
                 else ()
@@ -428,18 +479,22 @@ class TelegramSavedMessagesExecutor:
             or "SETTING_CLICKED" not in clicked.stdout
         ):
             return self._telegram_input_result(request, clicked)
-        if self._verifier.has_view_title(*identity, label):
+        if self._wait_postcondition(
+            identity, lambda: self._verifier.has_view_title(*identity, label)
+        ):
             return ActionResult(
                 request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
             )
-        return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+        return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
 
     def _stable_settings_item(
         self, identity: tuple[str, int], label: str
     ) -> ChatSearchMatch | None:
         previous: ChatSearchMatch | None = None
         for _ in range(3):
+            check_operation()
             current = self._verifier.find_settings_item(*identity, label)
+            check_operation()
             if current is not None and previous is not None:
                 if _same_search_box(previous, current):
                     return current
@@ -449,7 +504,7 @@ class TelegramSavedMessagesExecutor:
 
     def _scroll_settings(self, identity: tuple[str, int]) -> bool:
         try:
-            result = subprocess.run(
+            result = run_process(
                 [
                     self._system_python,
                     str(SCROLL_HELPER),
@@ -460,12 +515,22 @@ class TelegramSavedMessagesExecutor:
                     "right",
                     "telegram-control",
                 ],
+                helper=True,
+                helper_capabilities={"desktop_scroll-v1"},
                 capture_output=True,
                 text=True,
                 timeout=45,
                 check=False,
             )
+        except BackendUnavailable as error:
+            self.backend_status = error.status
+            return False
         except OSError, subprocess.TimeoutExpired:
+            return False
+        if result.stdout.startswith("BACKEND_UNAVAILABLE:"):
+            self.backend_status = BackendStatus(
+                False, result.stdout.strip().partition(":")[2]
+            )
             return False
         dispatched = result.returncode == 0 and "SCROLL_DISPATCHED" in result.stdout
         if dispatched:
@@ -491,11 +556,7 @@ class TelegramSavedMessagesExecutor:
         else:
             menu_label = headings[destination]
             match = self._stable_menu_item(identity, menu_label, fast_missing=True)
-            # In Archive the same top-left button first returns to All Chats.
-            # At most two clicks can reach the main menu from there.
-            for _ in range(2):
-                if match is not None:
-                    break
+            if match is None:
                 opened = self._run_helper(identity, "menu")
                 if (
                     opened is None
@@ -505,10 +566,12 @@ class TelegramSavedMessagesExecutor:
                     return self._telegram_input_result(request, opened)
                 match = self._stable_menu_item(identity, menu_label)
             if match is None:
+                # The button can also return from Archive. Missing OCR evidence
+                # proves neither that transition nor a harmless no-op: do not
+                # blindly click it again. A new command starts with a fresh read.
                 return ActionResult(
                     request.key,
-                    ActionOutcome.FAILED,
-                    error_code="telegram_menu_uncertain",
+                    ActionOutcome.DISPATCHED_UNVERIFIED,
                 )
             completed = self._run_helper(
                 identity,
@@ -525,6 +588,11 @@ class TelegramSavedMessagesExecutor:
                     )
                 ),
                 *(
+                    ("evidence=" + json.dumps(match.evidence_regions),)
+                    if match.geometry is not None and match.evidence_regions is not None
+                    else ()
+                ),
+                *(
                     ("geometry=" + match.geometry.to_json(),)
                     if match.geometry is not None
                     else ()
@@ -537,14 +605,17 @@ class TelegramSavedMessagesExecutor:
             or marker not in completed.stdout
         ):
             return self._telegram_input_result(request, completed)
-        destination_visible = (
-            self._verifier.has_view_title(*identity, "Settings")
-            if destination == "settings"
-            else self._verifier.find_left_label(*identity, headings[destination])
-            is not None
+        destination_visible = self._wait_postcondition(
+            identity,
+            lambda: (
+                self._verifier.find_left_label(*identity, headings[destination])
+                is not None
+                if destination in {"archive", "contacts"}
+                else self._verifier.has_view_title(*identity, headings[destination])
+            ),
         )
         if not destination_visible:
-            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+            return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
         return ActionResult(
             request.key,
             ActionOutcome.CONFIRMED,
@@ -560,7 +631,9 @@ class TelegramSavedMessagesExecutor:
     ) -> ChatSearchMatch | None:
         previous: ChatSearchMatch | None = None
         for _ in range(3):
+            check_operation()
             current = self._verifier.find_left_label(*identity, label, menu=True)
+            check_operation()
             if current is None and fast_missing:
                 return None
             if current is not None and previous is not None:
@@ -596,7 +669,7 @@ class TelegramSavedMessagesExecutor:
         self, identity: tuple[str, int], *args: str
     ) -> subprocess.CompletedProcess[str] | None:
         try:
-            return subprocess.run(
+            result = run_process(
                 [
                     self._system_python,
                     str(self._helper_path),
@@ -604,11 +677,21 @@ class TelegramSavedMessagesExecutor:
                     str(identity[1]),
                     *args,
                 ],
+                helper=True,
+                helper_capabilities={"telegram_portal-v1"},
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=65,
             )
+            if result.stdout.startswith("BACKEND_UNAVAILABLE:"):
+                self.backend_status = BackendStatus(
+                    False, result.stdout.strip().partition(":")[2]
+                )
+            return result
+        except BackendUnavailable as error:
+            self.backend_status = error.status
+            return None
         except OSError, subprocess.TimeoutExpired:
             return None
 
@@ -634,10 +717,10 @@ class TelegramSavedMessagesExecutor:
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
-        if not self._verifier.verify(*identity, "Saved Messages"):
-            return ActionResult(
-                request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
-            )
+        if not self._wait_postcondition(
+            identity, lambda: self._verifier.verify(*identity, "Saved Messages")
+        ):
+            return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
         return ActionResult(
             request.key,
             ActionOutcome.CONFIRMED,
@@ -664,15 +747,16 @@ class TelegramSavedMessagesExecutor:
             )
         if self._selection is not None:
             choices = self._settled_search_choices(identity, target)
-            scan_deadline = monotonic() + _MAX_SEARCH_SCAN_SECONDS
-            for _ in range(_MAX_SEARCH_SCROLLS):
-                if choices is not None and choices.selectable_results:
-                    break
-                if monotonic() >= scan_deadline:
-                    break
-                if not self._scroll_search_results(identity):
-                    break
-                choices = self._settled_search_choices(identity, target)
+            with budget(_MAX_SEARCH_SCAN_SECONDS, clock=monotonic):
+                scan_deadline = monotonic() + _MAX_SEARCH_SCAN_SECONDS
+                for _ in range(_MAX_SEARCH_SCROLLS):
+                    if choices is not None and choices.selectable_results:
+                        break
+                    if monotonic() >= scan_deadline:
+                        break
+                    if not self._scroll_search_results(identity):
+                        break
+                    choices = self._settled_search_choices(identity, target)
             if choices is not None:
                 if self._selection.begin(request, identity, target, choices):
                     return ActionResult(
@@ -698,47 +782,64 @@ class TelegramSavedMessagesExecutor:
         shown: ChatSearchChoices,
         cancellation: Event,
     ) -> ChatSearchChoices | None:
+        try:
+            with budget(65, cancelled=cancellation.is_set):
+                return self._input_broker.run(
+                    lambda: self._next_search_page(
+                        identity, target, shown, cancellation
+                    ),
+                    cancelled=cancellation.is_set,
+                )
+        except ActionCancelled, OperationStopped:
+            return None
+
+    def _next_search_page(
+        self,
+        identity: tuple[str, int],
+        target: str,
+        shown: ChatSearchChoices,
+        cancellation: Event,
+    ) -> ChatSearchChoices | None:
         """Advance the visible result list only while the same search is active."""
         if shown.source != "search":
             return None
-        with self._lock:
-            if cancellation.is_set() or self._identity_reader() != identity:
-                return None
-            fresh = self._settled_search_choices(identity, target)
-            if fresh is not None:
-                fresh = _keep_global_scope(shown, fresh)
-            if fresh is None or not _same_selectable_choices(shown, fresh):
-                return None
-            if not self._scroll_search_results(identity):
-                return None
-            next_choices = self._settled_search_choices(identity, target)
-            if next_choices is not None:
-                next_choices = _keep_global_scope(shown, next_choices)
+        if cancellation.is_set() or self._identity_reader() != identity:
+            return None
+        fresh = self._settled_search_choices(identity, target)
+        if fresh is not None:
+            fresh = _keep_global_scope(shown, fresh)
+        if fresh is None or not _same_selectable_choices(shown, fresh):
+            return None
+        if not self._scroll_search_results(identity):
+            return None
+        next_choices = self._settled_search_choices(identity, target)
+        if next_choices is not None:
+            next_choices = _keep_global_scope(shown, next_choices)
+        if (
+            next_choices is None
+            or not next_choices.selectable_results
+            or next_choices.view_signature == fresh.view_signature
+        ):
+            return None
+        if shown.local_results:
+            # On a later page, the OCR top-row fallback can mistake a
+            # global row for a personal chat. Require the boundary in
+            # this frame before offering any personal row for selection.
             if (
-                next_choices is None
-                or not next_choices.selectable_results
-                or next_choices.view_signature == fresh.view_signature
+                not next_choices.local_results
+                or not next_choices.global_section_verified
             ):
                 return None
-            if shown.local_results:
-                # On a later page, the OCR top-row fallback can mistake a
-                # global row for a personal chat. Require the boundary in
-                # this frame before offering any personal row for selection.
-                if (
-                    not next_choices.local_results
-                    or not next_choices.global_section_verified
-                ):
-                    return None
-            else:
-                # Once the verified global heading has been passed, every
-                # lower row remains global even when the heading scrolls away.
-                if next_choices.local_results or not next_choices.global_results:
-                    return None
-            return next_choices
+        else:
+            # Once the verified global heading has been passed, every
+            # lower row remains global even when the heading scrolls away.
+            if next_choices.local_results or not next_choices.global_results:
+                return None
+        return next_choices
 
     def _scroll_search_results(self, identity: tuple[str, int]) -> bool:
         try:
-            result = subprocess.run(
+            result = run_process(
                 [
                     self._system_python,
                     str(SCROLL_HELPER),
@@ -749,12 +850,22 @@ class TelegramSavedMessagesExecutor:
                     "left",
                     "telegram-control",
                 ],
+                helper=True,
+                helper_capabilities={"desktop_scroll-v1"},
                 capture_output=True,
                 text=True,
                 timeout=45,
                 check=False,
             )
+        except BackendUnavailable as error:
+            self.backend_status = error.status
+            return False
         except OSError, subprocess.TimeoutExpired:
+            return False
+        if result.stdout.startswith("BACKEND_UNAVAILABLE:"):
+            self.backend_status = BackendStatus(
+                False, result.stdout.strip().partition(":")[2]
+            )
             return False
         dispatched = result.returncode == 0 and "SCROLL_DISPATCHED" in result.stdout
         if dispatched:
@@ -764,7 +875,7 @@ class TelegramSavedMessagesExecutor:
     def _scroll_visible_list(self, identity: tuple[str, int]) -> bool:
         """Expose one already recognized, clipped bottom row before rereading."""
         try:
-            result = subprocess.run(
+            result = run_process(
                 [
                     self._system_python,
                     str(SCROLL_HELPER),
@@ -775,12 +886,22 @@ class TelegramSavedMessagesExecutor:
                     "left",
                     "telegram-control",
                 ],
+                helper=True,
+                helper_capabilities={"desktop_scroll-v1"},
                 capture_output=True,
                 text=True,
                 timeout=45,
                 check=False,
             )
+        except BackendUnavailable as error:
+            self.backend_status = error.status
+            return False
         except OSError, subprocess.TimeoutExpired:
+            return False
+        if result.stdout.startswith("BACKEND_UNAVAILABLE:"):
+            self.backend_status = BackendStatus(
+                False, result.stdout.strip().partition(":")[2]
+            )
             return False
         dispatched = result.returncode == 0 and "SCROLL_DISPATCHED" in result.stdout
         if dispatched:
@@ -811,6 +932,11 @@ class TelegramSavedMessagesExecutor:
                     match.image_width,
                     match.image_height,
                 )
+            ),
+            *(
+                ("evidence=" + json.dumps(match.evidence_regions),)
+                if match.geometry is not None and match.evidence_regions is not None
+                else ()
             ),
             *(
                 ("geometry=" + match.geometry.to_json(),)
@@ -845,33 +971,30 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code="chat_target_changed",
             )
-        if (
-            clicked is None
-            or clicked.returncode != 0
-            or "CHAT_RESULT_CLICKED" not in clicked.stdout
-        ):
+        dispatched = (
+            clicked is not None
+            and clicked.returncode == 0
+            and "CHAT_RESULT_CLICKED" in clicked.stdout
+        )
+        # A missing/uncertain transport reply may follow real input. Re-read
+        # the destination before recovery; never send another click here.
+        header_started = monotonic()
+        header_visible = self._wait_postcondition(
+            identity, lambda: self._verifier.verify(*identity, target)
+        )
+        if not dispatched and not (header_visible and unique_identity):
             return ActionResult(
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
-        if visible_row:
-            # Two stable OCR reads identified the row, and the helper checked
-            # the focused window, geometry, and pointer before clicking. A
-            # header OCR can lag or render a different short title, so report
-            # dispatch honestly without waiting for that extra read.
-            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
-        header_started = monotonic()
-        header_visible = self._verifier.verify(*identity, target)
         header_seconds = monotonic() - header_started
         if header_seconds >= 4:
             _LOGGER.warning("Telegram chat header OCR took %.1fs", header_seconds)
         if not header_visible:
-            return ActionResult(
-                request.key, ActionOutcome.UNKNOWN, error_code="chat_unverified"
-            )
+            return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
         if not unique_identity:
             # A matching header cannot distinguish same-title chats. The
             # selected row was clicked, but its identity is not proven.
-            return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+            return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
         return ActionResult(
             request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
         )
@@ -885,157 +1008,198 @@ class TelegramSavedMessagesExecutor:
         number: int | None,
         cancellation: Event,
     ) -> ActionResult:
-        """Re-read the same rows and focused window before a chosen click."""
-        with self._lock:
-            if cancellation.is_set():
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code="chat_selection_cancelled",
-                )
-            if self._identity_reader() != identity:
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code="telegram_focus_changed",
-                )
-            fresh = (
-                self._settled_visible_choices(identity, target)
-                if shown.source == "visible"
-                else self._settled_search_choices(identity, target)
-            )
-            if fresh is not None and shown.source == "search":
-                fresh = _keep_global_scope(shown, fresh)
-            if fresh is None:
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code=f"chat_search_uncertain:selection_read_{self._choice_status}",
-                )
-            if not _same_selectable_choices(shown, fresh):
-                section = "local" if shown.local_results else "global"
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code=(
-                        f"chat_search_uncertain:selection_{section}_rows_changed_"
-                        f"{len(shown.selectable_results)}_to_"
-                        f"{len(fresh.selectable_results)}"
+        try:
+            with budget(65, cancelled=cancellation.is_set):
+                return execute_with_budget(
+                    request,
+                    lambda: self._input_broker.run(
+                        lambda: self._complete_selection(
+                            request, identity, target, shown, number, cancellation
+                        ),
+                        cancelled=lambda: (
+                            cancellation.is_set()
+                            or (
+                                request.context is not None
+                                and request.context.cancelled
+                            )
+                        ),
                     ),
                 )
-            results = fresh.selectable_results
-            match = (
-                results[number - 1]
-                if number is not None and 1 <= number <= len(results)
-                else None
+        except ActionCancelled, OperationStopped:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="chat_selection_cancelled"
             )
-            if match is None:
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code="chat_search_uncertain",
-                )
-            if cancellation.is_set():
-                return ActionResult(
-                    request.key,
-                    ActionOutcome.FAILED,
-                    error_code="chat_selection_cancelled",
-                )
-            verified_title = (
-                fresh.grounded_titles[number - 1]
-                if number is not None and fresh.grounded_titles
-                else target
+
+    def _complete_selection(
+        self,
+        request: ActionRequest,
+        identity: tuple[str, int],
+        target: str,
+        shown: ChatSearchChoices,
+        number: int | None,
+        cancellation: Event,
+    ) -> ActionResult:
+        """Re-read the same rows and focused window before a chosen click."""
+        if cancellation.is_set():
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="chat_selection_cancelled",
             )
-            return self._click_result(
-                request,
-                identity,
-                verified_title,
-                match,
-                unique_identity=False,
-                visible_row=shown.source == "visible",
+        if self._identity_reader() != identity:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="telegram_focus_changed",
             )
+        fresh = (
+            self._settled_visible_choices(identity, target)
+            if shown.source == "visible"
+            else self._settled_search_choices(identity, target)
+        )
+        if fresh is not None and shown.source == "search":
+            fresh = _keep_global_scope(shown, fresh)
+        if fresh is None:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code=f"chat_search_uncertain:selection_read_{self._choice_status}",
+            )
+        if not _same_selectable_choices(shown, fresh):
+            section = "local" if shown.local_results else "global"
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code=(
+                    f"chat_search_uncertain:selection_{section}_rows_changed_"
+                    f"{len(shown.selectable_results)}_to_"
+                    f"{len(fresh.selectable_results)}"
+                ),
+            )
+        results = fresh.selectable_results
+        match = (
+            results[number - 1]
+            if number is not None and 1 <= number <= len(results)
+            else None
+        )
+        if match is None:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="chat_search_uncertain",
+            )
+        if cancellation.is_set():
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="chat_selection_cancelled",
+            )
+        verified_title = (
+            fresh.grounded_titles[number - 1]
+            if number is not None and fresh.grounded_titles
+            else target
+        )
+        return self._click_result(
+            request,
+            identity,
+            verified_title,
+            match,
+            unique_identity=False,
+            visible_row=shown.source == "visible",
+        )
 
     def _settled_search_choices(
         self, identity: tuple[str, int], target: str
     ) -> ChatSearchChoices | None:
-        deadline = monotonic() + _SEARCH_SETTLE_SECONDS
-        previous: ChatSearchChoices | None = None
-        saw_choices = False
-        while monotonic() < deadline:
-            current = self._verifier.find_search_choices(*identity, target)
-            self._choice_status = self._verifier.choice_status()
-            has_rows = current is not None and (
-                current.own_chat is not None or bool(current.global_results)
-            )
-            saw_choices = saw_choices or has_rows
-            if current is not None and has_rows and previous is not None:
-                if _same_selectable_choices(previous, current):
-                    return current
-            previous = current if has_rows else None
-            remaining = deadline - monotonic()
-            if remaining > 0:
-                sleep(min(_SEARCH_POLL_SECONDS, remaining))
-        if saw_choices:
-            self._choice_status = f"unstable_{self._choice_status}"
-        return None
+        with budget(_SEARCH_SETTLE_SECONDS, clock=monotonic):
+            deadline = monotonic() + _SEARCH_SETTLE_SECONDS
+            previous: ChatSearchChoices | None = None
+            saw_choices = False
+            while monotonic() < deadline:
+                check_operation()
+                current = self._verifier.find_search_choices(*identity, target)
+                if monotonic() >= deadline:
+                    return None
+                check_operation()
+                self._choice_status = self._verifier.choice_status()
+                has_rows = current is not None and (
+                    current.own_chat is not None or bool(current.global_results)
+                )
+                saw_choices = saw_choices or has_rows
+                if current is not None and has_rows and previous is not None:
+                    if _same_selectable_choices(previous, current):
+                        return current
+                previous = current if has_rows else None
+                remaining = deadline - monotonic()
+                if remaining > 0:
+                    sleep(min(_SEARCH_POLL_SECONDS, remaining))
+            if saw_choices:
+                self._choice_status = f"unstable_{self._choice_status}"
+            return None
 
     def _settled_visible_choices(
         self, identity: tuple[str, int], target: str
     ) -> ChatSearchChoices | None:
-        # An uncertain full-window read may need a second, magnified left-pane
-        # OCR pass. Leave time for two independent reads before a click.
-        deadline = monotonic() + 10.0
-        started = monotonic()
-        previous: ChatSearchChoices | None = None
-        saw_choices = False
-        needs_confirmation = False
-        reads = 0
-        while monotonic() < deadline or needs_confirmation:
-            reads += 1
-            current = self._verifier.find_visible_chat_choices(*identity, target)
-            self._choice_status = self._verifier.choice_status()
-            saw_choices = saw_choices or current is not None
-            if current is not None and previous is not None:
-                if _same_selectable_choices(previous, current):
-                    elapsed = monotonic() - started
-                    if elapsed >= 4:
-                        _LOGGER.warning(
-                            "Telegram visible chat OCR took %.1fs across %d reads",
-                            elapsed,
-                            reads,
-                        )
-                    return current
-            # A slow bilingual fallback may find its first candidate just as
-            # the deadline passes. Always allow one independent confirmation.
-            needs_confirmation = current is not None and previous is None
-            previous = current
-            remaining = deadline - monotonic()
-            if remaining > 0:
-                sleep(min(_SEARCH_POLL_SECONDS, remaining))
-        if saw_choices:
-            self._choice_status = f"unstable_{self._choice_status}"
-        elapsed = monotonic() - started
-        if elapsed >= 4:
-            _LOGGER.warning(
-                "Telegram visible chat OCR took %.1fs across %d reads",
-                elapsed,
-                reads,
-            )
-        return None
+        with budget(10.0, clock=monotonic):
+            # An uncertain full-window read may need a second, magnified left-pane
+            # OCR pass. Leave time for two independent reads before a click.
+            deadline = monotonic() + 10.0
+            started = monotonic()
+            previous: ChatSearchChoices | None = None
+            saw_choices = False
+            reads = 0
+            while monotonic() < deadline:
+                reads += 1
+                check_operation()
+                current = self._verifier.find_visible_chat_choices(*identity, target)
+                if monotonic() >= deadline:
+                    return None
+                check_operation()
+                self._choice_status = self._verifier.choice_status()
+                saw_choices = saw_choices or current is not None
+                if current is not None and previous is not None:
+                    if _same_selectable_choices(previous, current):
+                        elapsed = monotonic() - started
+                        if elapsed >= 4:
+                            _LOGGER.warning(
+                                "Telegram visible chat OCR took %.1fs across %d reads",
+                                elapsed,
+                                reads,
+                            )
+                        return current
+                previous = current
+                remaining = deadline - monotonic()
+                if remaining > 0:
+                    sleep(min(_SEARCH_POLL_SECONDS, remaining))
+            if saw_choices:
+                self._choice_status = f"unstable_{self._choice_status}"
+            elapsed = monotonic() - started
+            if elapsed >= 4:
+                _LOGGER.warning(
+                    "Telegram visible chat OCR took %.1fs across %d reads",
+                    elapsed,
+                    reads,
+                )
+            return None
 
     def _settled_search_result(
         self, identity: tuple[str, int], target: str
     ) -> ChatSearchMatch | None:
-        """Wait briefly for Telegram's results; click only after two matching reads."""
-        deadline = monotonic() + _SEARCH_SETTLE_SECONDS
-        previous: ChatSearchMatch | None = None
-        while monotonic() < deadline:
-            current = self._verifier.find_search_result(*identity, target)
-            if current is not None and previous is not None:
-                if _same_search_box(previous, current):
-                    return current
-            previous = current
-            remaining = deadline - monotonic()
-            if remaining > 0:
-                sleep(min(_SEARCH_POLL_SECONDS, remaining))
-        return None
+        """Click only after two matching reads within the shared budget."""
+        with budget(_SEARCH_SETTLE_SECONDS, clock=monotonic):
+            deadline = monotonic() + _SEARCH_SETTLE_SECONDS
+            previous: ChatSearchMatch | None = None
+            while monotonic() < deadline:
+                check_operation()
+                current = self._verifier.find_search_result(*identity, target)
+                if monotonic() >= deadline:
+                    return None
+                check_operation()
+                if current is not None and previous is not None:
+                    if _same_search_box(previous, current):
+                        return current
+                previous = current
+                remaining = deadline - monotonic()
+                if remaining > 0:
+                    sleep(min(_SEARCH_POLL_SECONDS, remaining))
+            return None

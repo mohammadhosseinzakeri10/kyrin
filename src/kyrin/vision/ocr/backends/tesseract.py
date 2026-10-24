@@ -6,6 +6,7 @@ import math
 import subprocess
 from pathlib import Path
 
+from kyrin.operations import run_process
 from kyrin.vision.ocr.contracts import (
     OcrCapabilities,
     OcrDevice,
@@ -100,7 +101,7 @@ class TesseractOcrEngine:
         if not image or len(image) > self._max_image_bytes:
             raise ValueError("OCR image is empty or exceeds the size limit")
         try:
-            result = subprocess.run(
+            result = run_process(
                 [
                     self._executable,
                     "stdin",

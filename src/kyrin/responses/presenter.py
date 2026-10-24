@@ -110,7 +110,21 @@ _TEXT: dict[str, dict[str, str]] = {
             "وضعیت این گزینه از رابط دسترس‌پذیری خوانده نشد؛ تغییری ندادم."
         ),
         "visible_control_sensitive": (
-            "این گزینه نیاز به تأیید جداگانه دارد و فعلاً اجرا نشد."
+            "این پیامد به ابزار و مجوز اختصاصی نیاز دارد؛ "
+            "کنترل عمومی آن را اجرا نمی‌کند."
+        ),
+        "visible_control_capability_required": (
+            "ابزار این نوع کنترل را پشتیبانی نمی‌کند."
+        ),
+        "visible_control_confirmation_declined": (
+            "تأیید این عمل دریافت نشد؛ اجرا نشد."
+        ),
+        "window_close_confirmation_required": (
+            "بستن پنجره به تأیید همان پنجره نیاز دارد؛ رابط تأیید در دسترس نیست."
+        ),
+        "window_close_confirmation_declined": "بستن پنجره تأیید نشد؛ اجرا نشد.",
+        "visible_control_confirmation_expired": (
+            "تأیید یا پنجرهٔ هدف معتبر نیست؛ فرمان تازه بدهید."
         ),
         "visible_control_risk_unknown": (
             "پیامد این گزینه مشخص نیست و تا فراهم شدن تأیید جداگانه اجرا نمی‌شود."
@@ -157,14 +171,14 @@ _TEXT: dict[str, dict[str, str]] = {
             "فهرست پنجره‌ها تغییر کرده است. لطفاً دوباره پنجره‌ها را نمایش دهید."
         ),
         "dependency_unverified": (
-            "فعال‌بودن برنامهٔ موردنظر تأیید نشد؛ برای جلوگیری از رفتن به چت "
-            "نادرست، ادامه ندادم."
+            "پیش‌نیاز این مرحله تأیید نشد؛ مرحلهٔ وابسته را اجرا نکردم."
         ),
         "confirmed": "انجام شد.",
         "confirmed_active_app": "برنامهٔ موردنظر اکنون فعال است.",
         "launch_accepted": (
             "درخواست انجام کار پذیرفته شد؛ نتیجهٔ آن هنوز تأیید نشده است."
         ),
+        "dispatched_unverified": ("ورودی ارسال شد؛ نتیجهٔ کار هنوز تأیید نشده است."),
         "chat_selection_dispatched": (
             "روی نتیجهٔ انتخاب‌شده کلیک شد؛ به‌دلیل عنوان‌های یکسان، "
             "هویت دقیق چت تأیید نشد."
@@ -289,7 +303,22 @@ _TEXT: dict[str, dict[str, str]] = {
             "The control did not expose its state, so I left it unchanged."
         ),
         "visible_control_sensitive": (
-            "This option needs separate confirmation and was not activated."
+            "This effect needs a dedicated tool and permission; "
+            "generic control cannot run it."
+        ),
+        "visible_control_capability_required": (
+            "The tool does not support this control operation."
+        ),
+        "visible_control_confirmation_declined": (
+            "This operation was not approved and was not run."
+        ),
+        "window_close_confirmation_required": (
+            "Closing needs confirmation for this window; "
+            "confirmation UI is unavailable."
+        ),
+        "window_close_confirmation_declined": "Window close was not approved or run.",
+        "visible_control_confirmation_expired": (
+            "The consent or target window expired; issue a new command."
         ),
         "visible_control_risk_unknown": (
             "This option's effect is unknown and it cannot run without confirmation."
@@ -337,13 +366,15 @@ _TEXT: dict[str, dict[str, str]] = {
             "The window list changed. Please show the Terminal windows again."
         ),
         "dependency_unverified": (
-            "I couldn't verify that the intended app is active, so I stopped "
-            "before opening the chat."
+            "A prerequisite was not verified, so I skipped the dependent step."
         ),
         "confirmed": "Done.",
         "confirmed_active_app": "The requested app is now active.",
         "launch_accepted": (
             "The request was accepted; completion has not been confirmed."
+        ),
+        "dispatched_unverified": (
+            "I sent the input, but completion has not been confirmed."
         ),
         "chat_selection_dispatched": (
             "I clicked the selected result, but identical titles prevent "
@@ -436,20 +467,29 @@ class ResponsePresenter:
             ):
                 text = messages["scroll_dispatched"]
             elif (
-                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                event.outcome
+                in (ActionOutcome.LAUNCH_ACCEPTED, ActionOutcome.DISPATCHED_UNVERIFIED)
                 and event.intent.kind is CommandKind.OPEN_CHAT
             ):
-                text = messages["chat_selection_dispatched"]
-            elif (
-                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
-                and event.intent.kind
-                in (CommandKind.TELEGRAM_VIEW, CommandKind.TELEGRAM_SETTINGS)
+                text = messages[
+                    "chat_selection_dispatched"
+                    if event.outcome is ActionOutcome.LAUNCH_ACCEPTED
+                    else "dispatched_unverified"
+                ]
+            elif event.outcome in (
+                ActionOutcome.LAUNCH_ACCEPTED,
+                ActionOutcome.DISPATCHED_UNVERIFIED,
+            ) and event.intent.kind in (
+                CommandKind.TELEGRAM_VIEW,
+                CommandKind.TELEGRAM_SETTINGS,
             ):
                 text = messages["telegram_view_dispatched"]
-            elif (
-                event.outcome is ActionOutcome.LAUNCH_ACCEPTED
-                and event.intent.kind
-                in (CommandKind.TELEGRAM_SEARCH_FOCUS, CommandKind.TELEGRAM_SEARCH)
+            elif event.outcome in (
+                ActionOutcome.LAUNCH_ACCEPTED,
+                ActionOutcome.DISPATCHED_UNVERIFIED,
+            ) and event.intent.kind in (
+                CommandKind.TELEGRAM_SEARCH_FOCUS,
+                CommandKind.TELEGRAM_SEARCH,
             ):
                 text = messages["telegram_search_dispatched"]
             elif (
@@ -491,6 +531,11 @@ class ResponsePresenter:
                 "visible_control_state_unavailable",
                 "visible_control_sensitive",
                 "visible_control_risk_unknown",
+                "visible_control_capability_required",
+                "visible_control_confirmation_declined",
+                "window_close_confirmation_required",
+                "window_close_confirmation_declined",
+                "visible_control_confirmation_expired",
                 "visible_control_unavailable",
                 "no_window",
                 "multiple_windows",

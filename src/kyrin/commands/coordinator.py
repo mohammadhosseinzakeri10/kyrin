@@ -1,6 +1,8 @@
 """Turn revisable transcript updates into safe, observable command decisions."""
 
 from collections.abc import Callable, Sequence
+from copy import copy
+from dataclasses import replace
 from time import monotonic
 
 from kyrin.commands.fragments import CommandFragmentBuffer
@@ -35,6 +37,7 @@ from kyrin.commands.models import (
     ResponseKind,
     ResponseRequest,
 )
+from kyrin.desktop.window_observation import WindowObservation
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 _TELEGRAM_SETTINGS_CONTEXT_SECONDS = 90.0
@@ -53,8 +56,10 @@ class CommandCoordinator:
         *,
         fragment_buffer: CommandFragmentBuffer | None = None,
         recent_utterances: Callable[[], tuple[str, ...]] | None = None,
+        window_observer: Callable[[], WindowObservation | None] | None = None,
     ) -> None:
         self.interpreter = interpreter
+        self._window_observer = window_observer
         self._fragments = fragment_buffer or CommandFragmentBuffer()
         self._recent_utterances = recent_utterances
         self._stream_id = 0
@@ -67,6 +72,16 @@ class CommandCoordinator:
             tuple[str, CommandKind, int | None, str | None, float] | None
         ) = None
         self._telegram_settings_context_at: float | None = None
+
+    def fork(self) -> CommandCoordinator:
+        """Copy dialogue state for speculative, single-worker interpretation.
+
+        Adapters and history readers stay shared; mutable fragment assembly
+        is independent. The runtime commits a fork only for its current epoch.
+        """
+        fork = copy(self)
+        fork._fragments = copy(self._fragments)
+        return fork
 
     @property
     def pending_clarification(
@@ -128,9 +143,8 @@ class CommandCoordinator:
             self._segment_id = update.segment_id
             self._clear_candidate()
 
-        if (
-            update.status is TranscriptStatus.FINAL
-            and self._fragments.hold(update.text)
+        if update.status is TranscriptStatus.FINAL and self._fragments.hold(
+            update.text
         ):
             # A fresh operation supersedes an older yes/no question.
             self._pending = None
@@ -162,6 +176,13 @@ class CommandCoordinator:
                 recent_scroll_kind = scroll_kind
                 recent_scroll_steps = scroll_steps
                 recent_scroll_area = scroll_area
+        initial_window = (
+            self._window_observer()
+            if self._window_observer is not None
+            and update.status is TranscriptStatus.FINAL
+            and current_scroll_app is not None
+            else None
+        )
         interpretation = self.interpreter.interpret(
             interpreted_text,
             language=update.language,
@@ -184,6 +205,33 @@ class CommandCoordinator:
             ),
             pending=self._pending,
         )
+        if (
+            self._window_observer is not None
+            and update.status is TranscriptStatus.FINAL
+            and isinstance(interpretation, ReadyCommand)
+            and interpretation.intent.kind is CommandKind.VISIBLE_CONTROL
+        ):
+            located = interpretation.intent.control_observation
+            if (
+                initial_window is None
+                or not initial_window.current(initial_window.window_token, monotonic())
+                or initial_window.app_id != current_scroll_app
+                or (
+                    located is not None
+                    and (
+                        located.identity != initial_window.identity
+                        or located.window_token != initial_window.window_token
+                    )
+                )
+            ):
+                interpretation = UnrecognizedCommand()
+            else:
+                interpretation = replace(
+                    interpretation,
+                    intent=replace(
+                        interpretation.intent, control_observation=initial_window
+                    ),
+                )
         if update.status is TranscriptStatus.PARTIAL:
             intent = (
                 interpretation.intent
@@ -241,7 +289,8 @@ class CommandCoordinator:
                 if item.kind is CommandKind.TELEGRAM_VIEW and item.target == "settings":
                     self._telegram_settings_context_at = monotonic()
                 elif item.kind is CommandKind.TELEGRAM_SETTINGS and item.target not in {
-                    "back", "cancel"
+                    "back",
+                    "cancel",
                 }:
                     self._telegram_settings_context_at = monotonic()
                 elif (
@@ -253,8 +302,11 @@ class CommandCoordinator:
                     self._telegram_settings_context_at = None
                 if item.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
                     self._last_scroll = (
-                        item.target, item.kind, item.scroll_steps,
-                        item.scroll_area, monotonic()
+                        item.target,
+                        item.kind,
+                        item.scroll_steps,
+                        item.scroll_area,
+                        monotonic(),
                     )
                 else:
                     self._last_scroll = None
@@ -356,15 +408,17 @@ class CommandCoordinator:
                     )
                 )
             elif isinstance(interpretation.pending, PendingNumberedCloseConfirmation):
-                events.append(ResponseRequest(
-                    update.segment_id,
-                    ResponseKind.CONFIRM_NUMBERED_CLOSE,
-                    ResponseChannel.TEXT_AND_VOICE,
-                    stream_id=self._stream_id,
-                    target=interpretation.pending.app_candidate.display_name,
-                    window_index=interpretation.pending.window_index,
-                    language=update.language,
-                ))
+                events.append(
+                    ResponseRequest(
+                        update.segment_id,
+                        ResponseKind.CONFIRM_NUMBERED_CLOSE,
+                        ResponseChannel.TEXT_AND_VOICE,
+                        stream_id=self._stream_id,
+                        target=interpretation.pending.app_candidate.display_name,
+                        window_index=interpretation.pending.window_index,
+                        language=update.language,
+                    )
+                )
             elif isinstance(interpretation.pending, PendingWindowSelection):
                 events.append(
                     ResponseRequest(

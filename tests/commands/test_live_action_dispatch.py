@@ -145,17 +145,19 @@ def test_plan_launches_first_app_then_reports_unsupported_chat() -> None:
     assert not dispatch_command_action(event, action_gate, executor)
 
 
-def test_failed_first_step_stops_second_app() -> None:
+def test_failed_first_step_allows_independent_second_app() -> None:
     action_gate = gate(apps=frozenset({"telegram", "browser"}))
-    executor = FakeExecutor((ActionOutcome.FAILED,))
+    executor = FakeExecutor((ActionOutcome.FAILED, ActionOutcome.LAUNCH_ACCEPTED))
     event = decisions("Open Telegram and open browser", TranscriptStatus.FINAL)[0]
 
     output = dispatch_command_action(event, action_gate, executor)
 
-    assert len(output) == 1
+    assert len(output) == 2
     assert isinstance(output[0], ActionFeedback)
     assert output[0].outcome is ActionOutcome.FAILED
-    assert len(executor.calls) == 1
+    assert len(executor.calls) == 2
+    assert isinstance(output[1], ActionFeedback)
+    assert output[1].outcome is ActionOutcome.LAUNCH_ACCEPTED
 
 
 def test_real_execution_requires_commands_mode_and_explicit_app_binding() -> None:
@@ -218,7 +220,9 @@ def test_queued_plan_reports_first_launch_and_unsupported_next_step() -> None:
             completed.set()
 
     worker = QueuedActionDispatcher(
-        lambda item: execute_final_command(item, action_gate, executor),
+        lambda item, context: execute_final_command(
+            item, action_gate, executor, context=context
+        ),
         on_output,
     )
     worker.start()

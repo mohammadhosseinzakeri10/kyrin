@@ -6,6 +6,7 @@ import subprocess
 from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest
 from kyrin.actions.platforms import open_windows
 from kyrin.commands.models import CommandIntent, CommandKind
+from tests.desktop.test_backend_protocol import bus_reply
 
 
 class Fallback:
@@ -20,6 +21,12 @@ def test_picker_uses_allowed_desktop_ids_and_rejects_stale_selection(
     replies = iter(("requested", "stale", "requested", "requested"))
 
     def run(command, **kwargs):
+        if command[-1] == "GetCapabilities":
+            return bus_reply(
+                "ShowOpenWindows", "ActivateShownOpenWindow", "ActivateShownOpenApp",
+                "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow",
+                "HideAppWindows", "ShowAllWindows",
+            )
         commands.append(command)
         return subprocess.CompletedProcess(
             command, 0, json.dumps({"data": [next(replies)]}).encode(), b""
@@ -66,7 +73,7 @@ def test_unbound_app_cannot_be_selected(monkeypatch) -> None:
     assert result.outcome is ActionOutcome.FAILED
 
 
-def test_numbered_close_uses_separate_close_allowlist_and_current_picker(
+def test_numbered_close_cannot_bypass_shared_confirmation(
     monkeypatch,
 ) -> None:
     calls: list[list[str]] = []
@@ -91,8 +98,9 @@ def test_numbered_close_uses_separate_close_allowlist_and_current_picker(
         ActionKey(0, 1), CommandIntent(CommandKind.SHOW_ALL_WINDOWS, "desktop")
     ))
     result = executor.execute(ActionRequest(ActionKey(0, 2), close))
-    assert result.outcome is ActionOutcome.LAUNCH_ACCEPTED
-    assert calls[1][-4:] == ["uas", "2", "1", "telegram.desktop"]
+    assert result.outcome is ActionOutcome.FAILED
+    assert result.error_code == "window_close_confirmation_required"
+    assert len(calls) == 1
     assert executor.execute(
         ActionRequest(ActionKey(0, 3), close)
     ).outcome is ActionOutcome.FAILED

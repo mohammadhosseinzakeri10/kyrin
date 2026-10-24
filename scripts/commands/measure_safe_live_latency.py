@@ -1,11 +1,12 @@
-"""Measure one live command with saved local models and an inert executor.
+"""Measure repeated live commands with saved models and an inert executor.
 
 Say "Open Telegram" after LISTENING_READY. No application is opened and no
 audio or transcript is written. The saved settings file is only read.
 """
 
+import argparse
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
@@ -19,6 +20,7 @@ from kyrin.audio.activity.speech_activity_monitor import SpeechActivityFrame
 from kyrin.runtime.latency import SpeechActionLatency
 from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.timing import TimingEvent
 
 
 class InertExecutor:
@@ -29,6 +31,20 @@ class InertExecutor:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument("--timeout-seconds", type=int, default=1800)
+    parser.add_argument(
+        "--temperature",
+        choices=("cold", "warm", "unknown"),
+        default="unknown",
+        help="Operator-controlled experiment condition; never inferred from run order",
+    )
+    args = parser.parse_args()
+    if not 20 <= args.samples <= 512:
+        parser.error("--samples must be between 20 and 512")
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
     saved = JsonSettingsStore(linux_settings_path()).load()
     if saved.stt is None:
         raise RuntimeError("Select a speech model in KYRIN before measuring")
@@ -40,6 +56,8 @@ def main() -> int:
         listening_enabled=True,
         action_execution_enabled=True,
         system_power_enabled=False,
+        allow_desktop_scroll=False,
+        allow_desktop_control=False,
         allowed_apps=telegram,
         allowed_chat_apps=(),
         allowed_window_apps=(),
@@ -47,16 +65,19 @@ def main() -> int:
     )
     completed = Event()
     latency = SpeechActionLatency()
-    result: dict[str, object] = {}
+    sample_count = 0
+    result: dict[str, object] = {"executor": "inert; no application opened"}
     activity_events = 0
     session_ends = 0
 
     def on_event(event: object) -> None:
-        nonlocal activity_events, session_ends
+        nonlocal activity_events, session_ends, sample_count
         if isinstance(event, SpeechActivityFrame):
             activity_events += 1
         elif isinstance(event, SpeechSessionEnded):
             session_ends += 1
+        if isinstance(event, TimingEvent):
+            event = replace(event, temperature=args.temperature)
         sample = latency.observe(event)
         if (
             isinstance(event, TranscriptUpdate)
@@ -64,15 +85,10 @@ def main() -> int:
         ):
             print("FINAL_TRANSCRIPT_RECEIVED", flush=True)
         if sample is not None:
-            result.update(
-                {
-                    "speech_to_final_ms": sample.speech_to_final_ms,
-                    "final_to_result_ms": sample.final_to_result_ms,
-                    "speech_to_result_ms": sample.speech_to_result_ms,
-                    "executor": "inert; no application opened",
-                }
-            )
-            completed.set()
+            sample_count += 1
+            print(json.dumps({"sample": asdict(sample)}), flush=True)
+            if sample_count >= args.samples:
+                completed.set()
 
     factory = UbuntuSessionFactory(
         stt_openers=standard_stt_openers(
@@ -94,17 +110,24 @@ def main() -> int:
             return_value=temporary_history,
         ):
             with factory(settings) as runtime:
-                def stop_after_one_command() -> None:
-                    completed.wait(90)
+
+                def stop_after_samples() -> None:
+                    completed.wait(args.timeout_seconds)
                     runtime.stop()
 
-                Thread(target=stop_after_one_command, daemon=True).start()
-                print("LISTENING_READY: Say Open Telegram once.", flush=True)
+                Thread(target=stop_after_samples, daemon=True).start()
+                print(
+                    f"LISTENING_READY: Say Open Telegram {args.samples} times, "
+                    "waiting for each result.",
+                    flush=True,
+                )
                 runtime.run()
+    result["samples"] = sample_count
+    result["summaries"] = [asdict(summary) for summary in latency.summaries()]
     result["activity_transitions"] = activity_events
     result["session_ends"] = session_ends
     if not completed.is_set():
-        result["error"] = "no action result"
+        result["error"] = "requested sample count not reached"
     print(json.dumps(result))
     return 0 if completed.is_set() else 1
 

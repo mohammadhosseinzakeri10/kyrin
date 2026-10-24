@@ -11,6 +11,7 @@ from kyrin.desktop.platforms.gnome import (
     GnomeShellActiveAppObserver,
 )
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
+from tests.desktop.test_backend_protocol import bus_reply
 
 
 def _reply(app_id: str) -> subprocess.CompletedProcess[str]:
@@ -25,11 +26,16 @@ def test_each_observation_reads_fresh_focus_and_maps_only_known_apps() -> None:
     )
     with patch(
         "kyrin.desktop.platforms.gnome.subprocess.run",
-        side_effect=[_reply("org.telegram.desktop"), _reply("unknown.desktop")],
+        side_effect=[
+            bus_reply("GetActiveApp"),
+            _reply("org.telegram.desktop"),
+            bus_reply("GetActiveApp"),
+            _reply("unknown.desktop"),
+        ],
     ) as run:
         assert observer.observe_active_app() == "telegram"
         assert observer.observe_active_app() is None
-    assert run.call_count == 2
+    assert run.call_count == 4
 
 
 def test_catalog_can_reject_a_stale_binding(tmp_path: Path) -> None:
@@ -44,7 +50,12 @@ def test_catalog_can_reject_a_stale_binding(tmp_path: Path) -> None:
     )
     with patch(
         "kyrin.desktop.platforms.gnome.subprocess.run",
-        side_effect=[_reply("known.desktop"), _reply("removed.desktop")],
+        side_effect=[
+            bus_reply("GetActiveApp"),
+            _reply("known.desktop"),
+            bus_reply("GetActiveApp"),
+            _reply("removed.desktop"),
+        ],
     ):
         assert observer.observe_active_app() == "known"
         assert observer.observe_active_app() is None
@@ -67,7 +78,10 @@ def test_missing_or_invalid_focus_is_unknown(
     reply: subprocess.CompletedProcess[str],
 ) -> None:
     observer = GnomeShellActiveAppObserver({"org.telegram.desktop": "telegram"})
-    with patch("kyrin.desktop.platforms.gnome.subprocess.run", return_value=reply):
+    with patch(
+        "kyrin.desktop.platforms.gnome.subprocess.run",
+        side_effect=[bus_reply("GetActiveApp"), reply],
+    ):
         assert observer.observe_active_app() is None
 
 
@@ -83,16 +97,23 @@ def test_bus_timeout_is_unknown() -> None:
 def test_focused_window_identity_requires_valid_id_and_pid() -> None:
     observer = GnomeShellActiveAppObserver({})
     valid = subprocess.CompletedProcess(
-        args=[], returncode=0,
+        args=[],
+        returncode=0,
         stdout='{"type":"su","data":["telegram.desktop",123]}',
     )
     invalid = subprocess.CompletedProcess(
-        args=[], returncode=0,
+        args=[],
+        returncode=0,
         stdout='{"type":"su","data":["telegram.desktop",0]}',
     )
     with patch(
         "kyrin.desktop.platforms.gnome.subprocess.run",
-        side_effect=[valid, invalid],
+        side_effect=[
+            bus_reply("GetActiveWindow"),
+            valid,
+            bus_reply("GetActiveWindow"),
+            invalid,
+        ],
     ):
         assert observer.read_active_window_identity() == ActiveWindowIdentity(
             "telegram.desktop", 123
@@ -108,14 +129,13 @@ def test_invalid_configuration_is_rejected() -> None:
 
 
 def test_optional_active_app_endpoint_is_detected_without_reading_focus() -> None:
-    result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
-        args=[], returncode=0
-    )
     with patch(
-        "kyrin.desktop.platforms.gnome.subprocess.run", return_value=result
+        "kyrin.desktop.platforms.gnome.subprocess.run",
+        return_value=bus_reply("GetActiveApp"),
     ) as run:
         assert GnomeShellActiveAppObserver.available()
-    assert run.call_args.args[0][-2:] == [
+    assert run.call_args.args[0][-3:] == [
         "/org/kyrin/ActiveApp",
         "org.kyrin.ActiveApp",
+        "GetCapabilities",
     ]

@@ -13,6 +13,9 @@ import {MascotAnimator} from './mascotAnimation.js';
 
 const INTERFACE_XML = `<node>
   <interface name="org.kyrin.VisualStatus">
+    <method name="GetCapabilities">
+      <arg name="manifest" type="s" direction="out"/>
+    </method>
     <method name="SetStatus">
       <arg name="status" type="s" direction="in"/>
     </method>
@@ -36,6 +39,11 @@ const STATES = {
 };
 
 export default class KyrinVisualStatusExtension extends Extension {
+    // This literal belongs to the loaded module; metadata on disk may be newer.
+    GetCapabilities() {
+        return JSON.stringify({"protocol_version": 1, "build_id": "visual-status@kyrin.local-2026-10-24-f20", "capabilities": ["SetStatus", "SetPresentation"]});
+    }
+
     enable() {
         const layer = name => {
             const actor = new St.Icon({

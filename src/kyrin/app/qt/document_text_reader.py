@@ -12,6 +12,7 @@ from kyrin.vision.ocr.backends.document import (
     DocumentOcrGpuMemoryError,
     DocumentOcrTimeoutError,
 )
+from kyrin.vision.ocr.backends.document_trust import DocumentOcrProtectionError
 from kyrin.vision.ocr.backends.tesseract import OcrUnavailableError
 from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference
 from kyrin.vision.screen_capture import IdentifiedWindowImage
@@ -72,7 +73,11 @@ class DocumentTextReader(QObject):
         if not self._access.granted:
             self.failed.emit("access_off")
             return False
-        engine = self._engine_factory(backend)
+        try:
+            engine = self._engine_factory(backend)
+        except DocumentOcrProtectionError:
+            self.failed.emit("ocr_protection_unavailable")
+            return False
         if engine is None:
             self.failed.emit("ocr_unavailable")
             return False
@@ -122,6 +127,8 @@ class DocumentTextReader(QObject):
                 events.failed.emit(generation, "ocr_timeout")
             except DocumentOcrGpuMemoryError:
                 events.failed.emit(generation, "gpu_memory")
+            except DocumentOcrProtectionError:
+                events.failed.emit(generation, "ocr_protection_unavailable")
             except OcrUnavailableError:
                 events.failed.emit(generation, "gpu_unavailable")
             except Exception:

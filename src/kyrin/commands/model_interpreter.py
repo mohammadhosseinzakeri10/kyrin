@@ -46,6 +46,7 @@ from kyrin.commands.understanding import (
 )
 from kyrin.commands.visible_options import VisibleOption
 from kyrin.text_normalization import fold_case, source_spelling
+from kyrin.timing import timed_stage
 
 
 def _words(value: str) -> tuple[str, ...]:
@@ -115,17 +116,21 @@ _SOURCE_NEGATION = re.compile(
 )
 _EN_REQUEST_PREFIX = r"(?:please\s+|could you\s+|can you\s+|would you\s+)*"
 _EN_VISIBLE_REQUEST = re.compile(
-    r"^" + _EN_REQUEST_PREFIX
+    r"^"
+    + _EN_REQUEST_PREFIX
     + r"(?:click|tap|press|select|choose|open|show|go to|navigate to|"
     r"turn on|turn off|switch on|switch off|enable|disable|check|uncheck)\b"
     r"|^i (?:want|would like)\b.+\b(?:opened|on|off)\b"
 )
 _EN_SCROLL_REQUEST = re.compile(
-    r"^" + _EN_REQUEST_PREFIX + r"scroll\s+(?:up|down)\b"
+    r"^" + _EN_REQUEST_PREFIX + r"scroll\s+(up|down)"
+    r"(?:\s+(?:on|in)\s+(?:this|the|the current|the active)\s+(?:page|window))?"
+    r"(?:\s+please)?[.!?]?"
 )
 _FA_SCROLL_REQUEST = re.compile(
-    r"(?:بالا|پایین).*?(?:برو|اسکرول|پیمایش)|"
-    r"(?:اسکرول|پیمایش).*?(?:بالا|پایین)"
+    r"(?:لطفا\s+)?(?:این\s+صفحه\s+را\s+)?(?:به\s+)?"
+    r"(?:(بالا|پایین)\s+(?:برو|(?:اسکرول|پیمایش)(?:\s+کن)?)|"
+    r"(?:اسکرول|پیمایش)\s+(بالا|پایین)(?:\s+کن)?)[.!؟]?"
 )
 
 
@@ -147,6 +152,28 @@ def _source_is_instruction(text: str, language: str | None, *, scroll: bool) -> 
         _FA_SCROLL_REQUEST.search(normalized)
         if scroll
         else _VISIBLE_ACTION_FA.search(normalized)
+    )
+
+
+def _source_scroll_operation(
+    text: str, language: str | None
+) -> RequestedOperation | None:
+    """Extract one direction from a bounded request, independently of the model."""
+    if not _source_is_instruction(text, language, scroll=True):
+        return None
+    assert language is not None
+    code = language.strip().lower().split("-", 1)[0]
+    pattern = _EN_SCROLL_REQUEST if code == "en" else _FA_SCROLL_REQUEST
+    # Match the entire request: a direction in a quote, condition, second
+    # instruction, or ambiguous suffix cannot authorize the proposed input.
+    match = pattern.fullmatch(fold_case(text).strip())
+    if match is None:
+        return None
+    direction = next(value for value in match.groups() if value is not None)
+    return (
+        RequestedOperation.SCROLL_UP
+        if direction in {"up", "بالا"}
+        else RequestedOperation.SCROLL_DOWN
     )
 
 
@@ -254,6 +281,10 @@ class ModelAssistedInterpreter:
         direct = self._rules.interpret(
             text, language=language, context=context, pending=pending
         )
+        if not context.is_final_transcript:
+            # Keep provisional previews on rules only, before confirmation
+            # inference, catalog refresh, or visible-control inventory/OCR.
+            return direct
         if pending is not None:
             if _words(text) == ("یا",):
                 return NeedsClarification(pending)
@@ -280,18 +311,19 @@ class ModelAssistedInterpreter:
                 if self._source_operations.extract(text, language=language).operations:
                     return direct
                 try:
-                    decision = self._model.classify_confirmation(
-                        UnderstandingInput(text, language),
-                        question=(
-                            f"Confirm {pending.operation.value} for "
-                            f"{pending.candidates[0].display_name}?"
-                            if pending.operation is not None
-                            else (
-                                f"Is this the "
-                                f"{pending.candidates[0].display_name} app?"
-                            )
-                        ),
-                    )
+                    with timed_stage("inference"):
+                        decision = self._model.classify_confirmation(
+                            UnderstandingInput(text, language),
+                            question=(
+                                f"Confirm {pending.operation.value} for "
+                                f"{pending.candidates[0].display_name}?"
+                                if pending.operation is not None
+                                else (
+                                    "Is this the "
+                                    f"{pending.candidates[0].display_name} app?"
+                                )
+                            ),
+                        )
                 except CommandModelError, ValueError:
                     return NeedsClarification(pending)
                 if decision is ConfirmationDecision.YES and not _NEGATIVE_REPLY.search(
@@ -343,7 +375,8 @@ class ModelAssistedInterpreter:
                 ),
             )
         try:
-            proposal = self._model.understand(source, context=context)
+            with timed_stage("inference"):
+                proposal = self._model.understand(source, context=context)
         except CommandModelError, ValueError:
             return self._unusable_model_result(direct, source)
         discovered_visible = False
@@ -380,7 +413,8 @@ class ModelAssistedInterpreter:
                 exact_visible_option = exact_matches[0]
             else:
                 try:
-                    proposal = self._model.understand(source, context=context)
+                    with timed_stage("inference"):
+                        proposal = self._model.understand(source, context=context)
                 except CommandModelError, ValueError:
                     return UnrecognizedCommand()
                 if (
@@ -417,8 +451,9 @@ class ModelAssistedInterpreter:
             RequestedOperation.SCROLL_UP,
             RequestedOperation.SCROLL_DOWN,
         }:
-            if context.observed_scroll_app is None or not _source_is_instruction(
-                text, language, scroll=True
+            if (
+                context.observed_scroll_app is None
+                or _source_scroll_operation(text, language) is not steps[0].operation
             ):
                 return UnrecognizedCommand()
             intent = CommandIntent(
@@ -466,8 +501,10 @@ class ModelAssistedInterpreter:
                     option.label,
                     control_state=visible_step.control_state,
                     control_source=option.source,
+                    control_accessibility=option.accessibility,
                     control_anchor=option.anchor,
                     control_window_app=context.observed_scroll_app,
+                    control_observation=option.observation,
                 )
             except ValueError:
                 return UnrecognizedCommand()

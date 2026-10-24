@@ -3,7 +3,9 @@
 from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from threading import Event, Lock
+from time import perf_counter_ns
 from typing import cast
 
 from kyrin.audio.activity.speech_activity_monitor import (
@@ -17,6 +19,7 @@ from kyrin.audio.audio_framer import AudioFramer
 from kyrin.audio.file_input import AudioFileInput
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
 from kyrin.audio.sample_rate_converter import SampleRateConverter
+from kyrin.audio.speech_timing import SpeechTiming
 from kyrin.stt.contracts import (
     CancellableSpeechToTextEngine,
     SpeechToTextEngine,
@@ -42,7 +45,9 @@ class FileSpeechPipeline:
         pause_confirm_ms: int = 384,
         on_compute_device: Callable[[ComputeDevice], None] | None = None,
         on_audio_ready: Callable[[], None] | None = None,
+        clock_ns: Callable[[], int] = perf_counter_ns,
     ) -> None:
+        self._clock_ns = clock_ns
         self.source = source
         self.detector = detector
         self.engine = engine
@@ -104,6 +109,7 @@ class FileSpeechPipeline:
 
                 def events() -> Iterator[LiveSpeechEvent]:
                     ready = False
+                    timing = SpeechTiming(self._clock_ns)
 
                     def chunks() -> Iterator[AudioData]:
                         nonlocal ready
@@ -122,13 +128,16 @@ class FileSpeechPipeline:
                             if self._stopped.is_set():
                                 return
                             frame = monitor.process(window)
+                            timing.boundary(frame)
                             if frame.transition is not None:
                                 yield frame
                             if frame.transition is SpeechTransition.STARTED:
-                                yield from turn_session.start_turn()
-                            yield from session.accept_audio(window)
+                                yield from timing.call(turn_session.start_turn)
+                            yield from timing.call(
+                                partial(session.accept_audio, window)
+                            )
                             if frame.transition is SpeechTransition.PAUSED:
-                                yield from turn_session.end_turn()
+                                yield from timing.call(turn_session.end_turn)
                     else:
                         pending: deque[SpeechActivityFrame] = deque()
 
@@ -146,13 +155,15 @@ class FileSpeechPipeline:
                                 frame = pending.popleft()
                                 if frame.transition is not None:
                                     yield frame
-                            yield from session.accept_audio(converted)
+                            yield from timing.call(
+                                partial(session.accept_audio, converted)
+                            )
                         while pending:
                             frame = pending.popleft()
                             if frame.transition is not None:
                                 yield frame
                     if not self._stopped.is_set():
-                        yield from session.finish()
+                        yield from timing.call(session.finish)
 
                 yield events()
             finally:

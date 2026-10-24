@@ -146,3 +146,26 @@ def capture_is_current(
 ) -> bool:
     age = now - geometry.captured_at
     return window_token == geometry.window_token and 0 <= age <= max_age_s
+
+
+def capture_regions_valid(
+    regions: tuple[Rect, ...], image_size: tuple[int, int]
+) -> bool:
+    """Require nonempty, unclipped half-open rectangles in original PNG pixels.
+
+    The producer supplies the complete target/supporting boxes. Extra margin is
+    zero: no inferred control border, desktop units or OCR-resize units enter
+    this contract. Geometry/capture ID bind these boxes to the source image.
+    """
+    image_width, image_height = image_size
+    return bool(regions) and all(
+        len(rect) == 4
+        and all(type(value) is int for value in rect)
+        and rect[0] >= 0
+        and rect[1] >= 0
+        and rect[2] > 0
+        and rect[3] > 0
+        and rect[0] + rect[2] <= image_width
+        and rect[1] + rect[3] <= image_height
+        for rect in regions
+    )

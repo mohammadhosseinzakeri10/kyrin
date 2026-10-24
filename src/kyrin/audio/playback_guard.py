@@ -9,7 +9,7 @@ from kyrin.audio.audio_input import AudioInput
 
 class PlaybackState(Protocol):
     @property
-    def is_active(self) -> bool: ...
+    def is_playing(self) -> bool: ...
 
 
 class PlaybackGuardInput:
@@ -21,8 +21,12 @@ class PlaybackGuardInput:
 
     def capture(self) -> Iterator[AudioData]:
         for chunk in self._source.capture():
-            if self._playback.is_active:
-                yield AudioData(bytes(len(chunk.data)), chunk.audio_format)
+            if self._playback.is_playing:
+                yield AudioData(
+                    bytes(len(chunk.data)),
+                    chunk.audio_format,
+                    chunk.capture_start_ns,
+                )
             else:
                 yield chunk
 

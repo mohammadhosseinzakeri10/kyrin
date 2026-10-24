@@ -5,7 +5,15 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from kyrin.model_resources import MODEL_RESOURCES, ModelResources, Workload
+from kyrin.vision.ocr.backends.document_sandbox import (
+    require_sandbox,
+    run_worker,
+    sandbox_command,
+)
+from kyrin.vision.ocr.backends.document_trust import approved_model, verify_model
 from kyrin.vision.ocr.backends.tesseract import OcrInferenceError, OcrUnavailableError
 from kyrin.vision.ocr.contracts import OcrDevice, OcrDevicePreference
 
@@ -32,7 +40,7 @@ class DocumentOcrResult:
     device: OcrDevice
 
 
-def document_model_ready(
+def _document_model_installed(
     backend: str, candidates_root: Path, runtimes_root: Path
 ) -> bool:
     """Offer only complete local checkpoints with their isolated Python runtime."""
@@ -58,56 +66,91 @@ def document_model_ready(
     return (model / "model.safetensors").is_file()
 
 
+def document_model_ready(
+    backend: str, candidates_root: Path, runtimes_root: Path
+) -> bool:
+    """Only approved, intact checkpoints can be offered, never self-signed ones.
+
+    Platform protection is checked before every execution; this discovery check
+    does not claim that the sandbox can run on this host.
+    """
+    if not _document_model_installed(backend, candidates_root, runtimes_root):
+        return False
+    try:
+        verify_model(candidates_root / _MODELS[backend][0], approved_model(backend))
+    except OcrUnavailableError:
+        return False
+    return True
+
+
 class DocumentOcrEngine:
     """A bounded subprocess that returns text only, with no action targeting API."""
 
     def __init__(
-        self, backend: str, candidates_root: Path, runtimes_root: Path
+        self,
+        backend: str,
+        candidates_root: Path,
+        runtimes_root: Path,
+        *,
+        resources: ModelResources = MODEL_RESOURCES,
     ) -> None:
-        if not document_model_ready(backend, candidates_root, runtimes_root):
+        approval = approved_model(backend)
+        if not _document_model_installed(backend, candidates_root, runtimes_root):
             raise OcrUnavailableError("Document OCR model or runtime is unavailable")
+        verify_model(candidates_root / _MODELS[backend][0], approval)
         model_folder, runtime_folder = _MODELS[backend]
+        self._resources = resources
         self.backend = backend
         self._model = candidates_root / model_folder
         self._python = runtimes_root / runtime_folder / "bin/python"
-        self._cache = runtimes_root / runtime_folder / "cache"
 
     def read_text(
         self, image: bytes, device: OcrDevicePreference = OcrDevicePreference.AUTO
+    ) -> DocumentOcrResult:
+        if not isinstance(device, OcrDevicePreference):
+            raise ValueError("Document OCR device must be auto, cpu, or gpu")
+        with self._resources.use(
+            Workload.DOCUMENT_OCR, f"document_ocr:{self.backend}:{device.value}"
+        ):
+            return self._read_text(image, device)
+
+    def _read_text(
+        self, image: bytes, device: OcrDevicePreference
     ) -> DocumentOcrResult:
         if not image or len(image) > _MAX_IMAGE_BYTES:
             raise ValueError("Document OCR image is empty or exceeds the size limit")
         if not isinstance(device, OcrDevicePreference):
             raise ValueError("Document OCR device must be auto, cpu, or gpu")
-        environment = os.environ.copy()
-        environment.update(
-            HF_HOME=str(self._cache / "huggingface"),
-            XDG_CACHE_HOME=str(self._cache),
-            HF_HUB_OFFLINE="1",
-            TRANSFORMERS_OFFLINE="1",
-            OMP_NUM_THREADS="4",
-        )
-        if device is OcrDevicePreference.CPU:
-            # CUDA libraries otherwise reserve virtual address space even for
-            # CPU inference and can trip the worker's 18 GB address-space cap.
-            environment["CUDA_VISIBLE_DEVICES"] = ""
-        worker = Path(__file__).with_name("document_worker.py")
-        try:
-            process = subprocess.run(
-                [
-                    str(self._python),
-                    "-I",
-                    str(worker),
-                    self.backend,
-                    str(self._model),
-                    device.value,
-                ],
-                input=image,
-                capture_output=True,
-                timeout=240,
-                check=False,
-                env=environment,
+        if device is OcrDevicePreference.GPU:
+            raise OcrUnavailableError(
+                "CUDA GPU is unavailable in the protected CPU document OCR profile"
             )
+        runtime = self._python.parent.parent.resolve()
+        worker = Path(__file__).with_name("document_worker.py").resolve()
+        # Probe before making a potentially large copy. No untrusted Python is
+        # started unless all namespace and mount restrictions actually work.
+        command = sandbox_command(runtime, self._model.resolve(), worker)
+        require_sandbox(command)
+        scratch = runtime.parent / ".document-work"
+        scratch.mkdir(mode=0o700, exist_ok=True)
+        try:
+            with TemporaryDirectory(prefix="read-", dir=scratch) as directory:
+                snapshot = Path(directory)
+                verify_model(self._model, approved_model(self.backend), snapshot)
+                command = sandbox_command(runtime, snapshot, worker)
+                process = run_worker(
+                    [
+                        *command,
+                        "--",
+                        "/runtime/bin/python",
+                        "-I",
+                        "/worker.py",
+                        self.backend,
+                        "/model",
+                        "cpu",
+                    ],
+                    image,
+                )
         except subprocess.TimeoutExpired as error:
             raise DocumentOcrTimeoutError(
                 "Document OCR process exceeded four minutes"

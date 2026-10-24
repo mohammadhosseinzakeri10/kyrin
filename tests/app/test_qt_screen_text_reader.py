@@ -49,6 +49,7 @@ class FakeAccess(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.available = True
+        self.transport_available = True
         self.granted = True
         self.remembered = False
         self.image: IdentifiedWindowImage | None = _IMAGE
@@ -394,7 +395,13 @@ def test_engine_change_discards_old_result_and_uses_new_engine(
         assert reader.read()
         assert old_engine.started.wait(1)
         reader.set_engine(new_engine)
-        assert not reader.busy
+        # A native plugin cannot be killed as a Python thread. Keep ownership
+        # and refuse another read until that worker actually returns.
+        assert reader.busy
+        assert not reader.read()
+        release.set()
+        _until(app, lambda: not reader.busy)
+        assert results == []
         assert reader.read()
         _until(app, lambda: bool(results))
         assert new_engine.used_worker
@@ -482,3 +489,31 @@ def test_selected_single_language_tesseract_does_not_require_english(
 
     assert engine is not None
     assert engine.capabilities.supported_languages == frozenset({"spa"})
+
+
+def test_expired_capture_callback_never_spawns_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.operations import Operation, activate
+
+    _app(monkeypatch)
+    callbacks = []
+    access = FakeAccess()
+    access.capture = callbacks.append
+    engine = FakeOcr()
+    reader = ScreenTextReader(
+        cast(ScreenAccess, access), engine,
+        lambda: (_IMAGE.platform_app_id, _IMAGE.process_id), OcrOptions("eng"),
+    )
+    now = [0.0]
+    operation = Operation(1, lambda: now[0])
+    try:
+        with activate(operation):
+            assert reader.read()
+        now[0] = 2
+        callbacks[0](_IMAGE)
+        assert not engine.started.is_set()
+        assert not reader.busy
+        assert reader._worker is None
+    finally:
+        reader.close()

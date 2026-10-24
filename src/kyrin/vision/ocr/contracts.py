@@ -86,5 +86,10 @@ class OcrEngine(Protocol):
     def capabilities(self) -> OcrCapabilities: ...
 
     def recognize(self, image: bytes, options: OcrOptions) -> OcrResult:
-        """Recognize one image in memory; never execute a desktop action."""
+        """Recognize one image; never execute a desktop action.
+
+        Built-in engines honor the context-local kyrin.operations budget and
+        own a killable subprocess. In-process plugins must cooperate with that
+        budget; ScreenTextReader retains busy ownership until they really exit.
+        """
         ...

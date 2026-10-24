@@ -14,7 +14,12 @@ class ScreenCapture(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class IdentifiedWindowImage:
-    """A capture tied to one focused app at capture time, not action authority."""
+    """One focused snapshot, not action authority.
+
+    ``capture_rect`` is the PNG extent in logical desktop units, including
+    client shadows; ``frame_rect`` is the logical interactive viewport.
+    ``geometry.image_size`` and padding use original PNG pixels.
+    """
 
     platform_app_id: str
     process_id: int

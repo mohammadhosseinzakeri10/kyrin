@@ -133,7 +133,7 @@ def test_kokoro_gpu_uses_isolated_sherpa_worker(
     ]
 
 
-def test_kitten_uses_selected_voice_speed_and_cached_model(
+def test_kitten_uses_selected_voice_speed_and_releases_model_between_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     folder = _kitten_folder(tmp_path / "voice")
@@ -176,7 +176,8 @@ def test_kitten_uses_selected_voice_speed_and_cached_model(
 
     assert generated == [("Hello", 2, 1.15), ("Again", 2, 1.15)]
     assert played == [([1, 2], 24000, False)] * 2
-    assert len(created) == 1
+    assert len(created) == 2
+    assert not synthesizer._loaded
 
 
 def test_persian_vits_route_loads_local_piper_package(
@@ -269,9 +270,7 @@ def test_kokoro_package_is_detected_and_uses_its_lexicon(
         lambda name: (
             fake_sherpa
             if name == "sherpa_onnx"
-            else SimpleNamespace(
-                play=lambda *args, **kwargs: None, wait=lambda: None
-            )
+            else SimpleNamespace(play=lambda *args, **kwargs: None, wait=lambda: None)
         ),
     )
     ConfiguredSpeechSynthesizer(
@@ -397,7 +396,11 @@ def test_device_switch_releases_old_tts_model_before_loading_new_one(
             return FakeModel(provider)
 
         def generate(
-            self, loaded: FakeModel, text: str, voice: str, speed: float,
+            self,
+            loaded: FakeModel,
+            text: str,
+            voice: str,
+            speed: float,
             language: str,
         ) -> tuple[list[float], int]:
             return [0.1], 16000
@@ -421,6 +424,7 @@ def test_device_switch_releases_old_tts_model_before_loading_new_one(
         f"load {old_device.value}",
         f"close {old_device.value}",
         f"load {new_device.value}",
+        f"close {new_device.value}",
     ]
     synthesizer.close()
     assert events[-1] == f"close {new_device.value}"
@@ -469,7 +473,11 @@ def test_quit_stops_active_isolated_tts_worker(
             return FakeWorker()
 
         def generate(
-            self, loaded: FakeWorker, text: str, voice: str, speed: float,
+            self,
+            loaded: FakeWorker,
+            text: str,
+            voice: str,
+            speed: float,
             language: str,
         ) -> tuple[list[float], int]:
             return loaded.generate()
@@ -533,7 +541,11 @@ def test_quit_does_not_wait_forever_for_stuck_in_process_tts(
             return FakeModel()
 
         def generate(
-            self, loaded: FakeModel, text: str, voice: str, speed: float,
+            self,
+            loaded: FakeModel,
+            text: str,
+            voice: str,
+            speed: float,
             language: str,
         ) -> tuple[list[float], int]:
             started.set()
@@ -637,9 +649,11 @@ def test_stale_model_prompt_is_discarded_after_generation(
     monkeypatch.setattr("kyrin.tts.runtime.util.find_spec", lambda _: object())
     monkeypatch.setattr(
         "kyrin.tts.runtime.import_module",
-        lambda name: fake_sherpa
-        if name == "sherpa_onnx"
-        else SimpleNamespace(play=lambda *args, **kwargs: played.append(args)),
+        lambda name: (
+            fake_sherpa
+            if name == "sherpa_onnx"
+            else SimpleNamespace(play=lambda *args, **kwargs: played.append(args))
+        ),
     )
     synthesizer = ConfiguredSpeechSynthesizer(
         TtsSelection("kitten", folder, "0", 1.0, DevicePreference.CPU)
@@ -655,3 +669,50 @@ def test_unsupported_package_is_rejected_instead_of_loaded(tmp_path: Path) -> No
     (folder / "weights.bin").write_bytes(b"fixture")
     with pytest.raises(ValueError, match="Unsupported TTS package family"):
         inspect_tts_model(folder)
+
+
+def test_interrupt_during_synthesis_discards_late_audio_and_keeps_input_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.tts import runtime
+
+    folder = _kitten_folder(tmp_path / "voice")
+    entered, release = Event(), Event()
+    played: list[object] = []
+
+    class Adapter:
+        def provider(self, selection):
+            return "cpu"
+
+        def load(self, *args):
+            return object()
+
+        def generate(self, *args):
+            entered.set()
+            assert release.wait(2)
+            return [0.1], 16000
+
+    monkeypatch.setattr(runtime, "inspect_tts_model", lambda folder: object())
+    monkeypatch.setitem(runtime._ADAPTERS, "kitten", Adapter())
+    monkeypatch.setattr(runtime, "validate_tts_selection", lambda selection: None)
+    monkeypatch.setattr(
+        runtime,
+        "import_module",
+        lambda name: SimpleNamespace(
+            play=lambda *args, **kwargs: played.append(args),
+            wait=lambda: None,
+        ),
+    )
+    synth = ConfiguredSpeechSynthesizer(TtsSelection("kitten", folder, "0"))
+    worker = Thread(target=synth.speak, args=("hello", "en"))
+    worker.start()
+    try:
+        assert entered.wait(2)
+        assert not synth.is_playing
+        synth.interrupt()
+    finally:
+        release.set()
+        worker.join(2)
+    assert not worker.is_alive()
+    assert played == []

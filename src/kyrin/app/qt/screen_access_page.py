@@ -219,9 +219,11 @@ class ScreenAccessPage(QWidget):
             document_reader.failed.connect(self._document_failed)
             document_reader.busy_changed.connect(self._document_busy_changed)
         self.translate()
-        self.enabled_checkbox.setEnabled(access is not None and access.available)
+        self.enabled_checkbox.setEnabled(
+            access is not None and access.transport_available
+        )
         self._changed(access.granted if access is not None else False)
-        if access is not None and access.available and access.remembered:
+        if access is not None and access.transport_available and access.remembered:
             QTimer.singleShot(
                 0, lambda: access.request_session() if access.remembered else None
             )
@@ -251,7 +253,7 @@ class ScreenAccessPage(QWidget):
             self.read_status.setText(text("screen_ocr_unavailable"))
         elif not self.read_output.toPlainText():
             self.read_status.setText(text("screen_read_hint"))
-        if self._access is None or not self._access.available:
+        if self._access is None or not self._access.transport_available:
             self.status.setText(text("screen_unavailable"))
         elif self._access.granted:
             self.status.setText(text("screen_active"))
@@ -314,11 +316,11 @@ class ScreenAccessPage(QWidget):
         with QSignalBlocker(self.enabled_checkbox):
             self.enabled_checkbox.setChecked(granted)
         self.enabled_checkbox.setEnabled(
-            self._access is not None and self._access.available
+            self._access is not None and self._access.transport_available
         )
         self.status.setText(
             self._translations.text("screen_active" if granted else "screen_off")
-            if self._access is not None and self._access.available
+            if self._access is not None and self._access.transport_available
             else self._translations.text("screen_unavailable")
         )
         self._update_read_button()
@@ -422,6 +424,7 @@ class ScreenAccessPage(QWidget):
             "capture_unavailable": "screen_capture_unavailable",
             "window_changed": "screen_window_changed",
             "ocr_timeout": "screen_document_timeout",
+            "ocr_protection_unavailable": "screen_document_protection_unavailable",
             "gpu_unavailable": "screen_document_gpu_unavailable",
             "gpu_memory": "screen_document_gpu_memory",
         }.get(reason, "screen_ocr_failed")

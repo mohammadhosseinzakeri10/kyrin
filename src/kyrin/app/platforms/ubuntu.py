@@ -8,6 +8,8 @@ from copy import copy
 from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
+from kyrin.actions.control_policy import ControlConfirmer
+from kyrin.actions.desktop_input import DesktopInputBroker, DesktopInputExecutor
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.gate import ActionGate, ActionPolicy
 from kyrin.actions.models import (
@@ -33,7 +35,12 @@ from kyrin.actions.platforms.telegram import (
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.window_control import WindowControlExecutor
 from kyrin.app.controller import RuntimeSession
-from kyrin.app.events import ApplicationEvent, AudioCaptureReady, SttDeviceReady
+from kyrin.app.events import (
+    ApplicationEvent,
+    AudioCaptureReady,
+    AudioDuplexChanged,
+    SttDeviceReady,
+)
 from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.settings import AppSettings, CommandModelSelection, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
@@ -66,11 +73,14 @@ from kyrin.commands.ollama_server import LocalOllamaServer
 from kyrin.commands.understanding import RequestedOperation
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.app_activation import ExistingAppActivator
+from kyrin.desktop.platforms.gnome import read_active_window_token
 from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.spoken_app_names import CatalogSpokenAppResolver
 from kyrin.desktop.window_control import AppWindowController
+from kyrin.desktop.window_observation import observe_window
 from kyrin.desktop.window_presence import AppWindowPresence
 from kyrin.memory.history import SqliteConversationHistory, default_history_path
+from kyrin.model_resources import MODEL_RESOURCES, ModelResources
 from kyrin.responses.models import SystemNotice, SystemNoticeKind
 from kyrin.responses.presenter import PresentedResponse, ResponsePresenter
 from kyrin.responses.speech import (
@@ -87,6 +97,7 @@ from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import CancellableSpeechToTextEngine, SpeechToTextEngine
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
+from kyrin.stt.resources import ManagedSttEngine
 from kyrin.system_power.flow import (
     PowerBackend,
     PowerPrompt,
@@ -227,6 +238,7 @@ class UbuntuSessionFactory:
         window_controller_factory: WindowControllerFactory | None = None,
         window_presence_factory: WindowPresenceFactory | None = None,
         chat_verifier: ChatVerifier | None = None,
+        control_confirmation: ControlConfirmer | None = None,
         focused_window: WindowIdentityReader | None = None,
         visual_publish: Callable[[VisualPresentation], None] | None = None,
         synthesizer: SpeechSynthesizer | None = None,
@@ -236,6 +248,7 @@ class UbuntuSessionFactory:
         command_server_factory: CommandServerFactory = _command_server,
         echo_cancellation_factory: Callable[[], PipeWireEchoCancellation] | None = None,
         voice_standby: bool = False,
+        model_resources: ModelResources | None = None,
     ) -> None:
         self._stt_openers = dict(stt_openers)
         self._on_event = on_event
@@ -249,6 +262,7 @@ class UbuntuSessionFactory:
         self._window_controller_factory = window_controller_factory
         self._window_presence_factory = window_presence_factory
         self._chat_verifier = chat_verifier
+        self._control_confirmation = control_confirmation
         self._focused_window = focused_window
         self._visual_publish = visual_publish
         self._synthesizer = synthesizer
@@ -258,7 +272,11 @@ class UbuntuSessionFactory:
         self._command_server_factory = command_server_factory
         self._echo_cancellation_factory = echo_cancellation_factory
         self._voice_standby = voice_standby
+        self._model_resources = model_resources or MODEL_RESOURCES
         self._audio_file: Path | None = None
+        # Shared by shallow audio-file clones too. A timed-out old owner must
+        # finish before any subsequent session gets a new input broker.
+        self._input_brokers: list[DesktopInputBroker] = []
 
     def for_audio_file(self, path: Path) -> UbuntuSessionFactory:
         """Use the same composition and permissions with a file source."""
@@ -275,6 +293,9 @@ class UbuntuSessionFactory:
         opener = self._stt_openers.get(selection.backend)
         if opener is None:
             raise ValueError(f"STT backend is not installed: {selection.backend}")
+        for previous_broker in self._input_brokers:
+            previous_broker.close()
+        self._input_brokers.clear()
 
         # Resolve exact registered IDs. Missing apps stay in the action policy
         # but cannot acquire a launch path or a spoken registered name.
@@ -385,11 +406,7 @@ class UbuntuSessionFactory:
             )
         if settings.allow_desktop_scroll and self._focused_window is not None:
             supported_kinds.update({CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN})
-        if (
-            settings.allow_desktop_control
-            and self._focused_window is not None
-            and self._chat_verifier is not None
-        ):
+        if settings.allow_desktop_control and self._focused_window is not None:
             supported_kinds.add(CommandKind.VISIBLE_CONTROL)
         if window_controls_available:
             supported_kinds.update(
@@ -416,9 +433,7 @@ class UbuntuSessionFactory:
                     settings.allow_desktop_scroll and self._focused_window is not None
                 ),
                 allow_focused_control=(
-                    settings.allow_desktop_control
-                    and self._focused_window is not None
-                    and self._chat_verifier is not None
+                    settings.allow_desktop_control and self._focused_window is not None
                 ),
                 allowed_close_apps=frozenset(settings.allowed_close_apps),
                 supported_kinds=frozenset(supported_kinds),
@@ -432,15 +447,21 @@ class UbuntuSessionFactory:
 
         # A missing microphone or unsupported explicit device fails before
         # capture. No alternative model or compute device is chosen silently.
+        configuration = None
         if self._audio_file is None:
-            self._microphones.resolve(settings.microphone_device_key)
-        engine = opener(selection)
+            configuration = self._microphones.resolve(settings.microphone_device_key)
+        engine = ManagedSttEngine(
+            lambda: opener(selection),
+            self._model_resources,
+            f"stt:{selection.backend}:{selection.model_path}:{selection.device.value}",
+        )
         safe_to_close_engine = True
         speaker: ResponseSpeaker | None = self._response_speaker
         echo_cancel: PipeWireEchoCancellation | None = None
         power_flow: SystemPowerFlow | None = None
         command_server: AbstractContextManager[str] | None = None
         history: SqliteConversationHistory | None = None
+        input_broker: DesktopInputBroker | None = None
         try:
             if (
                 selection.device is DevicePreference.GPU
@@ -468,7 +489,9 @@ class UbuntuSessionFactory:
                 interpreter = ModelAssistedInterpreter(
                     rules,
                     OllamaCommandEngine(
-                        endpoint, command_selection.model, command_selection.device
+                        endpoint, command_selection.model, command_selection.device,
+                        resources=self._model_resources,
+                        model_store=command_selection.store_path,
                     ),
                     spoken_names,
                     allowed_apps=frozenset(installed),
@@ -482,7 +505,6 @@ class UbuntuSessionFactory:
                         )
                         if settings.allow_desktop_control
                         and self._focused_window is not None
-                        and self._chat_verifier is not None
                         else None
                     ),
                     action_review=rules.review_model_action,
@@ -492,10 +514,17 @@ class UbuntuSessionFactory:
                         if operation.value in {kind.value for kind in supported_kinds}
                     ),
                 )
-            try:
-                history = SqliteConversationHistory(default_history_path())
-            except (OSError, ValueError, sqlite3.Error) as exc:
-                _LOGGER.warning("Conversation history is unavailable: %s", exc)
+            if settings.history_enabled:
+                try:
+                    history = SqliteConversationHistory(
+                        default_history_path(), retention=settings.history_retention
+                    )
+                    history.apply_retention()
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    if history is not None:
+                        history.close()
+                        history = None
+                    _LOGGER.warning("Conversation history is unavailable: %s", exc)
             recent_utterances: Callable[[], tuple[str, ...]] | None = None
             if history is not None:
                 history_store = history
@@ -510,9 +539,15 @@ class UbuntuSessionFactory:
                         return ()
 
                 recent_utterances = read_recent_utterances
+            focused_window = self._focused_window
             coordinator = CommandCoordinator(
                 interpreter,
                 recent_utterances=recent_utterances,
+                window_observer=(
+                    lambda: observe_window(focused_window, read_active_window_token)
+                )
+                if settings.allow_desktop_control and focused_window is not None
+                else None,
             )
             detector = self._detector_factory()
             presenter = ResponsePresenter(selection.language)
@@ -528,17 +563,22 @@ class UbuntuSessionFactory:
             if (
                 speaker is not None
                 and self._audio_file is None
-                and settings.microphone_device_key is None
                 and self._echo_cancellation_factory is not None
             ):
                 candidate = self._echo_cancellation_factory()
-                if candidate.start():
+                assert configuration is not None
+                if candidate.start(
+                    configuration.device_key or settings.microphone_device_key
+                ):
                     echo_cancel = candidate
                 else:
                     _LOGGER.warning(
                         "PipeWire echo cancellation unavailable; "
                         "playback guard remains active"
                     )
+
+            if self._audio_file is None:
+                self._on_event(AudioDuplexChanged(echo_cancel is not None))
 
             def show_response(response: PresentedResponse) -> None:
                 self._on_event(response)
@@ -579,24 +619,24 @@ class UbuntuSessionFactory:
                     else PlaybackGuardInput(source, speaker)
                 )
                 options = SpeechToTextOptions(
-                        device=selection.device,
-                        language_hint=selection.language,
-                        vocabulary_hints=(
-                            spoken_names.vocabulary_hints()
-                            if spoken_names is not None
-                            and engine.capabilities.supports_vocabulary_hints
-                            else ()
-                        ),
-                        emit_partials=self._audio_file is None,
-                    )
-                pause_confirm_ms = (
-                    800 if selection.backend == "omnilingual" else 384
+                    device=selection.device,
+                    language_hint=selection.language,
+                    vocabulary_hints=(
+                        spoken_names.vocabulary_hints()
+                        if spoken_names is not None
+                        and engine.capabilities.supports_vocabulary_hints
+                        else ()
+                    ),
+                    emit_partials=self._audio_file is None,
                 )
+                pause_confirm_ms = 800 if selection.backend == "omnilingual" else 384
+
                 def on_compute_device(device: ComputeDevice) -> None:
                     self._on_event(SttDeviceReady(device))
 
                 def on_audio_ready() -> None:
                     self._on_event(AudioCaptureReady())
+
                 if self._audio_file is not None:
                     return FileSpeechPipeline(
                         file_source,
@@ -619,6 +659,11 @@ class UbuntuSessionFactory:
                     pause_confirm_ms=pause_confirm_ms,
                     on_compute_device=on_compute_device,
                     on_audio_ready=on_audio_ready,
+                    on_speech_started=(
+                        speaker.interrupt
+                        if echo_cancel is not None and speaker is not None
+                        else None
+                    ),
                 )
 
             def show_live(event: LiveSpeechEvent) -> None:
@@ -694,7 +739,7 @@ class UbuntuSessionFactory:
             )
             power_flow.set_voice_ready(
                 lambda: (
-                    echo_cancel is not None or speaker is None or not speaker.is_active
+                    echo_cancel is not None or speaker is None or not speaker.is_playing
                 )
             )
             if self._system_power is not None and self._response_speaker is None:
@@ -723,6 +768,8 @@ class UbuntuSessionFactory:
             )
             executor: ActionExecutor | None = None
             if settings.action_execution_enabled:
+                input_broker = DesktopInputBroker()
+                self._input_brokers.append(input_broker)
                 executor = self._executor_factory(installed)
                 if terminal_app_id is not None:
                     executor = PtyxisActionExecutor(
@@ -763,6 +810,7 @@ class UbuntuSessionFactory:
                         verifier=self._chat_verifier,
                         selection=chat_selection,
                         remember_pointer=settings.remember_telegram_pointer,
+                        input_broker=input_broker,
                     )
                     if chat_selection is not None:
                         chat_selection.set_completion(
@@ -779,19 +827,23 @@ class UbuntuSessionFactory:
                         identity_reader=self._focused_window,
                         allow_any_focused_app=True,
                     )
-                if (
-                    settings.allow_desktop_control
-                    and self._focused_window is not None
-                    and self._chat_verifier is not None
-                ):
+                if settings.allow_desktop_control and self._focused_window is not None:
                     executor = DesktopControlExecutor(
                         executor,
                         identity_reader=self._focused_window,
                         verifier=self._chat_verifier,
+                        confirmation=self._control_confirmation,
                     )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
-                    executor = WindowControlExecutor(executor, controller)
+                    executor = WindowControlExecutor(
+                        executor,
+                        controller,
+                        confirmation=self._control_confirmation,
+                        allowed_close_apps=frozenset(settings.allowed_close_apps),
+                        allowed_window_apps=frozenset(settings.allowed_window_apps),
+                    )
+                executor = DesktopInputExecutor(executor, input_broker)
                 if visual is not None:
                     executor = _VisualActionExecutor(executor, visual)
 
@@ -805,6 +857,7 @@ class UbuntuSessionFactory:
                 on_command_event=show_command,
                 on_action_output=show_action,
                 on_session_end=show_session_end,
+                on_timing=self._on_event,
                 scroll_focus_reader=(
                     self._focused_window
                     if settings.allow_desktop_scroll or settings.allow_desktop_control
@@ -837,7 +890,7 @@ class UbuntuSessionFactory:
                 if self._system_power is not None:
                     cleanup.callback(
                         self._system_power.set_voice_ready,
-                        lambda: speaker is None or not speaker.is_active,
+                        lambda: speaker is None or not speaker.is_playing,
                     )
                 if echo_cancel is not None:
                     cleanup.callback(echo_cancel.close)
@@ -849,3 +902,5 @@ class UbuntuSessionFactory:
                     cleanup.callback(command_server.__exit__, None, None, None)
                 if history is not None:
                     cleanup.callback(history.close)
+                if input_broker is not None:
+                    cleanup.callback(input_broker.close)

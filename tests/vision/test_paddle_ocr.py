@@ -36,7 +36,7 @@ def test_paddle_result_preserves_line_box(tmp_path: Path) -> None:
         b'"box":[10,20,140,55],"confidence":0.9}]\n'
     )
     with patch(
-        "kyrin.vision.ocr.backends.paddle.subprocess.run",
+        "kyrin.vision.ocr.backends.paddle.run_process",
         return_value=CompletedProcess([], 0, framed, b""),
     ) as run:
         result = engine.recognize(b"png", OcrOptions("fas+eng"))
@@ -54,7 +54,7 @@ def test_paddle_rejects_unpositioned_text(tmp_path: Path) -> None:
         b'"box":[0,0,0,0],"confidence":0.9}]\n'
     )
     with patch(
-        "kyrin.vision.ocr.backends.paddle.subprocess.run",
+        "kyrin.vision.ocr.backends.paddle.run_process",
         return_value=CompletedProcess([], 0, framed, b""),
     ):
         with pytest.raises(OcrInferenceError):
@@ -83,7 +83,7 @@ def test_paddle_vl_preserves_unknown_confidence(tmp_path: Path) -> None:
         b'"box":[10,20,140,55],"confidence":null}]\n'
     )
     with patch(
-        "kyrin.vision.ocr.backends.paddle.subprocess.run",
+        "kyrin.vision.ocr.backends.paddle.run_process",
         return_value=CompletedProcess([], 0, framed, b""),
     ) as run:
         result = vl.recognize(b"png", OcrOptions("eng"))

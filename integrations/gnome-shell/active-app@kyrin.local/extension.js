@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -7,6 +8,9 @@ import {WindowPicker} from './windowPicker.js';
 
 const INTERFACE_XML = `<node>
   <interface name="org.kyrin.ActiveApp">
+    <method name="GetCapabilities">
+      <arg name="manifest" type="s" direction="out"/>
+    </method>
     <method name="GetActiveApp">
       <arg name="app_id" type="s" direction="out"/>
     </method>
@@ -80,6 +84,15 @@ const INTERFACE_XML = `<node>
       <arg name="app_id" type="s" direction="in"/>
       <arg name="status" type="s" direction="out"/>
     </method>
+    <method name="PrepareWindowClose">
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="number" type="u" direction="in"/>
+      <arg name="observation" type="s" direction="out"/>
+    </method>
+    <method name="CloseConfirmedWindow">
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="status" type="s" direction="out"/>
+    </method>
     <method name="ControlAppWindow">
       <arg name="app_id" type="s" direction="in"/>
       <arg name="operation" type="s" direction="in"/>
@@ -95,15 +108,26 @@ const INTERFACE_XML = `<node>
 </node>`;
 
 export default class KyrinActiveAppExtension extends Extension {
+    // This literal belongs to the loaded module; metadata on disk may be newer.
+    GetCapabilities() {
+        return JSON.stringify({"protocol_version": 1, "build_id": "active-app@kyrin.local-2026-10-24-f20", "capabilities": ["GetActiveApp", "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer", "HasAppWindow", "CountAppWindows", "ShowAllWindows", "ShowOpenWindows", "ActivateShownOpenWindow", "CloseShownOpenWindow", "ActivateShownOpenApp", "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow", "CloseShownAppWindow", "HideAppWindows", "ActivateExistingApp", "PrepareWindowClose", "CloseConfirmedWindow", "ControlAppWindow", "GetAppWindowState"]});
+    }
+
     enable() {
+        this._pendingClose = null;
         this._picker = null;
         this._shownWindows = null;
         this._shownOpen = null;
+        this._closeFocusSignal = global.display.connect('notify::focus-window', () => {
+            this._pendingClose = null;
+        });
         this._dbusObject = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this);
         this._dbusObject.export(Gio.DBus.session, '/org/kyrin/ActiveApp');
     }
 
     disable() {
+        global.display.disconnect(this._closeFocusSignal);
+        this._closeFocusSignal = null;
         this._clearPicker();
         this._dbusObject?.unexport();
         this._dbusObject = null;
@@ -166,6 +190,7 @@ export default class KyrinActiveAppExtension extends Extension {
     }
 
     _clearPicker() {
+        this._pendingClose = null;
         this._picker?.destroy();
         this._picker = null;
         this._shownWindows = null;
@@ -223,29 +248,8 @@ export default class KyrinActiveAppExtension extends Extension {
         return 'requested';
     }
 
-    CloseShownOpenWindow(number, allowedCloseIds) {
-        if (this._shownOpen === null)
-            return 'not_shown';
-        if (!Number.isInteger(number) || number < 1 || number > this._shownOpen.length)
-            return 'stale';
-        if (!Array.isArray(allowedCloseIds) || !allowedCloseIds.every(id =>
-            typeof id === 'string' && id.endsWith('.desktop') &&
-            !id.includes('/') && !id.includes('\\')))
-            return 'unknown';
-        const {appId, token} = this._shownOpen[number - 1];
-        if (!allowedCloseIds.includes(appId))
-            return 'not_allowed';
-        const window = this._appWindows(appId)?.find(
-            item => String(item.get_stable_sequence()) === token);
-        if (!window) {
-            this._clearPicker();
-            return 'stale';
-        }
-        if (!window.can_close())
-            return 'unavailable';
-        this._clearPicker();
-        window.delete(global.display.get_current_time_roundtrip());
-        return 'requested';
+    CloseShownOpenWindow(_number, _allowedCloseIds) {
+        return 'confirmation_required';
     }
 
     ActivateShownOpenApp(appId) {
@@ -302,23 +306,8 @@ export default class KyrinActiveAppExtension extends Extension {
         return 'requested';
     }
 
-    CloseShownAppWindow(appId, number) {
-        if (appId !== 'org.gnome.Ptyxis.desktop' || this._shownWindows === null)
-            return 'not_shown';
-        if (!Number.isInteger(number) || number < 1 || number > this._shownWindows.length)
-            return 'stale';
-        const token = this._shownWindows[number - 1];
-        const window = this._appWindows(appId)?.find(
-            item => String(item.get_stable_sequence()) === token);
-        if (!window) {
-            this._clearPicker();
-            return 'stale';
-        }
-        if (!window.can_close())
-            return 'unavailable';
-        this._clearPicker();
-        window.delete(global.display.get_current_time_roundtrip());
-        return 'requested';
+    CloseShownAppWindow(_appId, _number) {
+        return 'confirmation_required';
     }
 
     HideAppWindows(appId) {
@@ -374,9 +363,87 @@ export default class KyrinActiveAppExtension extends Extension {
         });
     }
 
+    _closeCandidate(appId, number) {
+        if (number > 0) {
+            const choice = appId === ''
+                ? this._shownOpen?.[number - 1]
+                : appId === 'org.gnome.Ptyxis.desktop' && this._shownWindows
+                    ? {appId, token: this._shownWindows[number - 1]} : null;
+            if (!choice?.token)
+                return null;
+            const window = this._appWindows(choice.appId)?.find(
+                item => String(item.get_stable_sequence()) === choice.token);
+            return window ? {appId: choice.appId, window} : null;
+        }
+        const windows = this._appWindows(appId);
+        if (!windows?.length)
+            return null;
+        const focus = global.display.get_focus_window();
+        const window = windows.length === 1 ? windows[0]
+            : windows.includes(focus) ? focus : null;
+        return window ? {appId, window} : null;
+    }
+
+    PrepareWindowClose(appId, number) {
+        this._pendingClose = null;
+        if (!Number.isInteger(number) || number < 0 || number > 99)
+            return '';
+        const candidate = this._closeCandidate(appId, number);
+        if (!candidate || !candidate.window.can_close() || candidate.window.get_pid() <= 0)
+            return '';
+        // Release the Shell modal grab so the shared Qt consent buttons can
+        // be clicked. Retain only the numbered identity snapshot, never input.
+        this._picker?.destroy();
+        this._picker = null;
+        const observed = GLib.get_monotonic_time() / 1000000;
+        const observation = {
+            app_id: candidate.appId,
+            process_id: candidate.window.get_pid(),
+            window_token: String(candidate.window.get_stable_sequence()),
+            generation: GLib.uuid_string_random(),
+            observed_at: observed,
+            deadline: observed + 10,
+        };
+        this._pendingClose = {
+            observation, appId, number, window: candidate.window,
+            focus: global.display.get_focus_window(),
+            snapshot: appId === '' ? this._shownOpen : this._shownWindows,
+        };
+        return JSON.stringify(observation);
+    }
+
+    CloseConfirmedWindow(generation) {
+        const pending = this._pendingClose;
+        this._pendingClose = null; // Invalid, expired and repeated commits burn it.
+        if (!pending || generation !== pending.observation.generation ||
+            GLib.get_monotonic_time() / 1000000 >= pending.observation.deadline ||
+            global.display.get_focus_window() !== pending.focus ||
+            (pending.number > 0 && pending.snapshot !==
+                (pending.appId === '' ? this._shownOpen : this._shownWindows)))
+            return 'stale';
+        const fresh = this._closeCandidate(pending.appId, pending.number);
+        const wanted = pending.observation;
+        if (!fresh || fresh.window !== pending.window || fresh.appId !== wanted.app_id ||
+            fresh.window.get_pid() !== wanted.process_id ||
+            String(fresh.window.get_stable_sequence()) !== wanted.window_token)
+            return 'stale';
+        if (!fresh.window.can_close())
+            return 'unavailable';
+        const timestamp = global.display.get_current_time_roundtrip();
+        if (GLib.get_monotonic_time() / 1000000 >= wanted.deadline ||
+            global.display.get_focus_window() !== pending.focus)
+            return 'stale';
+        this._clearPicker();
+        // Normal WM close only: no kill, save/discard response or retry.
+        fresh.window.delete(timestamp);
+        return 'requested';
+    }
+
     ControlAppWindow(appId, operation) {
+        if (operation === 'close')
+            return ['confirmation_required', ''];
         if (![
-            'restore', 'minimize', 'close', 'maximize', 'unmaximize',
+            'restore', 'minimize', 'maximize', 'unmaximize',
             'fullscreen', 'unfullscreen',
         ].includes(operation))
             return ['unknown', ''];
@@ -394,16 +461,13 @@ export default class KyrinActiveAppExtension extends Extension {
         if (window === null)
             return ['multiple_windows', ''];
         if ((operation === 'minimize' && !window.can_minimize()) ||
-            (operation === 'maximize' && !window.can_maximize()) ||
-            (operation === 'close' && !window.can_close()))
+            (operation === 'maximize' && !window.can_maximize()))
             return ['unavailable', ''];
         const token = String(window.get_stable_sequence());
         if (operation === 'restore')
             Main.activateWindow(window, global.display.get_current_time_roundtrip());
         else if (operation === 'minimize')
             window.minimize();
-        else if (operation === 'close')
-            window.delete(global.display.get_current_time_roundtrip());
         else {
             if (operation === 'maximize')
                 window.maximize();
