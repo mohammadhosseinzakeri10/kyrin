@@ -22,7 +22,7 @@ def test_missing_pipewire_tools_leave_echo_cancellation_disabled(
 def test_stale_cleanup_preserves_sources_owned_by_a_running_kyrin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    graph = [
+    graph: list[dict[str, object]] = [
         {
             "id": 1,
             "info": {
@@ -79,7 +79,7 @@ def test_stale_cleanup_preserves_sources_owned_by_a_running_kyrin(
 def test_selected_input_maps_only_to_unique_capture_node(
     key: str, props: dict[str, str]
 ) -> None:
-    graph = [
+    graph: list[dict[str, object]] = [
         {
             "id": 42,
             "info": {
@@ -93,7 +93,9 @@ def test_selected_input_maps_only_to_unique_capture_node(
     ]
     assert PipeWireEchoCancellation.resolve_target(key, graph) == "alsa_input.usb"
     assert PipeWireEchoCancellation.resolve_target(key, graph * 2) is None
-    graph[0]["info"]["props"]["media.class"] = "Audio/Sink"
+    info = graph[0]["info"]
+    assert isinstance(info, dict)
+    info["props"]["media.class"] = "Audio/Sink"
     assert PipeWireEchoCancellation.resolve_target(key, graph) is None
 
 
@@ -107,7 +109,7 @@ def test_start_pins_capture_and_disallows_default_fallback(
     import shutil
     from io import StringIO
 
-    graph = [
+    graph: list[dict[str, object]] = [
         {
             "info": {
                 "props": {
@@ -123,10 +125,10 @@ def test_start_pins_capture_and_disallows_default_fallback(
     class Process:
         stdin = StringIO()
 
-        def poll(self):
+        def poll(self) -> None:
             return None
 
-        def wait(self, timeout):
+        def wait(self, timeout: float) -> int:
             return 0
 
     process = Process()
@@ -192,7 +194,7 @@ def test_ready_requires_capture_and_speaker_reference_links(
 ) -> None:
     aec = PipeWireEchoCancellation()
     aec._target = "selected-mic"
-    graph = [
+    graph: list[dict[str, object]] = [
         {
             "id": i,
             "type": "PipeWire:Interface:Node",
@@ -242,7 +244,7 @@ def test_default_bridge_maps_to_metadata_source_not_arbitrary_device(
     name: str,
     value: object,
 ) -> None:
-    graph = [
+    graph: list[dict[str, object]] = [
         {
             "type": "PipeWire:Interface:Metadata",
             "metadata": [

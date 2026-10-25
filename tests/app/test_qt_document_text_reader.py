@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from kyrin.app.qt.document_text_reader import (  # noqa: E402
@@ -67,7 +67,7 @@ class TimeoutEngine:
         raise DocumentOcrTimeoutError("Document OCR process exceeded four minutes")
 
 
-def _until(app: QApplication, predicate: Callable[[], bool]) -> None:
+def _until(app: QCoreApplication, predicate: Callable[[], bool]) -> None:
     deadline = monotonic() + 3
     while monotonic() < deadline:
         app.processEvents()

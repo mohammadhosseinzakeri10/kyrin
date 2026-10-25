@@ -12,13 +12,14 @@ import pytest
 
 PySide6 = pytest.importorskip("PySide6")
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Signal  # noqa: E402
-from PySide6.QtGui import QImage  # noqa: E402
+from PySide6.QtGui import QImage, QImageWriter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from kyrin.app.qt.ocr_setup import installed_ocr_engine, selected_ocr_engine
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
 from kyrin.app.qt.screen_text_reader import (
+    ReadRegion,
     ScreenTextReader,
     _chat_list_png,
     _crop_png,
@@ -109,8 +110,8 @@ def _valid_png() -> bytes:
     output = QByteArray()
     buffer = QBuffer(output)
     assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    assert image.save(buffer, "PNG")
-    return bytes(output)
+    assert QImageWriter(buffer, b"PNG").write(image)
+    return bytes(output.data())
 
 
 def _until(app: QApplication, predicate: Callable[[], bool]) -> None:
@@ -323,10 +324,11 @@ def test_fast_list_and_chat_header_crops_keep_window_coordinates(
     access.image = IdentifiedWindowImage(
         _IMAGE.platform_app_id, _IMAGE.process_id, image
     )
-    for region, expected_size, expected_left in (
+    cases: tuple[tuple[ReadRegion, tuple[int, int], int], ...] = (
         ("left_chat_list_fast", (360, 800), 0),
         ("chat_header", (700, 160), 300),
-    ):
+    )
+    for region, expected_size, expected_left in cases:
         focused = _crop_png(image, region)
         assert focused is not None
         assert QImage.fromData(focused[0]).size().toTuple() == expected_size
@@ -340,7 +342,11 @@ def test_fast_list_and_chat_header_crops_keep_window_coordinates(
         reader.completed.connect(results.append)
         try:
             assert reader.read(region=region)
-            _until(app, lambda results=results: bool(results))
+
+            def ready(current: list[IdentifiedWindowText] = results) -> bool:
+                return bool(current)
+
+            _until(app, ready)
             assert results[0].image_size == (1000, 800)
             assert results[0].result.spans[0].box.left == expected_left + 1
         finally:
@@ -497,9 +503,9 @@ def test_expired_capture_callback_never_spawns_ocr(
     from kyrin.operations import Operation, activate
 
     _app(monkeypatch)
-    callbacks = []
+    callbacks: list[Callable[[IdentifiedWindowImage | None], None]] = []
     access = FakeAccess()
-    access.capture = callbacks.append
+    monkeypatch.setattr(access, "capture", callbacks.append)
     engine = FakeOcr()
     reader = ScreenTextReader(
         cast(ScreenAccess, access), engine,

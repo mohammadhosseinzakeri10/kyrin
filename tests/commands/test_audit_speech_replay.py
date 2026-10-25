@@ -16,7 +16,12 @@ SPEC.loader.exec_module(MODULE)
 
 def _fixture(
     *, spoken: str = "Open Telegram", heard: str = "Open browser"
-) -> tuple[list[dict], tuple[CorpusItem, ...], list[dict], list[dict]]:
+) -> tuple[
+    list[dict[str, object]],
+    tuple[CorpusItem, ...],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
     expected = {
         "route": "execute",
         "steps": [{"operation": "open_app", "target": "telegram"}],

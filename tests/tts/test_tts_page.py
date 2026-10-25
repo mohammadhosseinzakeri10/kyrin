@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
 from kyrin.app.qt.translations import UiTranslations  # noqa: E402
-from kyrin.app.qt.tts_page import TtsPage  # noqa: E402
+from kyrin.app.qt.tts_page import TtsPage, _VoiceEditor  # noqa: E402
 from kyrin.app.settings import TtsSelection  # noqa: E402
 
 
@@ -51,7 +51,6 @@ def test_local_models_are_listed_and_selected_without_copying(
 def test_refresh_and_browse_buttons_update_local_model_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kyrin.app.qt import tts_page
 
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
@@ -68,7 +67,7 @@ def test_refresh_and_browse_buttons_update_local_model_selection(
     page._editors["en"].refresh.click()
     assert page.installed.count() == 2
     monkeypatch.setattr(
-        tts_page.QFileDialog,
+        QFileDialog,
         "getExistingDirectory",
         lambda *args, **kwargs: str(folder),
     )
@@ -193,7 +192,7 @@ def test_persian_piper_package_appears_in_language_tab(
     page = TtsPage(UiTranslations(tmp_path), TtsSelection(), model_root=tmp_path)
     page.add_language("fa")
     editor = page.tabs.currentWidget()
-    assert editor is not None
+    assert isinstance(editor, _VoiceEditor)
     editor.engine.setCurrentIndex(editor.engine.findData("vits"))
     assert editor.installed.count() == 2
     editor.installed.setCurrentIndex(1)
@@ -270,13 +269,16 @@ def test_preview_uses_current_speed_without_saving(
     app = QApplication.instance() or QApplication([])
     saved = TtsSelection()
     requests: list[tuple[str, str, TtsSelection]] = []
+
+    def preview(text: str, language: str, selection: TtsSelection) -> bool:
+        requests.append((text, language, selection))
+        return True
+
     page = TtsPage(
         UiTranslations(tmp_path),
         saved,
         model_root=tmp_path,
-        preview=lambda text, language, selection: (
-            requests.append((text, language, selection)) or True
-        ),
+        preview=preview,
     )
     page.speed.setValue(1.3)
     page.preview_button.click()

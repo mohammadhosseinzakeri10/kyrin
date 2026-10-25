@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from kyrin.stt.backends.whisper_server import WhisperCppServer
 from kyrin.stt.evaluation import CorpusItem
 from scripts.stt.compare_language_candidates import (
     inspect_item,
@@ -84,13 +85,16 @@ def test_same_hints_are_sent_to_every_decode_without_using_reference(
 ) -> None:
     calls: list[tuple[str, tuple[str, ...]]] = []
 
-    class FakeServer:
+    class FakeServer(WhisperCppServer):
+        def __init__(self) -> None:
+            """Only the two overridden inference methods are used; no server starts."""
+
         def _request_inference(
             self,
             pcm: bytes,
             language: str,
             response_format: str,
-            hints: tuple[str, ...],
+            hints: tuple[str, ...] = (),
         ) -> dict[str, object]:
             calls.append((language, hints))
             return {
@@ -100,7 +104,7 @@ def test_same_hints_are_sent_to_every_decode_without_using_reference(
             }
 
         def transcribe(
-            self, pcm: bytes, language: str, *, hints: tuple[str, ...]
+            self, pcm: bytes, language: str, *, hints: tuple[str, ...] = ()
         ) -> str:
             calls.append((language, hints))
             return "Open Telegram"
@@ -121,4 +125,6 @@ def test_same_hints_are_sent_to_every_decode_without_using_reference(
         ("en", ("مرورگر", "تلگرام")),
         ("fa", ("مرورگر", "تلگرام")),
     ]
-    assert report["auto"]["proposal_score"] == "correct_action"
+    automatic = report["auto"]
+    assert isinstance(automatic, dict)
+    assert automatic["proposal_score"] == "correct_action"

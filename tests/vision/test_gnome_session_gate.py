@@ -521,7 +521,7 @@ def test_gnome_extension_requires_the_app_owned_session() -> None:
     assert "permission gate: passed" in result.stdout
 
 
-@pytest.mark.parametrize("case", {**_VALIDATION_CASES, **_REGION_CASES})
+@pytest.mark.parametrize("case", tuple(_VALIDATION_CASES | _REGION_CASES))
 def test_gnome_capture_validation_compares_decoded_pixels(case: str) -> None:
     gjs = shutil.which("gjs")
     if gjs is None:

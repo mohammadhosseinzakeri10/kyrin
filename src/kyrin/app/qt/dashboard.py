@@ -62,6 +62,8 @@ def _load_particles(
     limit: int,
 ) -> tuple[tuple[_Particle, ...], tuple[tuple[QColor, QColor], ...]]:
     """Use the Git artwork for light modes and the approved image for Heavy."""
+    particles: list[_Particle] = []
+    palette: list[tuple[QColor, QColor]] = []
     if limit != GPU_HEAVY_EMBLEM_POINTS:
         if limit not in {CPU_EMBLEM_POINTS, GPU_MEDIUM_EMBLEM_POINTS}:
             raise ValueError("Unsupported particle count")
@@ -69,8 +71,6 @@ def _load_particles(
             PARTICLES.read_text(encoding="utf-8")
         )
         rng = random.Random(7107)
-        particles: list[_Particle] = []
-        palette: list[tuple[QColor, QColor]] = []
         palette_indices: dict[tuple[int, int, int], int] = {}
         for x, y, red_value, green_value, blue_value in samples[:limit]:
             red, green, blue = int(red_value), int(green_value), int(blue_value)
@@ -112,7 +112,7 @@ def _load_particles(
         Qt.TransformationMode.SmoothTransformation,
     )
     position_rng = random.Random(895_800)
-    samples = (
+    image_samples = (
         (
             (x + 0.5 + (position_rng.random() - 0.5) * 0.9) / resolution,
             (y + 0.5 + (position_rng.random() - 0.5) * 0.9) / resolution,
@@ -124,11 +124,7 @@ def _load_particles(
         > (y * resolution + x) * limit // (resolution * resolution)
     )
     rng = random.Random(7107)
-    particles: list[_Particle] = []
-    palette: list[tuple[QColor, QColor]] = []
-    palette_indices: dict[tuple[int, int, int], int] = {}
-    for x, y, rgb in samples:
-        red, green, blue = rgb >> 16, (rgb >> 8) & 255, rgb & 255
+    for x, y, rgb in image_samples:
         palette_index = 0
         particles.append(
             _Particle(

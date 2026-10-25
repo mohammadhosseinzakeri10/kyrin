@@ -22,7 +22,7 @@ def test_cpu_qwen_budget_reserves_half_of_available_ram() -> None:
 def test_qwen_worker_sets_cpu_limit_before_loading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kyrin.tts import worker
+    import kyrin.tts.worker as worker
 
     steps: list[str] = []
 

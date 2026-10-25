@@ -1,6 +1,7 @@
 """The application runtime routes repeated speech without a terminal or microphone."""
 
 from collections.abc import Generator
+from pathlib import Path
 from threading import Event, Thread
 
 import pytest
@@ -16,6 +17,7 @@ from kyrin.actions.models import (
     ActionResult,
 )
 from kyrin.actions.queued_dispatch import FinalActionCommand
+from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
@@ -31,6 +33,7 @@ from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import (
+    InertPowerBackend,
     PowerAction,
     PowerPrompt,
     PowerStage,
@@ -181,13 +184,20 @@ def test_final_negation_cannot_execute_partial_positive_command() -> None:
     assert actions == []
 
 
-def test_only_final_raw_utterances_enter_history_and_context(tmp_path) -> None:
+def test_only_final_raw_utterances_enter_history_and_context(tmp_path: Path) -> None:
     history = SqliteConversationHistory(tmp_path / "conversation.sqlite3")
     seen_context: list[tuple[str, ...]] = []
     partial_seen = Event()
 
     class ContextReader:
-        def interpret(self, text, *, language, context, pending):
+        def interpret(
+            self,
+            text: str,
+            *,
+            language: str | None,
+            context: CommandContext,
+            pending: PendingCommandClarification | None,
+        ) -> Interpretation:
             seen_context.append(context.recent_utterances)
             if not context.is_final_transcript:
                 partial_seen.set()
@@ -226,13 +236,11 @@ def test_only_final_raw_utterances_enter_history_and_context(tmp_path) -> None:
     history.close()
 
 
-def test_system_dialogue_discards_an_unfinished_app_fragment() -> None:
-    class FakePowerFlow:
-        def on_final_speech(self, text: str) -> bool:
-            return text == "Power off"
-
-        def cancel(self) -> None:
-            pass
+def test_system_dialogue_discards_an_unfinished_app_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    power = SystemPowerFlow(InertPowerBackend(), lambda _: None, enabled=True)
+    monkeypatch.setattr(power, "on_final_speech", lambda text: text == "Power off")
 
     actions: list[ActionDecision | ActionFeedback] = []
     runtime = LiveCommandRuntime(
@@ -256,26 +264,25 @@ def test_system_dialogue_discards_an_unfinished_app_fragment() -> None:
         on_command_event=lambda event: None,
         on_action_output=actions.append,
         on_session_end=lambda event: None,
-        system_power=FakePowerFlow(),
+        system_power=power,
     )
     runtime.run()
     assert actions == []
 
 
-def test_telegram_choice_answer_bypasses_command_interpreter() -> None:
-    class FakeSelection:
-        def __init__(self) -> None:
-            self.answers: list[str] = []
-            self.cancelled = False
+def test_telegram_choice_answer_bypasses_command_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: list[str] = []
+    cancelled = Event()
+    choice = TelegramChatSelection(lambda _: None, lambda _: None)
 
-        def on_final_speech(self, text: str) -> bool:
-            self.answers.append(text)
-            return text == "own chat"
+    def choose(text: str) -> bool:
+        answers.append(text)
+        return text == "own chat"
 
-        def cancel(self) -> None:
-            self.cancelled = True
-
-    choice = FakeSelection()
+    monkeypatch.setattr(choice, "on_final_speech", choose)
+    monkeypatch.setattr(choice, "cancel", cancelled.set)
     commands: list[CommandEvent] = []
     runtime = LiveCommandRuntime(
         FakeController(
@@ -292,8 +299,8 @@ def test_telegram_choice_answer_bypasses_command_interpreter() -> None:
         telegram_selection=choice,
     )
     runtime.run()
-    assert choice.answers == ["own chat"]
-    assert choice.cancelled
+    assert answers == ["own chat"]
+    assert cancelled.is_set()
     assert commands == []
 
 

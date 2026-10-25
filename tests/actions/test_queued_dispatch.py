@@ -28,6 +28,11 @@ def command(segment: int) -> CommandResolution:
     )
 
 
+def _append_notice(outputs: list[ActionNotice], item: ActionOutput) -> None:
+    assert isinstance(item, ActionNotice)
+    outputs.append(item)
+
+
 def output_for(item: FinalActionCommand) -> ActionNotice:
     assert isinstance(item, CommandResolution)
     assert item.intent is not None
@@ -131,7 +136,9 @@ def test_natural_close_drains_pending_commands() -> None:
             assert release.wait(2)
         return (output_for(item),)
 
-    worker = QueuedActionDispatcher(process, outputs.append, max_queued=2)
+    worker = QueuedActionDispatcher(
+        process, lambda item: _append_notice(outputs, item), max_queued=2
+    )
     worker.start()
     assert worker.submit(command(0)) is None
     assert started.wait(1)
@@ -173,7 +180,9 @@ def test_finite_source_waits_for_queue_capacity_instead_of_dropping_command() ->
             assert release.wait(2)
         return (output_for(item),)
 
-    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker = QueuedActionDispatcher(
+        process, lambda item: _append_notice(outputs, item), max_queued=1
+    )
     worker.start()
     assert worker.submit(command(0)) is None
     assert started.wait(1)
@@ -210,7 +219,9 @@ def test_generation_change_cancels_unstarted_and_late_old_commands() -> None:
             assert release.wait(2)
         return (output_for(item),)
 
-    worker = QueuedActionDispatcher(process, outputs.append, max_queued=2)
+    worker = QueuedActionDispatcher(
+        process, lambda item: _append_notice(outputs, item), max_queued=2
+    )
     worker.start()
     generation = worker.generation
     assert worker.submit(command(0), generation=generation) is None
@@ -249,7 +260,9 @@ def test_generation_change_releases_finite_source_waiting_for_capacity(
             assert release.wait(2)
         return (output_for(item),)
 
-    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker = QueuedActionDispatcher(
+        process, lambda item: _append_notice(outputs, item), max_queued=1
+    )
     worker.start()
     generation = worker.generation
     assert worker.submit(command(0), generation=generation) is None
@@ -299,7 +312,9 @@ def test_drain_deadline_cancels_pending_without_killing_active_action() -> None:
             finished.set()
         return (output_for(item),)
 
-    worker = QueuedActionDispatcher(process, outputs.append, max_queued=1)
+    worker = QueuedActionDispatcher(
+        process, lambda item: _append_notice(outputs, item), max_queued=1
+    )
     worker.start()
     assert worker.submit(command(0)) is None
     assert started.wait(1)

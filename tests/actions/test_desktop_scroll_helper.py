@@ -14,8 +14,8 @@ from kyrin.actions.platforms import desktop_scroll
 def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     gi = ModuleType("gi")
     repository = ModuleType("gi.repository")
-    repository.Gio = ModuleType("Gio")
-    repository.GLib = ModuleType("GLib")
+    monkeypatch.setattr(repository, "Gio", ModuleType("Gio"), raising=False)
+    monkeypatch.setattr(repository, "GLib", ModuleType("GLib"), raising=False)
     monkeypatch.setitem(sys.modules, "gi", gi)
     monkeypatch.setitem(sys.modules, "gi.repository", repository)
     path = Path(desktop_scroll.__file__).with_name("desktop_scroll_helper.py")
@@ -40,7 +40,15 @@ def test_smooth_scroll_sends_small_axis_events(
     calls: list[tuple[str, object]] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, payload, *_rest):
+        def call_sync(
+            self,
+            _bus: str,
+            _object: str,
+            _interface: str,
+            method: str,
+            payload: object,
+            *_rest: object,
+        ) -> None:
             calls.append((method, payload))
 
     assert helper._scroll(
@@ -49,8 +57,12 @@ def test_smooth_scroll_sends_small_axis_events(
     )
     axes = [payload for method, payload in calls if method == "NotifyPointerAxis"]
     assert len(axes) == 12
-    assert all(payload[1][3] == 8.0 for payload in axes)
-    assert axes[-1][1][1]["finish"] == ("b", True)
+    for payload in axes:
+        assert isinstance(payload, tuple)
+        assert payload[1][3] == 8.0
+    last = axes[-1]
+    assert isinstance(last, tuple)
+    assert last[1][1]["finish"] == ("b", True)
     assert not any(method == "NotifyPointerAxisDiscrete" for method, _ in calls)
 
 
@@ -72,7 +84,9 @@ def test_smooth_scroll_stops_if_focus_changes(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_rest):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_rest: object
+        ) -> None:
             calls.append(method)
 
     assert not helper._scroll(
@@ -95,7 +109,9 @@ def test_chat_scroll_aims_inside_telegram_conversation(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_rest):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_rest: object
+        ) -> None:
             calls.append(method)
 
     assert helper._scroll(
@@ -119,7 +135,9 @@ def test_same_process_window_switch_stops_reused_session_input(
     calls = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_args):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_args: object
+        ) -> None:
             calls.append(method)
 
     assert not helper._scroll(Bus(), "/same-session", expected,

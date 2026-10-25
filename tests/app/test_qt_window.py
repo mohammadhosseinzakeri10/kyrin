@@ -218,7 +218,7 @@ def test_late_portal_grant_completion_does_not_restore_revoked_permission(
     monkeypatch: pytest.MonkeyPatch,
     kind: str,
 ) -> None:
-    from types import SimpleNamespace
+    from kyrin.app.qt.input_access import InputSetupJob
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     window = _window(
@@ -232,7 +232,7 @@ def test_late_portal_grant_completion_does_not_restore_revoked_permission(
         "control": ("desktop_control", "_control_grant_process"),
     }[kind]
     calls = []
-    job = SimpleNamespace(capability=capability, deleteLater=lambda: None)
+    job = InputSetupJob(window._input_sessions, capability, window)
     setattr(window, attribute, job)
     monkeypatch.setattr(
         window._input_sessions, "disconnect", lambda **kwargs: calls.append(kwargs)
@@ -829,8 +829,9 @@ def test_whisper_gpu_choice_is_saved_when_gpu_runtime_is_available(
             window.device_combo.findData(DevicePreference.GPU.value)
         )
         window.apply_button.click()
-        assert store.load().stt is not None
-        assert store.load().stt.device is DevicePreference.GPU
+        loaded = store.load()
+        assert loaded.stt is not None
+        assert loaded.stt.device is DevicePreference.GPU
         window._on_event(SttDeviceReady(ComputeDevice.GPU))
         assert "GPU" in window.active_device_label.text()
     finally:
@@ -1175,7 +1176,9 @@ def test_applying_model_change_stops_old_session_before_restart(
     window = _window(settings, store, controller)
     try:
         window.start_initial_session()
-        _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        _pump_until(
+            application, lambda: bool(sessions) and sessions[0].running.is_set()
+        )
         controller.set_commands_active(commands_active)
         window.model_path.setText(str(second))
         window.apply_button.click()
@@ -1235,7 +1238,9 @@ def test_close_minimizes_without_stopping_listening(
     try:
         window.show()
         window.start_initial_session()
-        _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        _pump_until(
+            application, lambda: bool(sessions) and sessions[0].running.is_set()
+        )
         window.close()
         application.processEvents()
         assert window.isMinimized()
@@ -1842,7 +1847,9 @@ def test_action_permission_change_restarts_running_session(
     )
     try:
         window.start_initial_session()
-        _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        _pump_until(
+            application, lambda: bool(sessions) and sessions[0].running.is_set()
+        )
         window.actions_page.apps.item(0).setCheckState(Qt.CheckState.Checked)
         window.actions_page.enabled_checkbox.setChecked(True)
         assert not store.path.exists()

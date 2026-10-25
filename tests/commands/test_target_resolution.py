@@ -1,6 +1,6 @@
 """Proposed model targets cannot bypass catalog or context checks."""
 
-from kyrin.commands.app_names import SpokenAppCandidate, SpokenAppMatch
+from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate, SpokenAppMatch
 from kyrin.commands.models import CommandContext
 from kyrin.commands.target_resolution import (
     SemanticTargetResolver,
@@ -18,6 +18,9 @@ from kyrin.commands.understanding import (
 
 
 class StubAppNames:
+    def model_options(self) -> tuple[ModelAppOption, ...]:
+        return ()
+
     def resolve(self, spoken_name: str) -> SpokenAppMatch:
         names = {
             "Telegram": SpokenAppMatch(

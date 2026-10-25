@@ -21,7 +21,7 @@ from kyrin.vision.text_reader import IdentifiedWindowText
 def _observation(
     *, left: int = 700, top: int = 40, duplicate: bool = False, query: bool = False
 ) -> IdentifiedWindowText:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("Saved", TextBox(left, top, 60, 24), 0.88),
         RecognizedText("Messages", TextBox(left + 67, top, 105, 24), 0.82),
     )
@@ -113,7 +113,7 @@ def test_visible_chat_titles_require_time_and_preview_anchors() -> None:
 
 
 def test_visible_chat_rejects_preview_and_active_search_field() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("Search", TextBox(60, 45, 70, 16), 0.90),
         RecognizedText("Alice", TextBox(70, 200, 55, 18), 0.90),
         RecognizedText("8:12", TextBox(455, 200, 42, 16), 0.82),
@@ -536,7 +536,7 @@ def test_search_query_requires_exact_text_in_left_input_field() -> None:
 
 
 def test_chat_title_matching_ignores_latin_letter_case() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("My", TextBox(700, 40, 35, 24), 0.9),
         RecognizedText("Mother", TextBox(742, 40, 85, 24), 0.9),
     )
@@ -693,7 +693,7 @@ def test_observed_telegram_geometry_keeps_global_rows_numbered() -> None:
 
 
 def test_low_confidence_query_still_locates_high_confidence_rows() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("My", TextBox(67, 42, 17, 13), 0.05),
         RecognizedText("Mother", TextBox(91, 42, 44, 13), 0.08),
         RecognizedText("My", TextBox(69, 92, 17, 13), 0.94),
@@ -714,7 +714,7 @@ def test_low_confidence_query_still_locates_high_confidence_rows() -> None:
 
 
 def test_missing_query_ocr_can_use_unique_first_chat_row() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("My", TextBox(69, 92, 17, 13), 0.94),
         RecognizedText("Mother", TextBox(91, 92, 44, 13), 0.95),
         RecognizedText("My", TextBox(155, 244, 17, 13), 0.94),
@@ -733,7 +733,7 @@ def test_missing_query_ocr_can_use_unique_first_chat_row() -> None:
 
 
 def test_two_local_chats_are_separated_from_global_results_by_section_header() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("My", TextBox(67, 42, 17, 13), 0.9),
         RecognizedText("Mother", TextBox(91, 42, 44, 13), 0.9),
         RecognizedText("My", TextBox(69, 92, 17, 13), 0.94),
@@ -809,7 +809,7 @@ def test_preview_text_is_not_numbered_as_a_second_chat() -> None:
 
 
 def test_global_only_results_require_visible_section_heading() -> None:
-    spans = (
+    spans: tuple[RecognizedText, ...] = (
         RecognizedText("My", TextBox(67, 45, 17, 13), 0.93),
         RecognizedText("Mother", TextBox(91, 45, 44, 13), 0.92),
         RecognizedText("results", TextBox(100, 203, 50, 13), 0.90),

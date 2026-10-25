@@ -151,9 +151,9 @@ def test_wait_deadline_and_operation_cancellation_preserve_capacity() -> None:
 
 def test_resource_wait_and_run_reuse_content_free_timing_scope() -> None:
     from kyrin.actions.models import ActionKey
-    from kyrin.timing import TimingScope, timing_scope
+    from kyrin.timing import TimingEvent, TimingScope, timing_scope
 
-    events = []
+    events: list[TimingEvent] = []
     resources = ModelResources(memory=lambda: MemorySnapshot())
     with timing_scope(TimingScope("session", ActionKey(1, 2), events.append)):
         with resources.use(Workload.COMMAND):

@@ -913,21 +913,19 @@ def test_split_open_chat_cannot_join_late_or_negated_name() -> None:
     )
     coordinator.observe(update(0, "Open chat", TranscriptStatus.FINAL))
     now[0] = 5.0
-    assert (
-        coordinator.observe(
-            update(1, "Hunter VPN", TranscriptStatus.FINAL),
-            observed_active_app="telegram",
-        )[0].intent
-        is None
-    )
+    resolved = coordinator.observe(
+        update(1, "Hunter VPN", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent is None
     coordinator.observe(update(2, "Open chat", TranscriptStatus.FINAL))
-    assert (
-        coordinator.observe(
-            update(3, "Do not open chat Hunter VPN", TranscriptStatus.FINAL),
-            observed_active_app="telegram",
-        )[0].intent
-        is None
-    )
+    resolved = coordinator.observe(
+        update(3, "Do not open chat Hunter VPN", TranscriptStatus.FINAL),
+        observed_active_app="telegram",
+    )[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent is None
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,9 @@ import pytest
 from scripts.stt.summarize_language_safety import summarize
 
 
-def _case(recording_id: str, speaker_id: str, *, negative: bool) -> tuple[dict, dict]:
+def _case(
+    recording_id: str, speaker_id: str, *, negative: bool
+) -> tuple[dict[str, object], dict[str, object]]:
     expected = (
         {
             "route": "no_action",
@@ -22,7 +24,7 @@ def _case(recording_id: str, speaker_id: str, *, negative: bool) -> tuple[dict, 
         }
     )
     reference = "Do not open Telegram" if negative else "Open Telegram"
-    link = {
+    link: dict[str, object] = {
         "recording_id": recording_id,
         "speaker_id": speaker_id,
         "spoken_reference": reference,
@@ -40,7 +42,7 @@ def _case(recording_id: str, speaker_id: str, *, negative: bool) -> tuple[dict, 
         },
         "proposal_score": "unsafe_action" if negative else "correct_action",
     }
-    row = {
+    row: dict[str, object] = {
         "id": recording_id,
         "spoken_language": "en",
         "reference": reference,
@@ -59,26 +61,33 @@ def test_safety_summary_keeps_speaker_coverage_and_unavailable_separate() -> Non
         {"model": {"results": [positive, negative]}},
         {"positive": positive_link, "negative": negative_link},
     )["model"]
+    assert isinstance(summary, dict)
+    conditions = summary["conditions"]
+    by_speaker = summary["by_speaker"]
+    assert isinstance(conditions, dict)
+    assert isinstance(by_speaker, dict)
     assert summary["speakers"] == 2
-    assert summary["conditions"]["auto"] == {
+    assert conditions["auto"] == {
         "missed_action": 1,
         "no_action_or_abstention": 1,
     }
-    assert summary["conditions"]["en"] == {
+    assert conditions["en"] == {
         "correct_action": 1,
         "unsafe_action": 1,
     }
-    assert summary["conditions"]["restricted"] == {
+    assert conditions["restricted"] == {
         "correct_action": 1,
         "unavailable": 1,
     }
-    assert summary["by_speaker"]["speaker-02"]["en"] == {"unsafe_action": 1}
+    assert by_speaker["speaker-02"]["en"] == {"unsafe_action": 1}
 
 
 def test_summary_rejects_score_or_reference_drift() -> None:
     link, row = _case("one", "speaker-01", negative=False)
     bad = deepcopy(row)
-    bad["fixed"]["en"]["proposal_score"] = "missed_action"
+    fixed = bad["fixed"]
+    assert isinstance(fixed, dict)
+    fixed["en"]["proposal_score"] = "missed_action"
     with pytest.raises(ValueError, match="score drift"):
         summarize({"model": {"results": [bad]}}, {"one": link})
     bad = deepcopy(row)

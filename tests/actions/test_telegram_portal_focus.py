@@ -3,8 +3,10 @@
 import importlib.util
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import NoReturn
 
 import pytest
 
@@ -17,8 +19,8 @@ from tests.desktop.test_backend_protocol import bus_reply
 def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     gi = ModuleType("gi")
     repository = ModuleType("gi.repository")
-    repository.Gio = ModuleType("Gio")
-    repository.GLib = ModuleType("GLib")
+    monkeypatch.setattr(repository, "Gio", ModuleType("Gio"), raising=False)
+    monkeypatch.setattr(repository, "GLib", ModuleType("GLib"), raising=False)
     monkeypatch.setitem(sys.modules, "gi", gi)
     monkeypatch.setitem(sys.modules, "gi.repository", repository)
     path = Path(telegram.__file__).with_name("telegram_portal_helper.py")
@@ -26,7 +28,10 @@ def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    def handshake_transport(args, **kwargs):
+
+    def handshake_transport(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         assert args[-1] == "GetCapabilities", "unexpected unmocked desktop call"
         return bus_reply(
             "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer",
@@ -88,7 +93,7 @@ def test_keyboard_action_borrows_live_session_without_start_or_close(
     )
 
     class Borrowed:
-        def close(self):
+        def close(self) -> None:
             pass
 
     monkeypatch.setattr(helper, "shared_session", lambda devices: (Borrowed(), "/live"))
@@ -112,7 +117,9 @@ def test_pointer_click_requires_matching_window_geometry_and_position(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_args):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_args: object
+        ) -> None:
             calls.append(method)
 
     helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
@@ -168,7 +175,9 @@ def test_pointer_accepts_first_chat_row_but_rejects_search_field(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_args):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_args: object
+        ) -> None:
             calls.append(method)
 
     helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
@@ -220,7 +229,7 @@ def test_pointer_does_not_click_when_geometry_differs(
     )
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("pointer input must be blocked")
 
     assert not helper._click_verified_box(
@@ -252,10 +261,16 @@ def test_telegram_click_uses_shared_capture_geometry(
     monkeypatch.setattr(helper, "_window_and_pointer", lambda: next(observations))
     monkeypatch.setattr(helper, "_focused_window_token", lambda: "window-7")
     monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
-    validations = []
+    validations: list[tuple[str, tuple[tuple[int, int, int, int], ...]]] = []
+
+    def validate(
+        capture_id: str, regions: tuple[tuple[int, int, int, int], ...]
+    ) -> bool:
+        validations.append((capture_id, regions))
+        return True
     monkeypatch.setattr(
         helper, "_capture_still_current",
-        lambda capture_id, regions: validations.append((capture_id, regions)) or True,
+        validate,
     )
     monkeypatch.setattr(helper, "sleep", lambda _seconds: None)
     helper.GLib.Variant = lambda _signature, value: value
@@ -263,7 +278,15 @@ def test_telegram_click_uses_shared_capture_geometry(
     calls: list[object] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, arguments, *_rest):
+        def call_sync(
+            self,
+            _bus: str,
+            _object: str,
+            _interface: str,
+            method: str,
+            arguments: object,
+            *_rest: object,
+        ) -> None:
             calls.append((method, arguments))
 
     assert helper._click_verified_box(
@@ -350,7 +373,9 @@ def test_telegram_rejects_same_pid_new_window_before_button(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_rest):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_rest: object
+        ) -> None:
             calls.append(method)
 
     assert not helper._click_verified_box(
@@ -411,11 +436,15 @@ def test_pointer_action_preserves_geometry_on_borrowed_session(
         "shared_session",
         lambda _: (SimpleNamespace(close=lambda: None), "/live"),
     )
-    checked = []
+    checked: list[dict[str, object]] = []
+
+    def click(*args: object, **kwargs: object) -> bool:
+        checked.append(kwargs)
+        return True
     monkeypatch.setattr(
         helper,
         "_click_verified_box",
-        lambda *args, **kwargs: checked.append(kwargs) or True,
+        click,
     )
     assert helper.main() == 0
     assert checked[0]["geometry"] == geometry
@@ -460,7 +489,9 @@ def test_actions_without_setup_do_not_request_control_portal(
     helper.GLib.Variant = lambda signature, value: (signature, value)
     calls: list[str] = []
 
-    def request(_connection, method, _arguments, _timeout):
+    def request(
+        _connection: object, method: str, _arguments: object, _timeout: int
+    ) -> dict[str, str]:
         calls.append(method)
         return {"session_handle": "/test/session"}
 
@@ -506,7 +537,7 @@ def test_telegram_rejects_missing_target_or_outside_evidence_before_input(
         (0, 0, 0, 0), (0, 0), (1, 1), "window-7", "capture-1", 100.0,
     )
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("invalid evidence must not dispatch input")
 
     assert not helper._click_verified_box(
@@ -538,44 +569,50 @@ def test_portal_request_timeout_closes_request_and_ignores_late_response(
 ) -> None:
     from kyrin.actions.platforms.helper_lifecycle import HelperLifetime
 
-    timers = []
+    timers: list[tuple[int, Callable[[], bool]]] = []
     replies = []
     unsubscribed = []
     calls = []
-    path = []
+    path: list[str] = []
 
     class Loop:
-        def run(self):
+        def run(self) -> None:
             timers[0][1]()
 
-        def quit(self):
+        def quit(self) -> None:
             replies.append("quit")
 
     class Reply:
-        def unpack(self):
+        def unpack(self) -> tuple[str]:
             return (path[0],)
 
     class Bus:
-        def get_unique_name(self):
+        def get_unique_name(self) -> str:
             return ":1.123"
 
-        def signal_subscribe(self, *args):
-            path.append(args[3])
-            self.late_response = args[-1]
+        def signal_subscribe(self, *args: object) -> int:
+            request_path = args[3]
+            callback = args[-1]
+            assert isinstance(request_path, str)
+            assert callable(callback)
+            path.append(request_path)
+            self.late_response = callback
             return 123
 
-        def signal_unsubscribe(self, identifier):
+        def signal_unsubscribe(self, identifier: int) -> None:
             unsubscribed.append(identifier)
 
-        def call_sync(self, *args):
+        def call_sync(self, *args: object) -> object:
             calls.append(args)
             return Reply()
 
     bus = Bus()
     helper.GLib.MainLoop = Loop
-    helper.GLib.timeout_add = lambda duration, callback: (
-        timers.append((duration, callback)) or 1
-    )
+    def add_timeout(duration: int, callback: Callable[[], bool]) -> int:
+        timers.append((duration, callback))
+        return 1
+
+    helper.GLib.timeout_add = add_timeout
     helper.GLib.source_remove = lambda identifier: None
     helper.GLib.Variant = lambda signature, value: value
     helper.GLib.VariantType = type(
@@ -596,7 +633,7 @@ def test_portal_request_timeout_closes_request_and_ignores_late_response(
         assert unsubscribed == [123]
 
         class Late:
-            def unpack(self):
+            def unpack(self) -> NoReturn:
                 pytest.fail("a completed request must ignore late response data")
 
         bus.late_response(None, None, None, None, None, Late())

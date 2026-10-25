@@ -50,7 +50,9 @@ def test_closing_private_server_unloads_model_before_termination(
     assert events == ["unload", "terminate", "wait"]
     assert request_data[0].full_url == "http://127.0.0.1:12345/api/generate"
     assert request_data[0].get_method() == "POST"
-    assert json.loads(request_data[0].data or b"{}") == {
+    data = request_data[0].data
+    assert isinstance(data, bytes)
+    assert json.loads(data) == {
         "model": "command-model",
         "prompt": "",
         "keep_alive": 0,

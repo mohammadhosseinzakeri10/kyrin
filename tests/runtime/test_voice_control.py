@@ -112,7 +112,7 @@ def test_standby_can_turn_microphone_off_without_resuming_commands() -> None:
     )
 
     class Source:
-        def events(self):
+        def events(self) -> Generator[SpeechRuntimeEvent]:
             yield from transcript
 
         def stop(self) -> None:

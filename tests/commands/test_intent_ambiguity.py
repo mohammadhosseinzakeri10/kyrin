@@ -125,6 +125,7 @@ def test_invalid_intent_choice_keeps_question(tmp_path: Path, answer: str) -> No
 
     result = coordinator.observe(_final(1, answer))
     assert result[0] == CommandResolution(1, None, language="en")
+    assert isinstance(result[1], ResponseRequest)
     assert result[1].kind is ResponseKind.CHOOSE_APP_OR_CHAT
     assert isinstance(coordinator.pending_clarification, PendingIntentClarification)
 
@@ -185,8 +186,10 @@ def test_persian_numbered_intent_choices(tmp_path: Path, answer: str) -> None:
         observed_active_app="telegram",
     )
     if answer.endswith(("یک", "۱")):
+        assert isinstance(result[0], CommandResolution)
         assert result[0].intent == CommandIntent(CommandKind.OPEN_APP, "ali_chat")
     else:
+        assert isinstance(result[0], CommandResolution)
         assert result[0].intent == CommandIntent(
             CommandKind.OPEN_CHAT, "علی", "telegram"
         )

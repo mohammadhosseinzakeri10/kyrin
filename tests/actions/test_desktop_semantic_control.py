@@ -147,10 +147,10 @@ class Owner:
 def semantic(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     gi = ModuleType("gi")
     repository: Any = ModuleType("gi.repository")
-    repository.Gio = ModuleType("Gio")
-    repository.GLib = ModuleType("GLib")
+    monkeypatch.setattr(repository, "Gio", ModuleType("Gio"), raising=False)
+    monkeypatch.setattr(repository, "GLib", ModuleType("GLib"), raising=False)
     repository.GLib.Error = RuntimeError
-    repository.Gio.DBusConnection = object
+    monkeypatch.setattr(repository.Gio, "DBusConnection", object, raising=False)
     monkeypatch.setitem(sys.modules, "gi", gi)
     monkeypatch.setitem(sys.modules, "gi.repository", repository)
     path = Path(desktop_control.__file__).with_name("desktop_control_helper.py")
@@ -159,7 +159,9 @@ def semantic(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
 
-    def handshake_transport(args, **kwargs):
+    def handshake_transport(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         assert args[-1] == "GetCapabilities", "unexpected unmocked desktop call"
         return bus_reply(
             "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer",

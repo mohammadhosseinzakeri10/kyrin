@@ -2,7 +2,7 @@
 
 import pytest
 
-from kyrin.commands.app_names import SpokenAppCandidate, SpokenAppMatch
+from kyrin.commands.app_names import ModelAppOption, SpokenAppCandidate, SpokenAppMatch
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.demo_interpreter import DemoCommandInterpreter
 from kyrin.commands.models import (
@@ -109,6 +109,12 @@ def test_negation_in_second_clause_never_makes_a_plan() -> None:
 
 def test_approximate_app_name_in_plan_never_executes_a_fragment() -> None:
     class NearMatchResolver:
+        def model_options(self) -> tuple[ModelAppOption, ...]:
+            return ()
+
+        def suggest(self, spoken_name: str) -> SpokenAppMatch:
+            return self.resolve(spoken_name)
+
         def resolve(self, _spoken_name: str) -> SpokenAppMatch:
             return SpokenAppMatch((SpokenAppCandidate("telegram", "Telegram"),))
 

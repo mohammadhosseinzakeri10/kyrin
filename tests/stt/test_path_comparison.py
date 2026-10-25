@@ -5,6 +5,7 @@ from pathlib import Path
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
+from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, SpeechToTextOptions
 from kyrin.stt.evaluation import CorpusItem
 from kyrin.stt.path_comparison import WavReplayInput, compare_item
@@ -57,6 +58,10 @@ class TurnSession:
 
 
 class Engine:
+    capabilities = SpeechToTextCapabilities(
+        frozenset({ComputeDevice.CPU}), frozenset({"en"}), True, False
+    )
+
     def open_session(self, options: SpeechToTextOptions) -> TurnSession:
         return TurnSession()
 
@@ -77,11 +82,15 @@ def test_same_wav_distinguishes_direct_stt_from_vad_rejection(tmp_path: Path) ->
         CorpusItem("case", path, "en", "Open Telegram"),
         options=SpeechToTextOptions(language_hint="en"),
     )
-    assert report["direct"]["transcript"] == "Open Telegram"
-    assert report["direct"]["cer"] == 0
-    assert report["live"]["transcript"] == ""
-    assert report["live"]["speech_starts"] == 0
-    assert report["live"]["cer"] == 1
+    direct = report["direct"]
+    live = report["live"]
+    assert isinstance(direct, dict)
+    assert isinstance(live, dict)
+    assert direct["transcript"] == "Open Telegram"
+    assert direct["cer"] == 0
+    assert live["transcript"] == ""
+    assert live["speech_starts"] == 0
+    assert live["cer"] == 1
 
 
 def test_replay_input_rejects_invalid_format(tmp_path: Path) -> None:

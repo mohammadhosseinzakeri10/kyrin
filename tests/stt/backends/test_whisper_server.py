@@ -1,5 +1,6 @@
 """The local whisper.cpp launcher must not silently claim GPU execution."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,7 @@ def test_server_flags_and_cuda_confirmation(
             stderr.write(startup_log)
         return ExitedProcess()
 
-    monkeypatch.setattr(whisper_server.subprocess, "Popen", launch)
+    monkeypatch.setattr(subprocess, "Popen", launch)
     monkeypatch.setattr(whisper_server, "_free_loopback_port", lambda: 12345)
     monkeypatch.setattr(
         whisper_server.WhisperCppServer, "_wait_ready", lambda self: None

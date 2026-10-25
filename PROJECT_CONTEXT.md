@@ -1,5 +1,22 @@
 # KYRIN — Project Context
 
+**Strict type-check cleanup — 2026-10-25:** The owner requested fixing the
+524 reported mypy errors, starting with the seven production-code errors.
+The dashboard loader now keeps image-sample names separate and declares shared
+output collections once; particle counts, colors and rendering behavior are
+unchanged. Test repairs add precise annotations, check concrete event/result
+types, complete fake contracts, preserve generic worker results, and import
+dependencies from their defining modules. A shared chat-verifier stub fails on
+unexpected calls. Qt image fixtures use QImageWriter to avoid a mismatch between
+QImage.save's installed type signature and runtime argument handling.
+The original full checker now passes syntax, Ruff, strict mypy (412 files,
+zero errors), and all 2338 tests (130.38 seconds). No test functions were removed,
+no new skips, Any annotations or type-ignore comments were added, and checker
+scope/configuration, dependencies and CI requirements were not relaxed.
+Reports: local-data/type-cleanup/verified/. Earlier red type-check results below
+are historical. This is local automated validation; no live hardware/model test
+or GitHub Actions run was performed. See docs/development/QUALITY_CHECKS.md.
+
 **L04 speech-error tolerance — 2026-10-25, owner-approved direction; documentation
 step only:** The owner selected semantic understanding combined with
 language-aware phonetic similarity and valid context for all supported command

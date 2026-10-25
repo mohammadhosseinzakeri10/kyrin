@@ -136,7 +136,9 @@ def test_terminal_window_can_be_closed_by_number_after_confirmation(
     coordinator.observe(_final(0, "Open Terminal"))
     coordinator.observe(_final(1, "one"))
     asked = coordinator.observe(_final(2, "quit number three"))
+    assert isinstance(asked[0], CommandResolution)
     assert asked[0].intent is None
+    assert isinstance(asked[1], ResponseRequest)
     assert asked[1].kind is ResponseKind.CONFIRM_NUMBERED_CLOSE
     assert asked[1].window_index == 3
     assert coordinator.observe(_final(3, "yes")) == (

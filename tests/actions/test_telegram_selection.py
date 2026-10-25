@@ -4,7 +4,13 @@ from threading import Event
 
 import pytest
 
-from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.models import (
+    ActionFeedback,
+    ActionKey,
+    ActionOutcome,
+    ActionRequest,
+    ActionResult,
+)
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
 from kyrin.commands.models import CommandIntent, CommandKind, ResponseRequest
@@ -30,7 +36,10 @@ def test_invalid_answer_repeats_prompt_without_clicking() -> None:
     calls: list[int | None] = []
     flow = TelegramChatSelection(prompts.append, lambda _: None)
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         calls.append(number)
         return ActionResult(request.key, ActionOutcome.CONFIRMED)
 
@@ -48,7 +57,7 @@ def test_invalid_answer_repeats_prompt_without_clicking() -> None:
 
 def test_new_visible_chat_command_replaces_pending_numbered_choice() -> None:
     prompts: list[ResponseRequest] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     flow = TelegramChatSelection(prompts.append, feedback.append)
     flow.set_completion(lambda *args: pytest.fail("old chat must not be opened"))
     assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", _choices())
@@ -65,7 +74,10 @@ def test_duplicate_chat_choice_requires_a_valid_number() -> None:
     done = Event()
     flow = TelegramChatSelection(prompts.append, lambda _: done.set())
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         calls.append(number)
         return ActionResult(request.key, ActionOutcome.CONFIRMED)
 
@@ -101,7 +113,10 @@ def test_choice_forms_select_the_same_number(answer: str, expected: int) -> None
     done = Event()
     flow = TelegramChatSelection(lambda _: None, lambda _: done.set())
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         calls.append(number)
         return ActionResult(request.key, ActionOutcome.CONFIRMED)
 
@@ -148,9 +163,13 @@ def test_unanswered_selection_expires_without_new_speech(
 
     monkeypatch.setattr(module, "_TIMEOUT_SECONDS", 0.03)
     finished = Event()
-    feedback = []
+    feedback: list[ActionFeedback] = []
+    def on_feedback(item: ActionFeedback) -> None:
+        feedback.append(item)
+        finished.set()
+
     flow = TelegramChatSelection(
-        lambda _: None, lambda item: (feedback.append(item), finished.set())
+        lambda _: None, on_feedback
     )
     flow.set_completion(lambda *args: pytest.fail("no chat should be opened"))
     assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", _choices())
@@ -160,7 +179,7 @@ def test_unanswered_selection_expires_without_new_speech(
 
 
 def test_stopping_pending_selection_reports_cancellation() -> None:
-    feedback = []
+    feedback: list[ActionFeedback] = []
     flow = TelegramChatSelection(lambda _: None, feedback.append)
     flow.set_completion(
         lambda *args: ActionResult(_request().key, ActionOutcome.CONFIRMED)
@@ -197,7 +216,10 @@ def test_verified_global_results_ask_for_a_number() -> None:
     done = Event()
     flow = TelegramChatSelection(prompts.append, lambda _: done.set())
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         calls.append(number)
         return ActionResult(request.key, ActionOutcome.CONFIRMED)
 
@@ -213,6 +235,7 @@ def test_verified_global_results_ask_for_a_number() -> None:
     assert flow.begin(
         _request(), ("telegram.desktop", 12), "My Mother", global_only
     )
+    assert prompts[0].message is not None
     assert "global search results" in prompts[0].message
     assert flow.on_final_speech("the second")
     assert done.wait(2)
@@ -239,7 +262,11 @@ def test_next_results_replaces_visible_numbered_page() -> None:
     )
     flow.set_page_navigation(lambda *_args: later)
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
+        assert number is not None
         chosen_tops.append(choices.selectable_results[number - 1].top)
         return ActionResult(request.key, ActionOutcome.CONFIRMED)
 
@@ -250,6 +277,7 @@ def test_next_results_replaces_visible_numbered_page() -> None:
     assert flow.on_final_speech("number two")
     assert selected.wait(2)
     assert chosen_tops == [292]
+    assert prompts[1].message is not None
     assert "personal chats" in prompts[1].message
 
 
@@ -276,23 +304,31 @@ def test_global_next_page_keeps_global_wording() -> None:
     assert flow.begin(_request(), ("telegram.desktop", 12), "My Mother", first)
     assert flow.on_final_speech("next")
     assert second_prompt.wait(2)
+    assert prompts[1].message is not None
     assert "global search results" in prompts[1].message
     flow.cancel()
 
 
 def test_spoken_cancel_while_paging_stops_the_prompt() -> None:
     prompts: list[ResponseRequest] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     started = Event()
     release = Event()
     finished = Event()
+    def on_feedback(item: ActionFeedback) -> None:
+        feedback.append(item)
+        finished.set()
+
     flow = TelegramChatSelection(
         prompts.append,
-        lambda item: (feedback.append(item), finished.set()),
+        on_feedback,
     )
     flow.set_completion(lambda *args: pytest.fail("no chat should be clicked"))
 
-    def navigate(identity, target, choices, cancellation):
+    def navigate(
+        identity: tuple[str, int], target: str, choices: ChatSearchChoices,
+        cancellation: Event,
+    ) -> ChatSearchChoices:
         started.set()
         assert release.wait(2)
         return _choices()
@@ -309,16 +345,23 @@ def test_spoken_cancel_while_paging_stops_the_prompt() -> None:
 
 
 def test_spoken_cancel_during_click_reports_actual_result() -> None:
-    feedback = []
+    feedback: list[ActionFeedback] = []
     started = Event()
     release = Event()
     finished = Event()
+    def on_feedback(item: ActionFeedback) -> None:
+        feedback.append(item)
+        finished.set()
+
     flow = TelegramChatSelection(
         lambda _: None,
-        lambda item: (feedback.append(item), finished.set()),
+        on_feedback,
     )
 
-    def complete(request, identity, target, choices, number, cancellation):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         started.set()
         assert release.wait(2)
         # A click already sent to Telegram cannot be undone by speech.

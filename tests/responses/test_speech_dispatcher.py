@@ -1,11 +1,13 @@
 """SSIP waits for completion and cancels only its own message, without audio I/O."""
 
+import socket as socket_module
+import subprocess
 from queue import Empty, Queue
 from threading import Event, Thread
 
 import pytest
 
-from kyrin.responses import speech, speech_dispatcher
+from kyrin.responses import speech
 from kyrin.responses.speech import SpeechDispatcherSynthesizer
 
 
@@ -55,7 +57,7 @@ def test_completion_wait_and_cancel_self(
 ) -> None:
     socket = Socket()
     monkeypatch.setenv("SPEECHD_ADDRESS", "unix:/tmp/fake/speechd.sock")
-    monkeypatch.setattr(speech_dispatcher.socket, "socket", lambda *args: socket)
+    monkeypatch.setattr(socket_module, "socket", lambda *args: socket)
     backend = SpeechDispatcherSynthesizer("spd-say", rate=12, voice_type="female1")
     done, started = Event(), Event()
     failures: list[Exception] = []
@@ -113,13 +115,13 @@ def test_local_service_autospawn_never_submits_speech(
     class Connection:
         output_uncertain = False
 
-        def speak(self, *args):
+        def speak(self, *args: object) -> None:
             pass
 
-        def close(self):
+        def close(self) -> None:
             pass
 
-    def connect(timeout: float):
+    def connect(timeout: float) -> Connection:
         connections.append(timeout)
         if len(connections) == 1:
             raise FileNotFoundError
@@ -127,7 +129,7 @@ def test_local_service_autospawn_never_submits_speech(
 
     monkeypatch.setattr(speech, "LocalSpeechConnection", connect)
     monkeypatch.setattr(
-        speech.subprocess, "run", lambda command, **kwargs: commands.append(command)
+        subprocess, "run", lambda command, **kwargs: commands.append(command)
     )
     SpeechDispatcherSynthesizer("spd-say").speak("hello", "en")
     assert commands == [["spd-say", "--list-output-modules"]]
@@ -142,7 +144,7 @@ def test_lost_cancel_ack_retains_echo_guard(monkeypatch: pytest.MonkeyPatch) -> 
             super().sendall(data)
 
     socket = LostCancel()
-    monkeypatch.setattr(speech_dispatcher.socket, "socket", lambda *args: socket)
+    monkeypatch.setattr(socket_module, "socket", lambda *args: socket)
     backend = SpeechDispatcherSynthesizer("spd-say", timeout_s=0.05)
     with pytest.raises(speech.SpeechSynthesisError, match="microphone stays guarded"):
         backend.speak("hello", "en")

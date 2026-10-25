@@ -57,7 +57,7 @@ def test_inventory_prefers_unique_accessible_options_and_rejects_duplicates(
             "",
         )
 
-    monkeypatch.setattr(desktop_control_inventory.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     inventory = desktop_control_inventory.DesktopControlInventory(
         lambda: ("example.desktop", 42), Reader(), token_reader=lambda: "window-7"
     )
@@ -74,7 +74,7 @@ def test_inventory_discards_snapshot_when_focus_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_control_inventory.subprocess,
+        subprocess,
         "run",
         lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
     )
@@ -89,7 +89,7 @@ def test_exact_accessible_name_avoids_ocr_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_control_inventory.subprocess,
+        subprocess,
         "run",
         lambda args, **_kwargs: subprocess.CompletedProcess(
             args,
@@ -120,7 +120,7 @@ def test_matching_option_near_bottom_survives_catalog_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_control_inventory.subprocess,
+        subprocess,
         "run",
         lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
     )
@@ -184,7 +184,7 @@ def test_inventory_rejects_same_process_window_switch_during_scan(
             "",
         )
 
-    monkeypatch.setattr(desktop_control_inventory.subprocess, "run", scan)
+    monkeypatch.setattr(subprocess, "run", scan)
     inventory = desktop_control_inventory.DesktopControlInventory(
         lambda: ("example.desktop", 42),
         Reader(),
@@ -197,7 +197,7 @@ def test_missing_token_does_not_fall_back_to_app_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        desktop_control_inventory.subprocess,
+        subprocess,
         "run",
         lambda *_a, **_k: pytest.fail("no scan without identity"),
     )
@@ -280,7 +280,7 @@ def test_inventory_rejects_ocr_duplicates_under_locator_normalization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "kyrin.actions.platforms.desktop_control_inventory.subprocess.run",
+        "subprocess.run",
         lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
     )
 

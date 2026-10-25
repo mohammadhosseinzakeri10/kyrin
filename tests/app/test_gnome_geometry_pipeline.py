@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QImageWriter, QPainter
 
 from kyrin.actions.telegram_verification import telegram_left_label
 from kyrin.actions.visible_control import unique_visible_target
@@ -42,9 +42,18 @@ telegram_helper = telegram_tests.helper
 
 class RecordingBus:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple]] = []
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
 
-    def call_sync(self, _bus, _obj, _iface, method, arguments, *_rest):
+    def call_sync(
+        self,
+        _bus: str,
+        _obj: str,
+        _iface: str,
+        method: str,
+        arguments: object,
+        *_rest: object,
+    ) -> None:
+        assert isinstance(arguments, tuple)
         self.calls.append((method, arguments))
 
 
@@ -120,18 +129,23 @@ print(JSON.stringify({values, valid}));
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    produced = json.loads(result.stdout)
+    assert isinstance(produced, dict)
+    return produced
 
 
-def _fixture(scale: float, origin: tuple[int, int], local: tuple[int, int]):
+def _fixture(
+    scale: float, origin: tuple[int, int], local: tuple[int, int]
+) -> tuple[dict[str, object], tuple[int, int], tuple[int, int, int, int]]:
     x, y = origin
     frame = dict(x=x, y=y, width=800, height=600)
     # Asymmetric client-side shadow: left=12, top=20, right=28, bottom=36.
     buffer = dict(x=x - 12, y=y - 20, width=840, height=656)
     size = (round(840 * scale), round(656 * scale))
-    box = tuple(
+    left, top, width, height = (
         round(value * scale) for value in (local[0] + 12, local[1] + 20, 16, 16)
     )
+    box = (left, top, width, height)
     image = QImage(*size, QImage.Format.Format_RGB888)
     image.fill(0x202020)
     painter = QPainter(image)
@@ -140,13 +154,13 @@ def _fixture(scale: float, origin: tuple[int, int], local: tuple[int, int]):
     data = QByteArray()
     stream = QBuffer(data)
     assert stream.open(QIODevice.OpenModeFlag.WriteOnly)
-    assert image.save(stream, "PNG")
+    assert QImageWriter(stream, b"PNG").write(image)
     return (
         dict(
             frame=frame,
             buffer=buffer,
             monitorScale=1,
-            png=list(bytes(data)),
+            png=list(bytes(data.data())),
             box=box,
             change="stable",
         ),
@@ -186,7 +200,10 @@ def test_producer_to_crop_resize_and_actuators(
     produced = _produce(case)
     assert produced["valid"] is True
     values = produced["values"]
-    assert values[2:6] == list(case["buffer"].values())
+    assert isinstance(values, list)
+    buffer = case["buffer"]
+    assert isinstance(buffer, dict)
+    assert values[2:6] == list(buffer.values())
     metadata = json.loads(values[10])
     assert metadata["coordinate_space"] == "logical_desktop"
     assert metadata["image_coordinate_space"] == "source_png_pixels"
@@ -257,7 +274,9 @@ def test_producer_to_crop_resize_and_actuators(
         box = (*source_box, *size)
         for helper in (control_helper, telegram_helper):
             bus = RecordingBus()
-            frame = ("test.desktop", 123, *case["frame"].values())
+            frame_info = case["frame"]
+            assert isinstance(frame_info, dict)
+            frame = ("test.desktop", 123, *frame_info.values())
             moved = (*frame[:2], frame[2] + 64, *frame[3:])
             frames = iter(
                 [
@@ -346,8 +365,10 @@ def test_producer_rejects_ambiguous_or_changed_image_extent(
     case, _, _ = _fixture(1.25, (-1200, -800), (100, 160))
     case["change"] = change
     produced = _produce(case)
+    values = produced["values"]
+    assert isinstance(values, list)
     if change in {"actor", "during_capture"}:
-        assert produced["values"][0] == ""
+        assert values[0] == ""
     else:
-        assert produced["values"][0] == "test.desktop"
+        assert values[0] == "test.desktop"
         assert produced["valid"] is False

@@ -13,12 +13,13 @@ from kyrin.actions.platforms.telegram import (
     _same_search_box,
 )
 from kyrin.actions.telegram_verification import ChatSearchMatch, telegram_left_label
-from kyrin.actions.visible_control import unique_visible_target
+from kyrin.actions.visible_control import VisibleControlTarget, unique_visible_target
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.desktop.window_observation import WindowObservation
 from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
+from tests.actions.chat_verifier_stub import StubChatVerifier
 
 
 def test_both_target_paths_keep_one_capture_geometry() -> None:
@@ -91,15 +92,16 @@ def test_both_executors_send_the_same_geometry_to_their_click_helpers(
         def execute(self, request: ActionRequest) -> ActionResult:
             return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
 
-    class Verifier:
+    class Verifier(StubChatVerifier):
         def ready(self) -> bool:
             return True
 
-        def verify(self, app_id: str, pid: int, target: str) -> bool:
+        def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
             return False
 
-        def find_visible_control(self, *_args: object):
-            from kyrin.actions.visible_control import VisibleControlTarget
+        def find_visible_control(
+            self, app_id: str, pid: int, label: str
+        ) -> VisibleControlTarget:
 
             return VisibleControlTarget(50, 100, 100, 20, 1000, 750, geometry=geometry)
 

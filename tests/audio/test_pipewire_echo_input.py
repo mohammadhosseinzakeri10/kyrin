@@ -1,5 +1,6 @@
 """Echo-cancelled capture has the same stop and PCM contract as microphone input."""
 
+from collections.abc import Generator
 from io import BytesIO
 
 import pytest
@@ -35,5 +36,6 @@ def test_echo_capture_yields_pcm_and_stops_record_process(
     assert chunk.audio_format.sample_rate == 16000
     assert chunk.data == b"\x01\x02" * 320
     source.stop_capture()
+    assert isinstance(chunks, Generator)
     chunks.close()
     assert process.terminated

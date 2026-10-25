@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from dataclasses import asdict, replace
+from typing import Literal
 
 import pytest
 
@@ -114,7 +115,10 @@ def test_repeated_inference_and_postcondition_have_separate_durations() -> None:
 
 def test_percentiles_require_twenty_samples_in_each_condition() -> None:
     tracker = SpeechActionLatency()
-    for temperature, count in (("cold", 19), ("warm", 20), ("unknown", 1)):
+    conditions: tuple[tuple[Literal["cold", "warm", "unknown"], int], ...] = (
+        ("cold", 19), ("warm", 20), ("unknown", 1)
+    )
+    for temperature, count in conditions:
         for index in range(count):
             for stage, ms in (("final", 0), ("command_completed", index + 1)):
                 tracker.observe(

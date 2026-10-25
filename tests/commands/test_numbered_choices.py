@@ -65,6 +65,9 @@ class Presence:
         self.state = state
         self.calls = 0
 
+    def count(self, app_id: str) -> int | None:
+        return None
+
     def observe(self, app_id: str) -> WindowPresence:
         assert app_id == "telegram"
         self.calls += 1
@@ -125,6 +128,7 @@ def test_bare_app_name_offers_current_window_actions_and_confirms_close(
 def test_bare_app_name_accepts_yes_for_open_and_no_for_cancel(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path, WindowPresence.OPEN)
     prompt = coordinator.observe(_final(0, "Telegram"))
+    assert isinstance(prompt[1], ResponseRequest)
     assert "yes to open" in ResponsePresenter("en").present(prompt[1]).text
     assert coordinator.observe(_final(1, "yes")) == (
         CommandResolution(
@@ -135,23 +139,30 @@ def test_bare_app_name_accepts_yes_for_open_and_no_for_cancel(tmp_path: Path) ->
     assert coordinator.observe(_final(3, "no")) == (
         CommandResolution(3, None, language="en"),
     )
-    assert coordinator.observe(_final(4, "yes"))[0].intent is None
+    resolved = coordinator.observe(_final(4, "yes"))[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent is None
 
 
 def test_bare_app_name_when_closed_asks_yes_or_no(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path, WindowPresence.CLOSED)
     prompt = coordinator.observe(_final(0, "Telegram"))
+    assert isinstance(prompt[1], ResponseRequest)
     assert ResponsePresenter("en").present(prompt[1]).text == (
         "Open Telegram? Say yes or no."
     )
-    assert coordinator.observe(_final(1, "yes"))[0].intent == CommandIntent(
+    resolved = coordinator.observe(_final(1, "yes"))[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent == CommandIntent(
         CommandKind.OPEN_APP, "telegram"
     )
 
 
 def test_registered_persian_open_synonym_uses_same_open_action(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path, WindowPresence.CLOSED)
-    assert coordinator.observe(_final(0, "تلگرام را اجرا کن"))[0].intent == (
+    resolved = coordinator.observe(_final(0, "تلگرام را اجرا کن"))[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent == (
         CommandIntent(CommandKind.OPEN_APP, "telegram")
     )
 
@@ -165,11 +176,15 @@ def test_ambiguous_smaller_request_asks_which_window_action(
 ) -> None:
     coordinator = _coordinator(tmp_path, WindowPresence.OPEN)
     prompt = coordinator.observe(_final(0, phrase))
+    assert isinstance(prompt[0], CommandResolution)
     assert prompt[0].intent is None
+    assert isinstance(prompt[1], ResponseRequest)
     assert prompt[1].operation_candidates == (
         CommandKind.MINIMIZE_APP, CommandKind.UNMAXIMIZE_APP
     )
-    assert coordinator.observe(_final(1, "yes"))[0].intent is None
+    resolved = coordinator.observe(_final(1, "yes"))[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent is None
     assert coordinator.observe(_final(2, "normal size")) == (
         CommandResolution(
             2,
@@ -183,7 +198,9 @@ def test_smaller_without_a_verified_target_does_not_change_any_window(
     tmp_path: Path,
 ) -> None:
     coordinator = _coordinator(tmp_path, WindowPresence.OPEN)
-    assert coordinator.observe(_final(0, "make it smaller"))[0].intent is None
+    resolved = coordinator.observe(_final(0, "make it smaller"))[0]
+    assert isinstance(resolved, CommandResolution)
+    assert resolved.intent is None
 
 
 def test_bare_app_name_without_window_offers_only_open(tmp_path: Path) -> None:

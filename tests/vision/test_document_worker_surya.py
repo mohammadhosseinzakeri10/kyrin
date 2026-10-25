@@ -27,7 +27,9 @@ def test_surya_retries_wide_ui_on_empty_full_window(
 ) -> None:
     frames: list[FakeImage] = []
 
-    def reader(*, text: list[dict[str, object]], max_new_tokens: int) -> list[dict]:
+    def reader(
+        *, text: list[dict[str, object]], max_new_tokens: int
+    ) -> list[dict[str, object]]:
         assert max_new_tokens == 1024
         frame = text[0]["content"][0]["image"]  # type: ignore[index]
         frames.append(frame)
@@ -47,7 +49,7 @@ def test_surya_retries_wide_ui_on_empty_full_window(
 def test_surya_skips_retry_when_full_window_has_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def reader(*, text: object, max_new_tokens: int) -> list[dict]:
+    def reader(*, text: object, max_new_tokens: int) -> list[dict[str, object]]:
         assert text is not None and max_new_tokens == 1024
         return [{"generated_text": [{"content": "<p>Already read</p>"}]}]
 

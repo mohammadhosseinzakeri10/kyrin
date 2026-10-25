@@ -57,12 +57,12 @@ def test_echo_guard_preserves_timestamps_and_silences_until_tail_expires(
         started = Event()
         release = Event()
 
-        def speak(self, text, language):
+        def speak(self, text: str, language: str) -> None:
             self.started.set()
             assert self.release.wait(2)
 
     class TimedSource(Source):
-        def capture(self):
+        def capture(self) -> Iterator[AudioData]:
             for _ in range(5):
                 yield AudioData(b"\x01\x02" * 160, FORMAT, 1_000_000)
 

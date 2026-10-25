@@ -3,24 +3,28 @@
 import json
 import subprocess
 
-from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest
+import pytest
+
+from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms import open_windows
 from kyrin.commands.models import CommandIntent, CommandKind
 from tests.desktop.test_backend_protocol import bus_reply
 
 
 class Fallback:
-    def execute(self, request: ActionRequest):
+    def execute(self, request: ActionRequest) -> ActionResult:
         raise AssertionError(f"unexpected fallback: {request}")
 
 
 def test_picker_uses_allowed_desktop_ids_and_rejects_stale_selection(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
     replies = iter(("requested", "stale", "requested", "requested"))
 
-    def run(command, **kwargs):
+    def run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         if command[-1] == "GetCapabilities":
             return bus_reply(
                 "ShowOpenWindows", "ActivateShownOpenWindow", "ActivateShownOpenApp",
@@ -32,7 +36,7 @@ def test_picker_uses_allowed_desktop_ids_and_rejects_stale_selection(
             command, 0, json.dumps({"data": [next(replies)]}).encode(), b""
         )
 
-    monkeypatch.setattr(open_windows.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = open_windows.OpenWindowPickerExecutor(
         Fallback(), {"telegram": "telegram.desktop", "browser": "firefox.desktop"}
     )
@@ -58,9 +62,9 @@ def test_picker_uses_allowed_desktop_ids_and_rejects_stale_selection(
     assert commands[3][-1] == "HideOpenWindows"
 
 
-def test_unbound_app_cannot_be_selected(monkeypatch) -> None:
+def test_unbound_app_cannot_be_selected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        open_windows.subprocess, "run",
+        subprocess, "run",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bus call")),
     )
     executor = open_windows.OpenWindowPickerExecutor(Fallback(), {})
@@ -74,18 +78,18 @@ def test_unbound_app_cannot_be_selected(monkeypatch) -> None:
 
 
 def test_numbered_close_cannot_bypass_shared_confirmation(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
     replies = iter(("requested", "requested"))
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         calls.append(command)
         return subprocess.CompletedProcess(
             command, 0, json.dumps({"data": [next(replies)]}).encode(), b""
         )
 
-    monkeypatch.setattr(open_windows.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = open_windows.OpenWindowPickerExecutor(
         Fallback(),
         {"telegram": "telegram.desktop", "browser": "firefox.desktop"},

@@ -17,6 +17,7 @@ from kyrin.actions.telegram_verification import ChatSearchMatch
 from kyrin.app.qt.chat_verifier import QtChatVerifier
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
+from kyrin.operations import Operation
 from kyrin.vision.ocr.contracts import (
     OcrDevice,
     OcrOptions,
@@ -83,8 +84,8 @@ def _observation() -> IdentifiedWindowText:
     )
 
 
-def _call_from_worker(app: QApplication, work: Callable[[], bool]) -> bool:
-    values: list[bool] = []
+def _call_from_worker[T](app: QApplication, work: Callable[[], T]) -> T:
+    values: list[T] = []
     thread = Thread(target=lambda: values.append(work()))
     thread.start()
     deadline = monotonic() + 3
@@ -638,7 +639,12 @@ def test_late_completion_never_starts_visible_ocr_fallback(
     access = Access()
     reader = Reader(_observation())
     calls: list[object] = []
-    reader.read = lambda *args, **kwargs: calls.append(args) or True
+
+    def read(*args: object, **kwargs: object) -> bool:
+        calls.append(args)
+        return True
+
+    monkeypatch.setattr(reader, "read", read)
     verifier = QtChatVerifier(
         cast(ScreenAccess, access), cast(ScreenTextReader, reader)
     )
@@ -668,9 +674,14 @@ def test_caller_timeout_cancels_carried_budget_and_clears_pending(
     access = Access()
     reader = Reader(_observation())
     carried = []
-    cancelled = []
-    reader.read = lambda *args, **kwargs: carried.append(current_operation()) or True
-    reader.cancel = lambda operation: cancelled.append(operation)
+    cancelled: list[Operation | None] = []
+
+    def read(*args: object, **kwargs: object) -> bool:
+        carried.append(current_operation())
+        return True
+
+    monkeypatch.setattr(reader, "read", read)
+    monkeypatch.setattr(reader, "cancel", cancelled.append, raising=False)
     verifier = QtChatVerifier(
         cast(ScreenAccess, access), cast(ScreenTextReader, reader)
     )

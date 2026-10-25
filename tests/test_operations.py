@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 
-from kyrin import operations
 from kyrin.actions.platforms.helper_lifecycle import HelperLifetime
 from kyrin.app.permission_token import read_opaque_token, save_opaque_token
 from kyrin.operations import Operation, OperationStopped, activate, budget, run_process
@@ -39,13 +38,15 @@ def test_fake_process_is_terminated_and_reaped_on_stop(
     now = [0.0]
     cancel = Event()
     operation = Operation(0.01, lambda: now[0], cancel.is_set)
-    calls: list[object] = []
+    calls: list[tuple[bytes | None, float | None]] = []
 
     class Process:
         pid = 12345
         returncode = None
 
-        def communicate(self, input=None, timeout=None):
+        def communicate(
+            self, input: bytes | None = None, timeout: float | None = None
+        ) -> tuple[bytes, bytes]:
             calls.append((input, timeout))
             if len(calls) == 1:
                 if cause == "cancel":
@@ -55,16 +56,18 @@ def test_fake_process_is_terminated_and_reaped_on_stop(
                 if cause == "late_success":
                     self.returncode = 0
                     return b"late", b""
+                assert timeout is not None
                 raise subprocess.TimeoutExpired("ocr", timeout)
             self.returncode = -15
             return b"", b""
 
     process = Process()
-    monkeypatch.setattr(operations.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
     signals = []
-    monkeypatch.setattr(operations.os, "killpg", lambda pid, sig: signals.append(sig))
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append(sig))
     with activate(operation), pytest.raises(OperationStopped):
         run_process(["ocr"], timeout=90, input=b"png")
+    assert calls[0][1] is not None
     assert calls[0][1] <= 0.01
     assert calls[0][0] == b"png"
     assert len(calls) == 2
@@ -80,7 +83,9 @@ def test_kill_after_grace_still_reaps_process(monkeypatch: pytest.MonkeyPatch) -
         pid = 12345
         returncode = None
 
-        def communicate(self, input=None, timeout=None):
+        def communicate(
+            self, input: bytes | None = None, timeout: float | None = None
+        ) -> tuple[bytes, bytes]:
             calls.append(timeout)
             if timeout is not None:
                 operation.cancel()
@@ -89,9 +94,9 @@ def test_kill_after_grace_still_reaps_process(monkeypatch: pytest.MonkeyPatch) -
             return b"", b""
 
     process = Process()
-    monkeypatch.setattr(operations.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
     signals = []
-    monkeypatch.setattr(operations.os, "killpg", lambda pid, sig: signals.append(sig))
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append(sig))
     with activate(operation), pytest.raises(OperationStopped):
         run_process(["ocr"], timeout=10)
     assert signals == [signal.SIGTERM, signal.SIGKILL]
@@ -109,7 +114,7 @@ def test_input_checks_epoch_and_deadline_immediately_before_dispatch(
     sent: list[tuple[Any, ...]] = []
 
     class Bus:
-        def call_sync(self, *args):
+        def call_sync(self, *args: object) -> None:
             sent.append(args)
 
     lifetime = HelperLifetime(Bus(), path, "epoch-one")
@@ -156,7 +161,7 @@ def test_expired_caller_does_not_spawn_a_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        operations.subprocess,
+        subprocess,
         "Popen",
         lambda *a, **k: pytest.fail("must not create an unowned worker"),
     )
@@ -188,18 +193,21 @@ def test_cancelled_owner_never_approves_waiting_helper_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     operation = Operation(10, lambda: 0)
-    endpoints = []
-    stages = []
+    endpoints: list[int] = []
+    stages: list[str] = []
 
     class Process:
         pid = 12345
         returncode = None
 
-        def communicate(self, input=None, timeout=None):
+        def communicate(
+            self, input: bytes | None = None, timeout: float | None = None
+        ) -> tuple[bytes, bytes]:
             if not stages:
                 stages.append("waiting_for_authorization")
                 os.write(endpoints[0], b"?")
                 operation.cancel()
+                assert timeout is not None
                 raise subprocess.TimeoutExpired("helper", timeout)
             import select
 
@@ -209,12 +217,12 @@ def test_cancelled_owner_never_approves_waiting_helper_input(
             stages.append("reaped_without_input")
             return b"", b""
 
-    def spawn(*args, **kwargs):
-        endpoints.append(os.dup(kwargs["pass_fds"][0]))
+    def spawn(*args: object, pass_fds: tuple[int, ...], **kwargs: object) -> Process:
+        endpoints.append(os.dup(pass_fds[0]))
         return Process()
 
-    monkeypatch.setattr(operations.subprocess, "Popen", spawn)
-    monkeypatch.setattr(operations.os, "killpg", lambda pid, sig: None)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: None)
     with activate(operation), pytest.raises(OperationStopped):
         run_process(["helper"], timeout=65, helper=True)
     assert stages == ["waiting_for_authorization", "reaped_without_input"]

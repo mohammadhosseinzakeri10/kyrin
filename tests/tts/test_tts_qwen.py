@@ -1,6 +1,7 @@
 """Qwen3-TTS CustomVoice is loaded from a complete local folder only."""
 
 import json
+from importlib import util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -83,16 +84,16 @@ def test_qwen_uses_offline_loading_and_selected_speaker(
             calls.append(kwargs)
             return [[0.1]], 24000
 
+    def from_pretrained(path: Path, **kwargs: object) -> FakeModel:
+        calls.append((path, kwargs))
+        return FakeModel()
+
     fake_qwen = SimpleNamespace(
-        Qwen3TTSModel=SimpleNamespace(
-            from_pretrained=lambda path, **kwargs: (
-                calls.append((path, kwargs)) or FakeModel()
-            )
-        )
+        Qwen3TTSModel=SimpleNamespace(from_pretrained=from_pretrained)
     )
     fake_torch = SimpleNamespace(float32="float32", float16="float16")
     monkeypatch.setattr(tts_qwen, "isolated_runtime_python", lambda _: None)
-    monkeypatch.setattr(tts_qwen.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(util, "find_spec", lambda _: object())
     monkeypatch.setattr(
         tts_qwen,
         "import_module",

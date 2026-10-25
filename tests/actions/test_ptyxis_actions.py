@@ -4,8 +4,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest
-from kyrin.actions.platforms import ptyxis
+import pytest
+
+from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.ptyxis import PtyxisActionExecutor
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.desktop.window_presence import WindowPresence
@@ -13,7 +14,7 @@ from tests.desktop.test_backend_protocol import bus_reply
 
 
 class Fallback:
-    def execute(self, request: ActionRequest):
+    def execute(self, request: ActionRequest) -> ActionResult:
         raise AssertionError(f"unexpected fallback: {request.intent.kind}")
 
 
@@ -28,7 +29,9 @@ class Presence:
         return WindowPresence.OPEN
 
 
-def test_fixed_new_window_command(monkeypatch, tmp_path: Path) -> None:
+def test_fixed_new_window_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
     entry.write_text("[Desktop Entry]\n", encoding="utf-8")
     calls: list[list[str]] = []
@@ -43,7 +46,7 @@ def test_fixed_new_window_command(monkeypatch, tmp_path: Path) -> None:
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(ptyxis.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = PtyxisActionExecutor(Fallback(), "terminal", entry)
     result = executor.execute(
         ActionRequest(
@@ -55,7 +58,7 @@ def test_fixed_new_window_command(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_unbound_app_never_reaches_terminal_command(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
     entry.write_text("[Desktop Entry]\n", encoding="utf-8")
@@ -63,7 +66,7 @@ def test_unbound_app_never_reaches_terminal_command(
     def run(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("must not invoke Ptyxis")
 
-    monkeypatch.setattr(ptyxis.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = PtyxisActionExecutor(Fallback(), "terminal", entry)
     result = executor.execute(
         ActionRequest(
@@ -74,7 +77,7 @@ def test_unbound_app_never_reaches_terminal_command(
 
 
 def test_new_tab_is_rejected_if_window_count_changed(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
     entry.write_text("[Desktop Entry]\n", encoding="utf-8")
@@ -82,7 +85,7 @@ def test_new_tab_is_rejected_if_window_count_changed(
     def run(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("must not open a tab in an ambiguous window")
 
-    monkeypatch.setattr(ptyxis.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = PtyxisActionExecutor(Fallback(), "terminal", entry, Presence(2))
     result = executor.execute(
         ActionRequest(
@@ -94,7 +97,7 @@ def test_new_tab_is_rejected_if_window_count_changed(
 
 
 def test_numbered_picker_uses_only_bound_terminal_and_reports_stale(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
     entry.write_text("[Desktop Entry]\n", encoding="utf-8")
@@ -113,7 +116,7 @@ def test_numbered_picker_uses_only_bound_terminal_and_reports_stale(
             args, 0, json.dumps({"type": "s", "data": [next(replies)]}), ""
         )
 
-    monkeypatch.setattr(ptyxis.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = PtyxisActionExecutor(Fallback(), "terminal", entry, Presence(3))
     shown = executor.execute(
         ActionRequest(
@@ -134,7 +137,7 @@ def test_numbered_picker_uses_only_bound_terminal_and_reports_stale(
 
 
 def test_numbered_terminal_close_cannot_bypass_shared_confirmation(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry = tmp_path / "org.gnome.Ptyxis.desktop"
     entry.write_text("[Desktop Entry]\n", encoding="utf-8")
@@ -152,7 +155,7 @@ def test_numbered_terminal_close_cannot_bypass_shared_confirmation(
             args, 0, json.dumps({"data": ["requested"]}), ""
         )
 
-    monkeypatch.setattr(ptyxis.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     executor = PtyxisActionExecutor(Fallback(), "terminal", entry, Presence(3))
     close = CommandIntent(CommandKind.CLOSE_SHOWN_WINDOW, "terminal", window_index=2)
     assert executor.execute(

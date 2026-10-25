@@ -92,10 +92,16 @@ def test_native_audio_initialization_failure_is_reported_as_microphone_error(
 ) -> None:
     original_import = builtins.__import__
 
-    def failing_import(name: str, *args: object, **kwargs: object) -> object:
+    def failing_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
         if name == "sounddevice":
             raise RuntimeError("PortAudio initialization failed")
-        return original_import(name, *args, **kwargs)
+        return original_import(name, globals, locals, fromlist, level)
 
     with monkeypatch.context() as patch:
         patch.setattr(builtins, "__import__", failing_import)

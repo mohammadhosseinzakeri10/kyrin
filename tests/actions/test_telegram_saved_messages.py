@@ -7,7 +7,13 @@ from threading import Event
 
 import pytest
 
-from kyrin.actions.models import ActionKey, ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.models import (
+    ActionFeedback,
+    ActionKey,
+    ActionOutcome,
+    ActionRequest,
+    ActionResult,
+)
 from kyrin.actions.platforms import telegram
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
@@ -594,7 +600,7 @@ def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
 ) -> None:
     calls: list[list[str]] = []
     prompts: list[ResponseRequest] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     done = Event()
     choices = ChatSearchChoices(
         ChatSearchMatch(70, 220, 90, 18, 1600, 900),
@@ -608,7 +614,7 @@ def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "CHAT_RESULT_CLICKED", "")
 
-    def on_feedback(item: object) -> None:
+    def on_feedback(item: ActionFeedback) -> None:
         feedback.append(item)
         done.set()
 
@@ -630,6 +636,7 @@ def test_two_visible_chats_wait_for_number_and_recheck_chosen_row(
     result = executor.execute(_visible_request())
     try:
         assert result.error_code == "chat_selection_pending"
+        assert prompts[0].message is not None
         assert "2 visible chats" in prompts[0].message
         assert "next" not in prompts[0].message.casefold()
         assert calls == []
@@ -1055,6 +1062,7 @@ def test_one_visible_local_without_section_boundary_waits_for_user_choice(
     result = executor.execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
     assert result.error_code == "chat_selection_pending"
     assert len(calls) == 1
+    assert prompts[0].message is not None
     assert "personal chats" in prompts[0].message
     selection.cancel()
 
@@ -1173,7 +1181,7 @@ def test_named_chat_asks_then_rechecks_selected_row(
 ) -> None:
     calls: list[list[str]] = []
     prompts: list[ResponseRequest] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     done = Event()
     choices = ChatSearchChoices(
         ChatSearchMatch(70, 92, 90, 13, 1600, 900),
@@ -1182,7 +1190,7 @@ def test_named_chat_asks_then_rechecks_selected_row(
     )
     verifier = Verifier(choices=choices)
 
-    def on_feedback(item: object) -> None:
+    def on_feedback(item: ActionFeedback) -> None:
         feedback.append(item)
         done.set()
 
@@ -1224,7 +1232,7 @@ def test_global_only_chat_asks_and_rechecks_selected_row(
 ) -> None:
     calls: list[list[str]] = []
     prompts: list[ResponseRequest] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     done = Event()
     choices = ChatSearchChoices(
         None,
@@ -1235,8 +1243,12 @@ def test_global_only_chat_asks_and_rechecks_selected_row(
         global_section_verified=True,
     )
     verifier = Verifier(choices=choices)
+    def on_feedback(item: ActionFeedback) -> None:
+        feedback.append(item)
+        done.set()
+
     selection = TelegramChatSelection(
-        prompts.append, lambda item: (feedback.append(item), done.set())
+        prompts.append, on_feedback
     )
     executor = telegram.TelegramSavedMessagesExecutor(
         Delegate(),
@@ -1257,6 +1269,7 @@ def test_global_only_chat_asks_and_rechecks_selected_row(
     monkeypatch.setattr("kyrin.actions.platforms.telegram.run_process", run)
     result = executor.execute(_request(CommandKind.OPEN_CHAT, "Alice", "telegram"))
     assert result.error_code == "chat_selection_pending"
+    assert prompts[0].message is not None
     assert "global search results" in prompts[0].message
     assert len(calls) == 1
     assert selection.on_final_speech("number two")
@@ -1269,7 +1282,7 @@ def test_global_only_chat_rejects_moved_row_before_click(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     done = Event()
     shown = ChatSearchChoices(
         None,
@@ -1277,8 +1290,12 @@ def test_global_only_chat_rejects_moved_row_before_click(
         global_section_verified=True,
     )
     verifier = Verifier(choices=shown)
+    def on_feedback(item: ActionFeedback) -> None:
+        feedback.append(item)
+        done.set()
+
     selection = TelegramChatSelection(
-        lambda _: None, lambda item: (feedback.append(item), done.set())
+        lambda _: None, on_feedback
     )
     executor = telegram.TelegramSavedMessagesExecutor(
         Delegate(),
@@ -1315,7 +1332,7 @@ def test_named_chat_rejects_moved_result_after_spoken_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
-    feedback = []
+    feedback: list[ActionFeedback] = []
     done = Event()
     shown = ChatSearchChoices(
         ChatSearchMatch(70, 92, 90, 13, 1600, 900),
@@ -1324,7 +1341,7 @@ def test_named_chat_rejects_moved_result_after_spoken_selection(
     )
     verifier = Verifier(choices=shown)
 
-    def on_feedback(item: object) -> None:
+    def on_feedback(item: ActionFeedback) -> None:
         feedback.append(item)
         done.set()
 
@@ -1378,7 +1395,9 @@ def test_stopping_selection_during_fresh_read_prevents_click(
             super().__init__(choices=shown)
             self.reads = 0
 
-        def find_search_choices(self, app_id, pid, target):
+        def find_search_choices(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchChoices | None:
             self.reads += 1
             if self.reads == 3:
                 reading.set()
@@ -1397,9 +1416,14 @@ def test_stopping_selection_during_fresh_read_prevents_click(
         helper_path=Path("/tmp/telegram-helper.py"),
     )
 
-    def complete(*args):
+    def complete(
+        request: ActionRequest, identity: tuple[str, int], target: str,
+        choices: ChatSearchChoices, number: int | None, cancellation: Event,
+    ) -> ActionResult:
         try:
-            return executor.complete_selection(*args)
+            return executor.complete_selection(
+                request, identity, target, choices, number, cancellation
+            )
         finally:
             finished.set()
 
@@ -1441,7 +1465,9 @@ def test_refreshing_global_results_do_not_block_local_choice_prompt(
     )
 
     class UnstableVerifier(Verifier):
-        def find_search_choices(self, app_id, pid, target):
+        def find_search_choices(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchChoices | None:
             return next(choices)
 
         def choice_status(self) -> str:
@@ -1481,7 +1507,9 @@ def test_empty_search_view_waits_for_result_rows(
     )
 
     class DelayedVerifier(Verifier):
-        def find_search_choices(self, app_id, pid, target):
+        def find_search_choices(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchChoices | None:
             return next(readings)
 
     monkeypatch.setattr(
@@ -1515,7 +1543,9 @@ def test_slow_first_visible_read_does_not_get_extra_confirmation_budget(
     choices = ChatSearchChoices(ChatSearchMatch(70, 92, 90, 13, 1600, 900), ())
 
     class SlowVerifier(Verifier):
-        def find_visible_chat_choices(self, app_id, pid, target):
+        def find_visible_chat_choices(
+            self, app_id: str, pid: int, target: str
+        ) -> ChatSearchChoices | None:
             calls.append(target)
             elapsed[0] += 11
             return choices

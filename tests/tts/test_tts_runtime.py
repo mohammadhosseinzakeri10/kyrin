@@ -1,5 +1,6 @@
 """Deterministic checks for local TTS selection and playback routing."""
 
+from importlib import util
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic
@@ -12,6 +13,7 @@ from kyrin.responses.speech import SpeechSynthesisError
 from kyrin.stt.device import DevicePreference
 from kyrin.tts.runtime import (
     ConfiguredSpeechSynthesizer,
+    LocalTtsModel,
     inspect_tts_model,
     kitten_model_file,
     register_tts_adapter,
@@ -107,7 +109,7 @@ def test_kokoro_gpu_uses_isolated_sherpa_worker(
             calls.append((text, voice, speed, language))
             return [0.2], 24000
 
-    monkeypatch.setattr(tts_runtime.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(util, "find_spec", lambda _: object())
     monkeypatch.setattr(
         tts_runtime, "isolated_runtime_python", lambda _: runtime_python
     )
@@ -586,7 +588,7 @@ def test_packaged_adapter_can_add_a_new_family_without_changing_playback(
         key = "customvoice"
         label = "Custom voice"
 
-        def inspect(self, path: Path) -> object | None:
+        def inspect(self, path: Path) -> LocalTtsModel | None:
             if (path / "voice.dat").is_file():
                 return tts_runtime.LocalTtsModel(self.key, path / "voice.dat")
             return None
@@ -682,13 +684,13 @@ def test_interrupt_during_synthesis_discards_late_audio_and_keeps_input_open(
     played: list[object] = []
 
     class Adapter:
-        def provider(self, selection):
+        def provider(self, selection: TtsSelection) -> str:
             return "cpu"
 
-        def load(self, *args):
+        def load(self, *args: object) -> object:
             return object()
 
-        def generate(self, *args):
+        def generate(self, *args: object) -> tuple[list[float], int]:
             entered.set()
             assert release.wait(2)
             return [0.1], 16000

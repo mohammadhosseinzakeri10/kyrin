@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,13 +67,13 @@ def test_chatterbox_uses_local_weights_and_spoken_language(
             calls.append((text, language_id))
             return Waveform()
 
-    fake_class = SimpleNamespace(
-        from_local=lambda path, provider, *, t3_model: (
-            calls.append((path, provider, t3_model)) or FakeModel()
-        )
-    )
+    def from_local(path: Path, provider: str, *, t3_model: Path) -> FakeModel:
+        calls.append((path, provider, t3_model))
+        return FakeModel()
+
+    fake_class = SimpleNamespace(from_local=from_local)
     monkeypatch.setattr(tts_chatterbox, "isolated_runtime_python", lambda _: None)
-    monkeypatch.setattr(tts_chatterbox.util, "find_spec", lambda _: object())
+    monkeypatch.setattr(util, "find_spec", lambda _: object())
     monkeypatch.setattr(
         tts_chatterbox,
         "import_module",

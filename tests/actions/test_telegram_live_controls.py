@@ -444,7 +444,7 @@ def test_shared_session_acquisition_cannot_rebind_the_initial_window(
         def call_sync(self, *values: Any) -> None:
             calls.append(values[3])
 
-    def acquire(_devices: int):
+    def acquire(_devices: int) -> tuple[SimpleNamespace, str]:
         ui.token = "other-window-same-process"
         return SimpleNamespace(check=lambda **kwargs: None, close=lambda: None), "/live"
 

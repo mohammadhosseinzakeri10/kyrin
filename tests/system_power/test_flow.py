@@ -162,6 +162,7 @@ def test_unclear_final_voice_never_confirms_or_changes_the_action() -> None:
     flow.set_announcement(announcements.append)
     assert flow.on_final_speech("Power off")
     first = _wait_for(events, PowerStage.FIRST)
+    assert first.speech_text is not None
     assert first.spoken and "Power off" in first.speech_text
     assert flow.on_final_speech("Yes")
     second = _wait_for(events, PowerStage.SECOND)
@@ -231,7 +232,7 @@ def test_permission_cancel_and_expiry_never_execute() -> None:
     )
     now = 16.0
     flow.expire()
-    assert events[-1].stage is PowerStage.EXPIRED
+    assert _wait_for(events, PowerStage.EXPIRED).stage is PowerStage.EXPIRED
     assert not flow.respond(second_request.request_id, "continue")
     assert backend.actions == []
 

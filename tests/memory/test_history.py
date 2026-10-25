@@ -2,12 +2,13 @@
 
 import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Thread
 
 from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 
 
-def test_history_persists_bounded_final_text_and_can_be_cleared(tmp_path) -> None:
+def test_history_persists_bounded_final_text_and_can_be_cleared(tmp_path: Path) -> None:
     path = tmp_path / "memory" / "conversation.sqlite3"
     history = SqliteConversationHistory(path, max_turns=2)
     for segment in range(3):
@@ -35,7 +36,7 @@ def test_history_persists_bounded_final_text_and_can_be_cleared(tmp_path) -> Non
     reopened.close()
 
 
-def test_history_is_safe_across_ui_and_runtime_threads(tmp_path) -> None:
+def test_history_is_safe_across_ui_and_runtime_threads(tmp_path: Path) -> None:
     history = SqliteConversationHistory(tmp_path / "conversation.sqlite3")
     errors: list[Exception] = []
 
@@ -58,7 +59,7 @@ def test_history_is_safe_across_ui_and_runtime_threads(tmp_path) -> None:
     history.close()
 
 
-def test_legacy_history_can_be_archived_without_losing_turns(tmp_path) -> None:
+def test_legacy_history_can_be_archived_without_losing_turns(tmp_path: Path) -> None:
     path = tmp_path / "conversation.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute(
@@ -94,7 +95,7 @@ def test_legacy_history_can_be_archived_without_losing_turns(tmp_path) -> None:
     reopened.close()
 
 
-def test_archived_turns_are_paged_and_restored_one_at_a_time(tmp_path) -> None:
+def test_archived_turns_are_paged_and_restored_one_at_a_time(tmp_path: Path) -> None:
     history = SqliteConversationHistory(tmp_path / "conversation.sqlite3", max_turns=3)
     for index in range(4):
         history.append(

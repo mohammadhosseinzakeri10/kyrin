@@ -28,7 +28,7 @@ def test_large_desktop_image_is_split_into_ordered_overlapping_bands() -> None:
     assert all(frame.width * frame.height <= 800_000 for frame in frames)
     assert frames[0].box is not None and frames[0].box[1] == 0
     assert frames[-1].box is not None and frames[-1].box[3] == 1048
-    assert frames[0].box[3] > frames[1].box[1]  # type: ignore[index]
+    assert frames[0].box[3] > frames[1].box[1]
 
 
 def test_small_image_is_read_without_tiling() -> None:

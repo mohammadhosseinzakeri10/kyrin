@@ -1203,6 +1203,9 @@ def test_ollama_device_options_and_probe() -> None:
         (DevicePreference.GPU, 999),
         (DevicePreference.AUTO, None),
     ):
+        def probe(url: str, model: str, selected: DevicePreference = device) -> int:
+            return 0 if selected is DevicePreference.CPU else 1024
+
         engine = OllamaCommandEngine(
             "http://127.0.0.1:11435",
             "qwen3.5:4b",
@@ -1210,9 +1213,7 @@ def test_ollama_device_options_and_probe() -> None:
             resources=ModelResources(memory=lambda: MemorySnapshot()),
             token_counter=lambda payload: 1000,
             transport=transport,
-            device_probe=lambda url, model, selected=device: (
-                0 if selected is DevicePreference.CPU else 1024
-            ),
+            device_probe=probe,
         )
         assert (
             engine.understand(

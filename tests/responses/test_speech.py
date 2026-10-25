@@ -1,5 +1,6 @@
 """Offline voice output follows the response channel without blocking capture."""
 
+from collections.abc import Callable
 from pathlib import Path
 from runpy import run_path
 from threading import Event
@@ -174,7 +175,16 @@ def test_local_backend_waits_for_offline_speech_and_propagates_failure(
         def __init__(self, timeout_s: float) -> None:
             assert timeout_s == 15
 
-        def speak(self, text, language, rate, voice, cancelled, valid, playing):
+        def speak(
+            self,
+            text: str,
+            language: str,
+            rate: int,
+            voice: str,
+            cancelled: Event,
+            valid: Callable[[], bool],
+            playing: Callable[[bool], None],
+        ) -> None:
             assert valid()
             calls.append((text, language, rate, voice))
             playing(True)
@@ -259,7 +269,7 @@ def test_interrupt_clears_full_queue_and_rejects_late_custom_synthesis() -> None
         None, None, "old", ResponseChannel.TEXT_AND_VOICE, "en"
     )
 
-    def custom(text, language, valid):
+    def custom(text: str, language: str, valid: Callable[[], bool]) -> None:
         entered.set()
         assert release.wait(2)
         if valid():

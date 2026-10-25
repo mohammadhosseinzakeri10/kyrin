@@ -1,6 +1,7 @@
 """Pointer motion may arrive after the RemoteDesktop portal call returns."""
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -16,9 +17,9 @@ from tests.desktop.test_backend_protocol import bus_reply
 def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     gi = ModuleType("gi")
     repository = ModuleType("gi.repository")
-    repository.Gio = ModuleType("Gio")
-    repository.GLib = ModuleType("GLib")
-    repository.Gio.DBusConnection = object
+    monkeypatch.setattr(repository, "Gio", ModuleType("Gio"), raising=False)
+    monkeypatch.setattr(repository, "GLib", ModuleType("GLib"), raising=False)
+    monkeypatch.setattr(repository.Gio, "DBusConnection", object, raising=False)
     monkeypatch.setitem(sys.modules, "gi", gi)
     monkeypatch.setitem(sys.modules, "gi.repository", repository)
     path = Path(desktop_control.__file__).with_name("desktop_control_helper.py")
@@ -26,7 +27,10 @@ def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    def handshake_transport(args, **kwargs):
+
+    def handshake_transport(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         assert args[-1] == "GetCapabilities", "unexpected unmocked desktop call"
         return bus_reply(
             "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer",
@@ -99,7 +103,15 @@ def test_click_uses_actual_capture_origin_for_decorated_window(
     calls: list[tuple[str, object]] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, arguments, *_rest):
+        def call_sync(
+            self,
+            _bus: str,
+            _object: str,
+            _interface: str,
+            method: str,
+            arguments: object,
+            *_rest: object,
+        ) -> None:
             calls.append((method, arguments))
 
     helper.GLib.Variant = lambda _signature, value: value
@@ -134,7 +146,7 @@ def test_click_stops_if_capture_frame_moved(
     monkeypatch.setattr(helper, "_window_and_pointer", lambda: frame)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("must not dispatch input after a frame change")
 
     assert (
@@ -167,7 +179,7 @@ def test_legacy_click_rejects_unproven_scale_or_shadow(
     monkeypatch.setattr(helper, "_window_and_pointer", lambda: frame)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("legacy dimensions cannot establish scale or shadow origin")
 
     assert helper._click(
@@ -199,7 +211,15 @@ def test_click_uses_explicit_fractional_scale_instead_of_shadow_guess(
     motions: list[object] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, arguments, *_rest):
+        def call_sync(
+            self,
+            _bus: str,
+            _object: str,
+            _interface: str,
+            method: str,
+            arguments: object,
+            *_rest: object,
+        ) -> None:
             if method == "NotifyPointerMotion":
                 motions.append(arguments)
 
@@ -212,11 +232,17 @@ def test_click_uses_explicit_fractional_scale_instead_of_shadow_guess(
         helper, "_focused_window_token", lambda: "window-7", raising=False
     )
     monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
-    validated = []
+    validated: list[tuple[str, tuple[tuple[int, int, int, int], ...]]] = []
+
+    def validate(
+        capture_id: str, regions: tuple[tuple[int, int, int, int], ...]
+    ) -> bool:
+        validated.append((capture_id, regions))
+        return True
     monkeypatch.setattr(
         helper,
         "_capture_still_current",
-        lambda capture_id, regions: validated.append((capture_id, regions)) or True,
+        validate,
     )
     assert (
         helper._click(
@@ -259,7 +285,7 @@ def test_click_rejects_stale_capture_before_pointer_motion(
     monkeypatch.setattr(helper, "monotonic", lambda: 120.0)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("stale capture must not dispatch")
 
     assert (
@@ -304,7 +330,7 @@ def test_click_rejects_same_app_and_pid_with_different_window_token(
     monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("changed window must not dispatch")
 
     assert (
@@ -350,7 +376,7 @@ def test_changed_content_after_input_grant_blocks_click(
     monkeypatch.setattr(helper, "monotonic", lambda: 101.0)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("changed content must not dispatch")
 
     assert (
@@ -381,7 +407,9 @@ def test_final_pointer_must_reach_target_before_button(
     calls: list[str] = []
 
     class Bus:
-        def call_sync(self, _bus, _object, _interface, method, *_rest):
+        def call_sync(
+            self, _bus: str, _object: str, _interface: str, method: str, *_rest: object
+        ) -> None:
             calls.append(method)
 
     assert (
@@ -407,7 +435,7 @@ def test_legacy_capture_reports_missing_geometry_instead_of_window_movement(
     monkeypatch.setattr(helper, "_window_and_pointer", lambda: frame)
 
     class Bus:
-        def call_sync(self, *_args):
+        def call_sync(self, *_args: object) -> None:
             pytest.fail("legacy capture with unmatched dimensions must not click")
 
     assert (

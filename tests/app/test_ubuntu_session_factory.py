@@ -1,9 +1,10 @@
 """The Ubuntu composition honors saved choices without real audio or actions."""
 
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Thread
-from typing import cast
+from typing import TypedDict, Unpack, cast
 
 import pytest
 
@@ -20,7 +21,9 @@ from kyrin.actions.platforms.telegram import ChatVerifier
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
 from kyrin.actions.visible_control import VisibleControlTarget
+from kyrin.app.events import ApplicationEvent
 from kyrin.app.platforms import ubuntu
+from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.settings import (
     AllowedApp,
     AppSettings,
@@ -29,8 +32,12 @@ from kyrin.app.settings import (
     SttSelection,
 )
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
+from kyrin.audio.audio_data import AudioData
+from kyrin.audio.audio_errors import AudioCaptureStopError
 from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
+from kyrin.audio.audio_input import AudioInput
 from kyrin.audio.file_input import FILE_AUDIO_FORMAT, AudioFileInput
+from kyrin.audio.live_speech_pipeline import LiveSpeechEvent, LiveSpeechPipeline
 from kyrin.audio.microphone.devices import MicrophoneConfiguration
 from kyrin.audio.microphone.errors import MicrophoneError
 from kyrin.commands.models import (
@@ -51,21 +58,29 @@ from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.desktop.window_control import WindowControlStatus, WindowOperation
 from kyrin.desktop.window_observation import WindowObservation
 from kyrin.desktop.window_presence import WindowPresence
-from kyrin.memory.history import SqliteConversationHistory
+from kyrin.memory.history import (
+    HistoryRetention,
+    SqliteConversationHistory,
+    default_history_path,
+)
 from kyrin.model_resources import MemorySnapshot, ModelResources
+from kyrin.responses.speech import ResponseSpeaker
 from kyrin.responses.visual_status import VisualPresentation, VisualStatus
 from kyrin.runtime.command_runtime import LiveCommandRuntime
+from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.stt.capabilities import SpeechToTextCapabilities
-from kyrin.stt.contracts import SpeechToTextEngine
-from kyrin.stt.device import ComputeDevice, DevicePreference
+from kyrin.stt.contracts import SpeechToTextEngine, SpeechToTextSession
+from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.system_power.flow import (
     InertPowerBackend,
     PowerAction,
+    PowerPrompt,
     PowerStage,
     SystemPowerFlow,
 )
+from tests.actions.chat_verifier_stub import StubChatVerifier
 
 
 @pytest.fixture(autouse=True)
@@ -102,6 +117,9 @@ class FakeEngine:
         self.capabilities = SpeechToTextCapabilities(
             frozenset({ComputeDevice.CPU}), frozenset({"en"}), True, False
         )
+
+    def open_session(self, options: SpeechToTextOptions) -> SpeechToTextSession:
+        raise AssertionError("Composition tests must not start real recognition")
 
     def close(self) -> None:
         self.closed = True
@@ -166,10 +184,10 @@ def test_whisper_auto_falls_back_but_explicit_gpu_fails(
 class FakeSpeechController:
     """Supply final transcripts at the speech boundary, without PortAudio."""
 
-    def __init__(self, factory: object) -> None:
+    def __init__(self, factory: Callable[[], LiveSpeechPipeline]) -> None:
         self.factory = factory
 
-    def events(self):  # type: ignore[no-untyped-def]
+    def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
         yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
         yield TranscriptUpdate(1, "Open Browser", TranscriptStatus.FINAL, "en")
 
@@ -197,7 +215,45 @@ def _catalog(tmp_path: Path) -> XdgDesktopAppCatalog:
     return XdgDesktopAppCatalog((tmp_path / "data",))
 
 
-def _settings(tmp_path: Path, **changes: object) -> AppSettings:
+class SettingsChanges(TypedDict, total=False):
+    history_enabled: bool
+    history_retention: HistoryRetention
+    microphone_device_key: str | None
+    stt: SttSelection | None
+    allowed_apps: tuple[AllowedApp, ...]
+    allowed_window_apps: tuple[str, ...]
+    allowed_close_apps: tuple[str, ...]
+    allowed_chat_apps: tuple[str, ...]
+    app_spoken_aliases: tuple[AppSpokenAliases, ...]
+    command_model: CommandModelSelection | None
+    action_execution_enabled: bool
+    allow_desktop_control: bool
+    allow_desktop_scroll: bool
+    remember_telegram_pointer: bool
+    system_power_enabled: bool
+    trust_all_capabilities: bool
+
+
+class FakeDetector:
+    input_format = FILE_AUDIO_FORMAT
+    frames_per_window = 512
+
+    def detect(self, window: AudioData) -> bool:
+        raise AssertionError("Composition tests must not run voice detection")
+
+    def reset(self) -> None:
+        pass
+
+
+class FakeAudioInput:
+    def capture(self) -> Iterator[AudioData]:
+        raise AssertionError("Composition tests must not capture real audio")
+
+    def stop_capture(self) -> None:
+        pass
+
+
+def _settings(tmp_path: Path, **changes: Unpack[SettingsChanges]) -> AppSettings:
     base = AppSettings(
         history_enabled=True,
         microphone_device_key='["PulseAudio","USB Mic"]',
@@ -252,11 +308,7 @@ def test_session_applies_selected_active_and_archive_retention(
 ) -> None:
     from datetime import UTC, datetime
 
-    from kyrin.memory.history import (
-        ConversationTurn,
-        HistoryRetention,
-        default_history_path,
-    )
+    from kyrin.memory.history import ConversationTurn
 
     path = default_history_path()
     history = SqliteConversationHistory(path)
@@ -289,10 +341,7 @@ def test_session_applies_selected_active_and_archive_retention(
 def test_live_close_uses_persistent_permission_without_confirmation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trust: bool
 ) -> None:
-    from collections.abc import Iterator
     from time import monotonic
-
-    from kyrin.app.events import ApplicationEvent
 
     completed = Event()
     events: list[ApplicationEvent] = []
@@ -377,7 +426,7 @@ def test_saved_power_consent_does_not_ask_during_voice_playback(
         def close(self) -> None:
             self.closed = True
 
-    prompts = []
+    prompts: list[PowerPrompt] = []
     flow = SystemPowerFlow(InertPowerBackend(), prompts.append, enabled=True)
     echo = ReadyEchoCancellation()
     speaker = BusySpeaker()
@@ -386,10 +435,10 @@ def test_saved_power_consent_does_not_ask_during_voice_playback(
         on_event=lambda event: None,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
-        response_speaker=cast(ubuntu.ResponseSpeaker, speaker),
+        detector_factory=FakeDetector,
+        response_speaker=cast(ResponseSpeaker, speaker),
         system_power=flow,
-        echo_cancellation_factory=lambda: cast(ubuntu.PipeWireEchoCancellation, echo),
+        echo_cancellation_factory=lambda: cast(PipeWireEchoCancellation, echo),
     )
     settings = _settings(
         tmp_path,
@@ -426,10 +475,10 @@ def test_cleanup_closes_stt_even_if_echo_cancellation_close_fails(
         on_event=lambda event: None,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
-        response_speaker=cast(ubuntu.ResponseSpeaker, object()),
+        detector_factory=FakeDetector,
+        response_speaker=cast(ResponseSpeaker, object()),
         echo_cancellation_factory=lambda: cast(
-            ubuntu.PipeWireEchoCancellation, FaultyEchoCancellation()
+            PipeWireEchoCancellation, FaultyEchoCancellation()
         ),
     )
     settings = _settings(tmp_path, microphone_device_key=None)
@@ -456,12 +505,12 @@ def test_failed_capture_stop_cancels_owned_inference_without_closing_active_engi
         on_event=lambda event: None,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
     )
 
-    with pytest.raises(ubuntu.AudioCaptureStopError):
+    with pytest.raises(AudioCaptureStopError):
         with factory(_settings(tmp_path)):
-            raise ubuntu.AudioCaptureStopError("session still active")
+            raise AudioCaptureStopError("session still active")
 
     assert engine.cancelled
     assert not engine.closed
@@ -473,14 +522,14 @@ def test_dry_run_allows_only_configured_app_without_executing(
     monkeypatch.setattr(ubuntu, "SpeechSessionController", FakeSpeechController)
     microphones = FakeMicrophones()
     engine = FakeEngine()
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     executor = RecordingExecutor()
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: engine},
         on_event=events.append,
         microphones=microphones,
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),  # unused by the fake speech controller
+        detector_factory=FakeDetector,  # unused by the fake speech controller
         executor_factory=lambda paths: executor,
     )
 
@@ -492,7 +541,7 @@ def test_dry_run_allows_only_configured_app_without_executing(
     assert executor.requests == []
     requests = [event for event in events if isinstance(event, ActionRequest)]
     assert [item.intent.target for item in requests] == ["telegram"]
-    history_path = ubuntu.default_history_path()
+    history_path = default_history_path()
     assert history_path == tmp_path / "xdg-data/kyrin/memory/conversation.sqlite3"
     history = SqliteConversationHistory(history_path)
     try:
@@ -511,7 +560,7 @@ def test_audio_file_session_uses_file_without_resolving_microphone(
         def __init__(self, create_pipeline):  # type: ignore[no-untyped-def]
             self.create_pipeline = create_pipeline
 
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             self.create_pipeline()
             yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
 
@@ -537,7 +586,7 @@ def test_audio_file_session_uses_file_without_resolving_microphone(
         on_event=lambda event: None,
         microphones=microphones,
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
     )
     with factory.for_audio_file(audio_file)(_settings(tmp_path)) as runtime:
         runtime.run()
@@ -551,15 +600,15 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
 ) -> None:
     completed = Event()
     requested: list[ActionRequest] = []
-    observed: list[ubuntu.ApplicationEvent] = []
+    observed: list[ApplicationEvent] = []
 
     class ScrollSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Scroll down", TranscriptStatus.FINAL, "en")
             assert completed.wait(2)
 
     class ScrollExecutor:
-        def __init__(self, delegate, **kwargs) -> None:
+        def __init__(self, delegate: ActionExecutor, **kwargs: object) -> None:
             assert kwargs["desktop_ids"] == {}
             assert kwargs["allow_any_focused_app"] is True
 
@@ -567,7 +616,7 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
             requested.append(request)
             return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
 
-    def on_event(event: ubuntu.ApplicationEvent) -> None:
+    def on_event(event: ApplicationEvent) -> None:
         observed.append(event)
         if isinstance(event, ActionFeedback):
             completed.set()
@@ -579,7 +628,7 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
         on_event=on_event,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
         focused_window=lambda: ("unselected.desktop", 42),
     )
@@ -609,13 +658,15 @@ def test_visible_click_reaches_unselected_focused_app(
     requested: list[ActionRequest] = []
 
     class ControlSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Click Advanced", TranscriptStatus.FINAL, "en")
             assert completed.wait(2)
 
     class ControlExecutor:
-        def __init__(self, delegate, **kwargs) -> None:
-            assert kwargs["identity_reader"]() == ("unselected.desktop", 42)
+        def __init__(self, delegate: ActionExecutor, **kwargs: object) -> None:
+            identity_reader = kwargs["identity_reader"]
+            assert callable(identity_reader)
+            assert identity_reader() == ("unselected.desktop", 42)
 
         def execute(self, request: ActionRequest) -> ActionResult:
             requested.append(request)
@@ -630,7 +681,7 @@ def test_visible_click_reaches_unselected_focused_app(
         on_event=lambda _event: None,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
         focused_window=lambda: ("unselected.desktop", 42),
         chat_verifier=cast(ChatVerifier, object()) if with_ocr else None,
@@ -652,7 +703,7 @@ def test_selected_command_model_reaches_live_transcript_without_executing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class PoliteSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(
                 0, "Please open Telegram", TranscriptStatus.FINAL, "en"
             )
@@ -686,14 +737,14 @@ def test_selected_command_model_reaches_live_transcript_without_executing(
     monkeypatch.setattr(ubuntu, "SpeechSessionController", PoliteSpeechController)
     monkeypatch.setattr(ubuntu, "OllamaCommandEngine", FakeCommandModel)
     monkeypatch.setattr(ubuntu, "installed_ollama_models", lambda path: ("qwen3.5:4b",))
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     executor = RecordingExecutor()
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=events.append,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: executor,
         command_server_factory=lambda selection: FakeServer(),
     )
@@ -717,7 +768,7 @@ def test_registered_long_app_names_reach_stt_only_if_backend_supports_hints(
     from kyrin.stt.device import SpeechToTextOptions
 
     class CaptureSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             self.factory()
             yield TranscriptUpdate(0, "", TranscriptStatus.FINAL, "en")
 
@@ -750,13 +801,19 @@ def test_registered_long_app_names_reach_stt_only_if_backend_supports_hints(
             False,
             supports_vocabulary_hints=supported,
         )
+
+        def open_current(
+            selection: SttSelection, current: FakeEngine = engine
+        ) -> FakeEngine:
+            return current
+
         factory = ubuntu.UbuntuSessionFactory(
-            stt_openers={"fake": lambda selection, current=engine: current},
+            stt_openers={"fake": open_current},
             on_event=lambda event: None,
             microphones=FakeMicrophones(),
-            source_factory=lambda config: object(),
+            source_factory=lambda config: FakeAudioInput(),
             catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
-            detector_factory=lambda: object(),
+            detector_factory=FakeDetector,
         )
         with factory(settings) as runtime:
             runtime.run()
@@ -768,7 +825,7 @@ def test_omnilingual_uses_longer_pause_without_changing_other_engines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class CaptureSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             self.factory()
             yield TranscriptUpdate(0, "", TranscriptStatus.FINAL, "en")
 
@@ -793,9 +850,9 @@ def test_omnilingual_uses_longer_pause_without_changing_other_engines(
             stt_openers={backend: lambda selection: FakeEngine()},
             on_event=lambda event: None,
             microphones=FakeMicrophones(),
-            source_factory=lambda config: object(),
+            source_factory=lambda config: FakeAudioInput(),
             catalog=catalog,
-            detector_factory=lambda: object(),
+            detector_factory=FakeDetector,
         )
         with factory(settings) as runtime:
             runtime.run()
@@ -808,17 +865,17 @@ def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class PersianSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "مرورگر رو باز کن", TranscriptStatus.FINAL, "fa")
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", PersianSpeechController)
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=events.append,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
     )
     allowed = _settings(
@@ -843,17 +900,17 @@ def test_session_uses_saved_aliases_and_unbound_name_collision_abstains(
     class AliasSpeechController(FakeSpeechController):
         phrase = "Open my messenger"
 
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, self.phrase, TranscriptStatus.FINAL, "en")
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", AliasSpeechController)
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=events.append,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
     )
     allowed = _settings(
@@ -881,7 +938,7 @@ def test_ubuntu_session_asks_which_permitted_browser_before_opening(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class BrowserSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Open browser", TranscriptStatus.FINAL, "en")
             yield TranscriptUpdate(1, "Firefox", TranscriptStatus.FINAL, "en")
 
@@ -898,13 +955,13 @@ def test_ubuntu_session_asks_which_permitted_browser_before_opening(
             encoding="utf-8",
         )
     monkeypatch.setattr(ubuntu, "SpeechSessionController", BrowserSpeechController)
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=events.append,
         microphones=FakeMicrophones(),
         catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
     )
     settings = _settings(
@@ -932,7 +989,7 @@ def test_ubuntu_terminal_menu_reaches_authorized_dry_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class TerminalSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Open Terminal", TranscriptStatus.FINAL, "en")
             yield TranscriptUpdate(1, "number two", TranscriptStatus.FINAL, "en")
 
@@ -952,13 +1009,13 @@ def test_ubuntu_terminal_menu_reaches_authorized_dry_run(
         encoding="utf-8",
     )
     monkeypatch.setattr(ubuntu, "SpeechSessionController", TerminalSpeechController)
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=events.append,
         microphones=FakeMicrophones(),
         catalog=XdgDesktopAppCatalog((tmp_path / "data",)),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         window_presence_factory=lambda mapping: Presence(),
     )
     settings = _settings(
@@ -983,7 +1040,7 @@ def test_enabled_actions_use_only_exact_registered_allowlist(
     action_completed = Event()
 
     class WaitingSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
             assert action_completed.wait(1)
             yield TranscriptUpdate(1, "Open Browser", TranscriptStatus.FINAL, "en")
@@ -991,9 +1048,9 @@ def test_enabled_actions_use_only_exact_registered_allowlist(
     monkeypatch.setattr(ubuntu, "SpeechSessionController", WaitingSpeechController)
     paths_seen: list[dict[str, Path]] = []
     executor = RecordingExecutor()
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
 
-    def on_event(event: ubuntu.ApplicationEvent) -> None:
+    def on_event(event: ApplicationEvent) -> None:
         events.append(event)
         if isinstance(event, ActionFeedback):
             action_completed.set()
@@ -1007,7 +1064,7 @@ def test_enabled_actions_use_only_exact_registered_allowlist(
         on_event=on_event,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=make_executor,
     )
     settings = _settings(tmp_path, action_execution_enabled=True)
@@ -1026,15 +1083,15 @@ def test_optional_foreground_observer_and_mascot_report_confirmed_action(
     action_completed = Event()
 
     class WaitingSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
             assert action_completed.wait(1)
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", WaitingSpeechController)
     visuals: list[VisualPresentation] = []
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
 
-    def on_event(event: ubuntu.ApplicationEvent) -> None:
+    def on_event(event: ApplicationEvent) -> None:
         events.append(event)
         if isinstance(event, ActionFeedback):
             action_completed.set()
@@ -1048,7 +1105,7 @@ def test_optional_foreground_observer_and_mascot_report_confirmed_action(
         on_event=on_event,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: RecordingExecutor(),
         observer_factory=lambda app_ids, catalog: TelegramObserver(),
         visual_publish=visuals.append,
@@ -1070,7 +1127,7 @@ def test_registered_existing_window_is_activated_without_relaunch(
     action_completed = Event()
 
     class WaitingSpeechController(FakeSpeechController):
-        def events(self):  # type: ignore[no-untyped-def]
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             yield TranscriptUpdate(0, "Open Telegram", TranscriptStatus.FINAL, "en")
             assert action_completed.wait(1)
 
@@ -1084,16 +1141,16 @@ def test_registered_existing_window_is_activated_without_relaunch(
             return ActivationAttempt.REQUESTED
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", WaitingSpeechController)
-    events: list[ubuntu.ApplicationEvent] = []
+    events: list[ApplicationEvent] = []
     activated: list[str] = []
     launcher = RecordingExecutor()
 
-    def on_event(event: ubuntu.ApplicationEvent) -> None:
+    def on_event(event: ApplicationEvent) -> None:
         events.append(event)
         if isinstance(event, ActionFeedback):
             action_completed.set()
 
-    def activator_factory(ids: dict[str, str]) -> TelegramActivator:
+    def activator_factory(ids: Mapping[str, str]) -> TelegramActivator:
         assert ids == {"telegram": "telegram.desktop"}
         return TelegramActivator()
 
@@ -1102,7 +1159,7 @@ def test_registered_existing_window_is_activated_without_relaunch(
         on_event=on_event,
         microphones=FakeMicrophones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         executor_factory=lambda paths: launcher,
         observer_factory=lambda app_ids, catalog: TelegramObserver(),
         activator_factory=activator_factory,
@@ -1134,7 +1191,7 @@ def test_missing_microphone_and_explicit_gpu_fail_without_capture(
         on_event=lambda event: None,
         microphones=microphones,
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
     )
     microphones.missing = True
     with pytest.raises(MicrophoneError, match="not available"):
@@ -1172,11 +1229,11 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
 ) -> None:
     catalog = _catalog(tmp_path)
 
-    class ChatVerifier:
+    class ReadyChatVerifier(StubChatVerifier):
         def ready(self) -> bool:
             return True
 
-        def verify(self, app_id: str, pid: int) -> bool:
+        def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
             return True
 
     class TelegramObserver:
@@ -1184,14 +1241,14 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
             return "telegram"
 
     def factory(
-        *, verifier: ubuntu.ChatVerifier | None, identity: bool
+        *, verifier: ChatVerifier | None, identity: bool
     ) -> ubuntu.UbuntuSessionFactory:
         return ubuntu.UbuntuSessionFactory(
             stt_openers={"fake": lambda selection: FakeEngine()},
             on_event=lambda event: None,
             microphones=FakeMicrophones(),
             catalog=catalog,
-            detector_factory=lambda: object(),
+            detector_factory=FakeDetector,
             executor_factory=lambda paths: RecordingExecutor(),
             observer_factory=lambda app_ids, catalog: TelegramObserver(),
             chat_verifier=verifier,
@@ -1199,7 +1256,7 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
         )
 
     settings = _settings(tmp_path, action_execution_enabled=True)
-    with factory(verifier=ChatVerifier(), identity=True)(settings) as runtime:
+    with factory(verifier=ReadyChatVerifier(), identity=True)(settings) as runtime:
         gate = cast(LiveCommandRuntime, runtime)._gate
         assert gate is not None
         assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
@@ -1209,11 +1266,11 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
         gate = cast(LiveCommandRuntime, runtime)._gate
         assert gate is not None
         assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
-    with factory(verifier=ChatVerifier(), identity=False)(permitted) as runtime:
+    with factory(verifier=ReadyChatVerifier(), identity=False)(permitted) as runtime:
         gate = cast(LiveCommandRuntime, runtime)._gate
         assert gate is not None
         assert CommandKind.OPEN_CHAT not in gate.policy.supported_kinds
-    with factory(verifier=ChatVerifier(), identity=True)(permitted) as runtime:
+    with factory(verifier=ReadyChatVerifier(), identity=True)(permitted) as runtime:
         gate = cast(LiveCommandRuntime, runtime)._gate
         assert gate is not None
         assert gate.policy.allowed_chat_apps == frozenset({"telegram"})
@@ -1517,7 +1574,7 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
     executor = RecordingExecutor()
 
     class Microphones(FakeMicrophones):
-        def resolve(self, key):
+        def resolve(self, key: str | None) -> MicrophoneConfiguration:
             return replace(super().resolve(key), device_key=selected)
 
     class Speaker:
@@ -1525,25 +1582,25 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
         is_playing = True
         interrupts = 0
 
-        def interrupt(self):
+        def interrupt(self) -> None:
             self.interrupts += 1
 
-    class Source:
+    class Source(FakeAudioInput):
         audio_format = AudioFormat(16000, 1, AudioSampleFormat.INT16)
 
     class Echo:
-        def start(self, key):
+        def start(self, key: str | None) -> bool:
             keys.append(key)
             return aec_available
 
-        def input(self):
+        def input(self) -> Source:
             return source
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     class Controller(FakeSpeechController):
-        def events(self):
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
             self.factory()
             yield SpeechActivityFrame(
                 AudioData(bytes(320), source.audio_format),
@@ -1552,11 +1609,12 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
                 SpeechTransition.STARTED,
             )
 
-    def pipeline(actual_source, *args, **kwargs):
+    def pipeline(actual_source: AudioInput, *args: object, **kwargs: object) -> object:
         sources.append(actual_source)
         callback = kwargs["on_speech_started"]
         callbacks.append(callback)
         if callback is not None:
+            assert callable(callback)
             callback()
         return object()
 
@@ -1569,10 +1627,10 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
         on_event=events.append,
         microphones=Microphones(),
         catalog=_catalog(tmp_path),
-        detector_factory=lambda: object(),
+        detector_factory=FakeDetector,
         source_factory=lambda config: source,
-        response_speaker=cast(ubuntu.ResponseSpeaker, speaker),
-        echo_cancellation_factory=lambda: cast(ubuntu.PipeWireEchoCancellation, Echo()),
+        response_speaker=cast(ResponseSpeaker, speaker),
+        echo_cancellation_factory=lambda: cast(PipeWireEchoCancellation, Echo()),
         executor_factory=lambda bindings: executor,
     )
     with factory(

@@ -383,7 +383,9 @@ def test_remembered_screen_token_survives_app_close(
         reopened.close()
 
 
-def test_legacy_capture_is_rejected_by_default(monkeypatch, tmp_path):
+def test_legacy_capture_is_rejected_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert QApplication.instance() or QApplication([])
@@ -397,13 +399,15 @@ def test_legacy_capture_is_rejected_by_default(monkeypatch, tmp_path):
         }
     )
     access.request_session()
-    captured = []
+    captured: list[IdentifiedWindowImage | None] = []
     access.capture(captured.append)
     assert captured == [None]
     access.close()
 
 
-def test_screen_late_backend_has_bounded_probe_and_recovers(monkeypatch, tmp_path):
+def test_screen_late_backend_has_bounded_probe_and_recovers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from PySide6.QtCore import QTimer
 
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
@@ -426,7 +430,7 @@ def test_screen_late_backend_has_bounded_probe_and_recovers(monkeypatch, tmp_pat
             "RequestPersistentSession": _reply(True),
         }
     )
-    errors = []
+    errors: list[str] = []
     access.error.connect(errors.append)
     assert access.transport_available and not access.available
     access.request_session()
@@ -463,12 +467,12 @@ def test_screen_late_backend_has_bounded_probe_and_recovers(monkeypatch, tmp_pat
     ],
 )
 def test_screen_incompatible_backend_never_requests_permission(
-    monkeypatch,
-    tmp_path,
-    version,
-    caps,
-    reason,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    version: int,
+    caps: list[str],
+    reason: str,
+) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert QApplication.instance() or QApplication([])
@@ -484,7 +488,9 @@ def test_screen_incompatible_backend_never_requests_permission(
     access.close()
 
 
-def test_legacy_handshake_requires_explicit_compatibility(monkeypatch, tmp_path):
+def test_legacy_handshake_requires_explicit_compatibility(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert QApplication.instance() or QApplication([])
@@ -503,14 +509,16 @@ def test_legacy_handshake_requires_explicit_compatibility(monkeypatch, tmp_path)
         access = StubAccess(replies, allow_legacy_capture=allow_legacy)
         access.request_session()
         assert access.granted is allow_legacy
-        captured = []
+        captured: list[IdentifiedWindowImage | None] = []
         access.capture(captured.append)
         assert (captured[0] is not None) is allow_legacy
         access.close()
 
 
 @pytest.mark.parametrize("stop", ["revoke", "close", "cancel"])
-def test_late_probe_cannot_restart_permission_after_stop(monkeypatch, tmp_path, stop):
+def test_late_probe_cannot_restart_permission_after_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stop: str
+) -> None:
     from time import monotonic
 
     from PySide6.QtCore import QTimer
@@ -560,8 +568,8 @@ def test_late_probe_cannot_restart_permission_after_stop(monkeypatch, tmp_path, 
 
 
 def test_backend_loss_keeps_remembered_permission_and_allows_recovery(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert QApplication.instance() or QApplication([])
@@ -575,7 +583,7 @@ def test_backend_loss_keeps_remembered_permission_and_allows_recovery(
     access.replies["GetCapabilities"] = _reply(
         manifest("CaptureActiveWindow", version=0)
     )
-    captured = []
+    captured: list[IdentifiedWindowImage | None] = []
     access.capture(captured.append)
     assert captured == [None]
     assert not access.granted
