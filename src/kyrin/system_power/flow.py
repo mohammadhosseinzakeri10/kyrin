@@ -1,4 +1,4 @@
-"""Two-step voice-or-click confirmation for disruptive session actions."""
+"""Persistent power consent, with an explicit legacy/inert confirmation flow."""
 
 import re
 from collections.abc import Callable
@@ -8,6 +8,7 @@ from threading import Lock, Thread
 from time import monotonic
 from typing import Protocol
 
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.commands.wake_names import DEFAULT_WAKE_NAMES
 
 
@@ -127,6 +128,7 @@ class SystemPowerFlow:
         publish: Callable[[PowerPrompt], None],
         *,
         enabled: bool,
+        permissions: PermissionPolicy | None = None,
         voice_ready: Callable[[], bool] = lambda: True,
         preview_backend: PowerBackend | None = None,
         timeout_s: float = 45.0,
@@ -138,6 +140,7 @@ class SystemPowerFlow:
         self._publish = publish
         self._announcement: Callable[[PowerPrompt], None] | None = None
         self._enabled = enabled
+        self._permissions = permissions
         self._voice_ready = voice_ready
         self._timeout_s = timeout_s
         self._clock = clock
@@ -164,11 +167,15 @@ class SystemPowerFlow:
         self.start(action)
         return True
 
-    def configure(self, *, enabled: bool) -> None:
+    def configure(
+        self, *, enabled: bool, permissions: PermissionPolicy | None = None
+    ) -> None:
         with self._lock:
+            changed = self._permissions != permissions
             self._enabled = enabled
-            pending = self._pending if not enabled else None
-            if not enabled:
+            self._permissions = permissions
+            pending = self._pending if not enabled or changed else None
+            if pending is not None:
                 self._pending = None
         if pending is not None:
             self._emit(
@@ -201,7 +208,54 @@ class SystemPowerFlow:
             announcement(prompt)
 
     def start(self, action: PowerAction) -> bool:
+        with self._lock:
+            permissions = self._permissions
+        if permissions is not None:
+            return self._start_authorized(action)
         return self._start(action, preview=False)
+
+    def _start_authorized(self, action: PowerAction) -> bool:
+        with self._lock:
+            if (
+                not self._enabled
+                or self._permissions is None
+                or not self._permissions.allows("system_power")
+                or self._pending is not None
+                or self._inflight
+            ):
+                return False
+            self._next_id += 1
+            prompt = PowerPrompt(
+                self._next_id,
+                action,
+                PowerStage.SUBMITTING,
+                "Sending the authorized request to the operating system…",
+            )
+            self._pending = prompt
+            self._deadline = self._clock() + self._timeout_s
+            self._inflight = True
+        self._emit(prompt)
+        Thread(target=self._execute_authorized, args=(prompt,), daemon=True).start()
+        return True
+
+    def _execute_authorized(self, prompt: PowerPrompt) -> None:
+        with self._lock:
+            if self._next_id != prompt.request_id:
+                return
+            if (
+                self._pending != prompt
+                or not self._enabled
+                or self._permissions is None
+                or not self._permissions.allows("system_power")
+                or self._clock() >= self._deadline
+            ):
+                if self._pending == prompt:
+                    self._pending = None
+                self._inflight = False
+                return
+            # Dispatch boundary: cancellation cannot undo a request already sent.
+            self._pending = None
+        self._execute(prompt, self._backend)
 
     def start_preview(self, action: PowerAction) -> bool:
         if self._preview_backend is None:
@@ -297,6 +351,8 @@ class SystemPowerFlow:
         with self._lock:
             pending = self._pending
             if pending is None or pending.request_id != request_id:
+                return False
+            if pending.stage is PowerStage.SUBMITTING and answer not in _NEGATIVE:
                 return False
             if self._clock() >= self._deadline:
                 stage = PowerStage.EXPIRED

@@ -23,19 +23,26 @@ reads used by actions/OCR also receive the remaining budget.
 Tesseract and Paddle run in owned subprocesses. Cancellation/expiry stops and
 reaps the process before its owner returns: SIGTERM, up to 300 ms for cleanup,
 then SIGKILL and reap. A helper's descendant busctl stays in its process group.
-Each input helper receives the absolute deadline and a private inherited
-socket-pair descriptor. Before every portal `Notify*` call it checks deadline,
-asks its owner whether the action generation is still valid, and compares the
-current restore token with its expected permission epoch. Unlink/replacement
-invalidates active input; authorized rotation updates the helper's expected
-value. A revoked token is not recreated by a late `Start` response. Standalone
-setup helpers have a finite local budget and the same token checks.
+L03 (2026-10-25) moves the input helpers into an application-owned persistent
+system-Python process. The private inherited socket carries request IDs, absolute
+deadlines and per-input checkpoints. A current PermissionPolicy decision is
+required for the same capability before each acknowledged event. Acknowledgement
+commits at most that event; cancellation cannot recall an in-flight input. The
+existing FIFO broker still owns the whole compound operation through cleanup.
 
-Portal calls and response timers receive only remaining time. Timeout closes
-an outstanding Request; every acquired Session is closed in `finally`, including
-revocation and interruption. The helper's D-Bus connection disappears on forced
-process termination. These are still one-shot sessions; persistent reuse is not
-introduced by this change. See the official [Request Close contract](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Request.html)
+Only explicit settings setup can create/start/restore a RemoteDesktop session.
+Commands borrow the live connection or return setup_required. Restore-token
+existence is not readiness; a live authorized session without persistence remains
+usable. Tokens are atomically claimed before SelectDevices and replacements are
+atomically saved. No command-time restore or input retry is allowed.
+
+Request timeouts close outstanding portal requests. The shared Session closes on
+revocation, disconnection, operation interruption or application exit, rather than
+in each operation's finally block. Disconnect reaps the old owner before a new
+setup can start, and invalidates earlier waiters. Late Closed signals are scoped
+to their session path. Idle microphone shutdown leaves input connected; restarting
+the application needs explicit setup. See the [L03 contract](SHARED_INPUT_SESSION_FA.md)
+and the official [Request Close contract](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Request.html)
 and [Session lifetime contract](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Session.html).
 
 Limits are explicit:

@@ -9,7 +9,6 @@ from types import ModuleType
 import pytest
 
 from kyrin.actions.platforms import telegram
-from kyrin.app.permission_token import read_opaque_token, save_opaque_token
 from kyrin.vision.capture_geometry import CaptureGeometry
 from tests.desktop.test_backend_protocol import bus_reply
 
@@ -75,45 +74,26 @@ def test_waits_for_stable_focus_without_unconditional_delay(
     assert elapsed <= maximum_elapsed
 
 
-def test_portal_restores_and_rotates_control_token_for_keyboard_action(
+def test_keyboard_action_borrows_live_session_without_start_or_close(
     helper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    token_path = tmp_path / "telegram-control.token"
-    save_opaque_token(token_path, "old-opaque-token")
-    monkeypatch.setattr(helper, "CONTROL_TOKEN_PATH", token_path)
-    monkeypatch.setattr(helper.sys, "argv", ["helper", "org.telegram.desktop", "42"])
     expected = ("org.telegram.desktop", 42)
+    monkeypatch.setattr(helper.sys, "argv", ["helper", expected[0], "42"])
     monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
     monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _identity: True)
-    monkeypatch.setattr(helper, "_key", lambda *_args: None)
+    keys = []
+    monkeypatch.setattr(helper, "_key", lambda *_args: keys.append(_args))
+    monkeypatch.setattr(
+        helper, "_request", lambda *_args: pytest.fail("no portal startup")
+    )
 
-    class Bus:
-        def call_sync(self, *_args):
-            return None
+    class Borrowed:
+        def close(self):
+            pass
 
-    bus = Bus()
-    helper.Gio.bus_get_sync = lambda *_args: bus
-    helper.Gio.BusType = type("BusType", (), {"SESSION": 0})
-    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
-    helper.GLib.Variant = lambda signature, value: (signature, value)
-    calls: list[tuple[str, object]] = []
-
-    def request(_connection, method, arguments, _timeout):
-        calls.append((method, arguments))
-        if method == "CreateSession":
-            return {"session_handle": "/test/session"}
-        if method == "SelectDevices":
-            return {}
-        return {"devices": 3, "restore_token": "next-opaque-token"}
-
-    monkeypatch.setattr(helper, "_request", request)
+    monkeypatch.setattr(helper, "shared_session", lambda devices: (Borrowed(), "/live"))
     assert helper.main() == 0
-    assert calls[1][0] == "SelectDevices"
-    options = calls[1][1][1]
-    assert options["types"] == ("u", 3)
-    assert options["persist_mode"] == ("u", 2)
-    assert options["restore_token"] == ("s", "old-opaque-token")
-    assert read_opaque_token(token_path) == "next-opaque-token"
+    assert keys
 
 
 def test_pointer_click_requires_matching_window_geometry_and_position(
@@ -383,102 +363,76 @@ def test_telegram_rejects_same_pid_new_window_before_button(
     assert calls == ["NotifyPointerMotion"]
 
 
-def test_pointer_grant_restores_and_rotates_token_when_enabled(
-    helper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_pointer_action_preserves_geometry_on_borrowed_session(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected = ("org.telegram.desktop", 42)
-    token_path = tmp_path / "telegram-control.token"
-    save_opaque_token(token_path, "old-pointer-token")
-    monkeypatch.setattr(helper, "CONTROL_TOKEN_PATH", token_path)
+    geometry = CaptureGeometry(
+        "logical_desktop",
+        0,
+        (0, 0, 1600, 900),
+        (1600, 900),
+        1,
+        1,
+        (0, 0, 0, 0),
+        (0, 0),
+        (1, 1),
+        "window-7",
+        "capture-1",
+        100.0,
+    )
+    from json import dumps
+
+    regions = ((70, 220, 90, 24), (300, 220, 20, 20))
     monkeypatch.setattr(
         helper.sys,
         "argv",
         [
-            "helper", expected[0], "42", "click", "70", "220", "90", "24",
-            "1600", "900",
+            "helper",
+            expected[0],
+            "42",
+            "click",
+            "70",
+            "220",
+            "90",
+            "24",
+            "1600",
+            "900",
+            "evidence=" + dumps(regions),
+            "geometry=" + geometry.to_json(),
         ],
     )
     monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
-    monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _identity: True)
-    from json import dumps
+    monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _: True)
+    from types import SimpleNamespace
 
-    geometry = CaptureGeometry(
-        "logical_desktop", 0, (0, 0, 1600, 900), (1600, 900), 1, 1,
-        (0, 0, 0, 0), (0, 0), (1, 1), "window-7", "capture-1", 100.0,
-    )
-    monkeypatch.setattr(helper.sys, "argv", [
-        *helper.sys.argv,
-        "evidence=" + dumps(((70, 220, 90, 24), (300, 220, 20, 20))),
-        "geometry=" + geometry.to_json(),
-    ])
-    validated = []
     monkeypatch.setattr(
-        helper, "_click_verified_box",
-        lambda *_args, **kwargs: validated.append(kwargs) or True,
+        helper,
+        "shared_session",
+        lambda _: (SimpleNamespace(close=lambda: None), "/live"),
     )
-    helper.Gio.bus_get_sync = lambda *_args: type(
-        "Bus", (), {"call_sync": lambda *_args: None}
-    )()
-    helper.Gio.BusType = type("BusType", (), {"SESSION": 0})
-    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
-    helper.GLib.Variant = lambda signature, value: (signature, value)
-    calls: list[tuple[str, object]] = []
-
-    def request(_connection, method, arguments, _timeout):
-        calls.append((method, arguments))
-        if method == "CreateSession":
-            return {"session_handle": "/test/session"}
-        if method == "SelectDevices":
-            return {}
-        return {"devices": 3, "restore_token": "next-pointer-token"}
-
-    monkeypatch.setattr(helper, "_request", request)
+    checked = []
+    monkeypatch.setattr(
+        helper,
+        "_click_verified_box",
+        lambda *args, **kwargs: checked.append(kwargs) or True,
+    )
     assert helper.main() == 0
-    options = calls[1][1][1]
-    assert options["types"] == ("u", 3)
-    assert options["persist_mode"] == ("u", 2)
-    assert options["restore_token"] == ("s", "old-pointer-token")
-    assert read_opaque_token(token_path) == "next-pointer-token"
-    assert validated[0]["geometry"] == geometry
-    assert validated[0]["evidence_regions"] == (
-        (70, 220, 90, 24), (300, 220, 20, 20),
-    )
+    assert checked[0]["geometry"] == geometry
+    assert checked[0]["evidence_regions"] == regions
 
 
-def test_setup_grants_control_without_focusing_or_clicking_telegram(
-    helper: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_standalone_helper_cannot_prepare_system_consent(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    token_path = tmp_path / "telegram-control.token"
-    monkeypatch.setattr(helper, "CONTROL_TOKEN_PATH", token_path)
     monkeypatch.setattr(helper.sys, "argv", ["helper", "grant-control"])
     monkeypatch.setattr(
-        helper, "_focused_identity", lambda: pytest.fail("no chat focus is needed")
+        helper, "_focused_identity", lambda: pytest.fail("no focus read")
     )
     monkeypatch.setattr(
-        helper, "_click_verified_box",
-        lambda *_args: pytest.fail("setup must not click"),
+        helper, "_request", lambda *_args: pytest.fail("no portal startup")
     )
-    helper.Gio.bus_get_sync = lambda *_args: type(
-        "Bus", (), {"call_sync": lambda *_args: None}
-    )()
-    helper.Gio.BusType = type("BusType", (), {"SESSION": 0})
-    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
-    helper.GLib.Variant = lambda signature, value: (signature, value)
-    calls: list[tuple[str, object]] = []
-
-    def request(_connection, method, arguments, _timeout):
-        calls.append((method, arguments))
-        if method == "CreateSession":
-            return {"session_handle": "/test/session"}
-        if method == "SelectDevices":
-            return {}
-        return {"devices": 3, "restore_token": "saved-control-token"}
-
-    monkeypatch.setattr(helper, "_request", request)
-    assert helper.main() == 0
-    assert calls[1][1][1]["types"] == ("u", 3)
-    assert calls[1][1][1]["persist_mode"] == ("u", 2)
-    assert read_opaque_token(token_path) == "saved-control-token"
+    assert helper.main() == 3
 
 
 @pytest.mark.parametrize(
@@ -497,6 +451,7 @@ def test_actions_without_setup_do_not_request_control_portal(
     monkeypatch.setattr(helper, "CONTROL_TOKEN_PATH", tmp_path / "missing.token")
     monkeypatch.setattr(helper.sys, "argv", ["helper", expected[0], "42", *arguments])
     monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: "window-1")
     helper.Gio.bus_get_sync = lambda *_args: type(
         "Bus", (), {"call_sync": lambda *_args: None}
     )()
@@ -564,45 +519,16 @@ def test_telegram_rejects_missing_target_or_outside_evidence_before_input(
     )
 
 
-def test_revocation_after_portal_start_closes_session_without_input_or_token_restore(
-    helper: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+def test_revoked_live_session_does_not_dispatch_keyboard_input(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kyrin.operations import OperationStopped
-
-    path = tmp_path / "telegram-control.token"
-    save_opaque_token(path, "old")
-    monkeypatch.setattr(helper, "CONTROL_TOKEN_PATH", path)
     monkeypatch.setattr(helper.sys, "argv", ["helper", "org.telegram.desktop", "42"])
     monkeypatch.setattr(
         helper, "_focused_identity", lambda: ("org.telegram.desktop", 42)
     )
-    sent = []
-
-    class Bus:
-        def call_sync(self, *args):
-            sent.append(args[3])
-
-    helper.Gio.bus_get_sync = lambda *args: Bus()
-    helper.Gio.BusType = type("BusType", (), {"SESSION": 0})
-    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
-    helper.GLib.Variant = lambda signature, value: value
-    helper.GLib.Error = RuntimeError
-
-    def request(connection, method, arguments, timeout):
-        if method == "CreateSession":
-            return {"session_handle": "/session"}
-        if method == "SelectDevices":
-            return {}
-        path.unlink()
-        return {"devices": 3, "restore_token": "late"}
-
-    monkeypatch.setattr(helper, "_request", request)
-    with pytest.raises(OperationStopped):
-        helper.main()
-    assert sent == ["Close"]
-    assert not path.exists()
+    monkeypatch.setattr(helper, "shared_session", lambda _: None)
+    monkeypatch.setattr(helper, "_key", lambda *_args: pytest.fail("no revoked input"))
+    assert helper.main() == 3
 
 
 def test_portal_request_timeout_closes_request_and_ignores_late_response(

@@ -1,6 +1,6 @@
 """Keep local playback out of the continuously captured audio stream."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Protocol
 
 from kyrin.audio.audio_data import AudioData
@@ -15,13 +15,23 @@ class PlaybackState(Protocol):
 class PlaybackGuardInput:
     """Pass through microphone chunks, or replace playback-time chunks with silence."""
 
-    def __init__(self, source: AudioInput, playback: PlaybackState) -> None:
+    def __init__(
+        self,
+        source: AudioInput,
+        playback: PlaybackState,
+        *,
+        on_guard: Callable[[bool], None] | None = None,
+    ) -> None:
         self._source = source
         self._playback = playback
+        self._on_guard = on_guard
 
     def capture(self) -> Iterator[AudioData]:
         for chunk in self._source.capture():
-            if self._playback.is_playing:
+            guarded = self._playback.is_playing
+            if self._on_guard is not None:
+                self._on_guard(guarded)
+            if guarded:
                 yield AudioData(
                     bytes(len(chunk.data)),
                     chunk.audio_format,

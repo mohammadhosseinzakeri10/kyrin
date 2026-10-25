@@ -162,6 +162,87 @@ def _window(
     )
 
 
+def test_trust_is_visible_persistent_and_revocable_in_settings(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.app.permissions import PermissionPolicy
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    settings = AppSettings(listening_enabled=False)
+    window = _window(settings, store, _controller([]))
+    try:
+        page = window.actions_page
+        page.enabled_checkbox.setChecked(True)
+        page.trust_all_checkbox.setChecked(True)
+        assert page.has_unsaved_changes(settings)
+        assert page.desktop_control_grant_button.isEnabled()
+        assert page.desktop_scroll_grant_button.isEnabled()
+        assert page.telegram_pointer_grant_button.isEnabled()
+        # Trust enables setup without manufacturing invalid granular app grants.
+        assert not page.telegram_chat_checkbox.isEnabled()
+        assert not page.telegram_pointer_checkbox.isEnabled()
+        candidate = window._candidate_settings()
+        window._save_and_start(candidate)
+        assert store.load().trust_all_capabilities
+    finally:
+        window.close()
+    # A new UI instance reads the persisted setting, not widget memory.
+    reopened = _window(JsonSettingsStore(store.path).load(), store, _controller([]))
+    try:
+        page = reopened.actions_page
+        assert page.trust_all_checkbox.isChecked()
+        assert "future" in page.trust_all_checkbox.text()
+        for name in ("desktop-control", "desktop-scroll", "telegram-control"):
+            save_opaque_token(permission_token_path(name), "old-grant")
+        page.revoke_permissions_button.click()
+        candidate = reopened._candidate_settings()
+        reopened._save_and_start(candidate)
+        loaded = JsonSettingsStore(store.path).load()
+        assert not loaded.trust_all_capabilities and not loaded.action_execution_enabled
+        assert not PermissionPolicy(loaded).allows("close_window", "chrome")
+        assert all(
+            not permission_token_path(name).exists()
+            for name in ("desktop-control", "desktop-scroll", "telegram-control")
+        )
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("kind", ["telegram", "scroll", "control"])
+def test_late_portal_grant_completion_does_not_restore_revoked_permission(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    window = _window(
+        AppSettings(listening_enabled=False),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+    )
+    capability, attribute = {
+        "telegram": ("telegram_chat", "_pointer_grant_process"),
+        "scroll": ("desktop_scroll", "_scroll_grant_process"),
+        "control": ("desktop_control", "_control_grant_process"),
+    }[kind]
+    calls = []
+    job = SimpleNamespace(capability=capability, deleteLater=lambda: None)
+    setattr(window, attribute, job)
+    monkeypatch.setattr(
+        window._input_sessions, "disconnect", lambda **kwargs: calls.append(kwargs)
+    )
+    window._finish_input_setup(job, attribute, {"state": "ready", "devices": 3})
+    assert calls == [{"forget": True}]
+    assert getattr(window, attribute) is None
+    window.close()
+
+
 def test_preferences_can_clear_local_text_history(
     application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -986,8 +1067,37 @@ def test_voice_modes_start_in_standby_and_full_off_persists(
     settings = AppSettings(stt=SttSelection("vosk", model, "en"))
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(settings)
-    sessions: list[FakeSession] = []
-    controller = _controller(sessions, start_in_standby=True)
+    stopped = Event()
+    modes: list[VoiceModeChanged] = []
+    sessions: list[LiveCommandRuntime] = []
+
+    class Source:
+        def events(self) -> Generator[SpeechRuntimeEvent]:
+            assert stopped.wait(3)
+            yield from ()
+
+        def stop(self) -> None:
+            stopped.set()
+
+    @contextmanager
+    def factory(_settings: AppSettings) -> Iterator[RuntimeSession]:
+        runtime = LiveCommandRuntime(
+            Source(),
+            coordinator=None,
+            gate=None,
+            observer=None,
+            executor=None,
+            on_live_event=lambda _: None,
+            on_command_event=lambda _: None,
+            on_action_output=lambda _: None,
+            on_session_end=lambda _: None,
+            voice_standby=True,
+            on_voice_mode=modes.append,
+        )
+        sessions.append(runtime)
+        yield runtime
+
+    controller = ApplicationController(factory, start_in_standby=True)
     window = _window(settings, store, controller)
     try:
         window.start_initial_session()
@@ -1001,15 +1111,46 @@ def test_voice_modes_start_in_standby_and_full_off_persists(
         window._on_event(AudioCaptureReady())
         window._refresh()
         assert ENGLISH["state_standby"] in window.status_label.text()
-        window._on_event(VoiceModeChanged(VoiceMode.ACTIVE))
+        sessions[0]._control_speech(
+            TranscriptUpdate(0, "start listening", TranscriptStatus.FINAL)
+        )
+        window._on_event(modes[-1])
         assert controller.commands_active()
-        window._on_event(VoiceModeChanged(VoiceMode.STANDBY))
+        sessions[0]._control_speech(
+            TranscriptUpdate(1, "stop listening", TranscriptStatus.FINAL)
+        )
+        standby = modes[-1]
+        window._on_event(standby)
         assert not controller.commands_active()
-        assert not sessions[0].stopped.is_set()
-        window._on_event(VoiceModeChanged(VoiceMode.OFF))
+        assert not stopped.is_set()
+        window.listening_button.click()
+        assert controller.commands_active()
+        window._on_event(standby)  # Delayed notification cannot undo GUI Start.
+        window._on_event(VoiceModeChanged(VoiceMode.OFF))  # Unscoped old event.
+        assert controller.commands_active()
+        assert store.load().listening_enabled
+        sessions[0]._control_speech(
+            TranscriptUpdate(2, "turn microphone off", TranscriptStatus.FINAL)
+        )
+        window._on_event(modes[-1])
         _pump_until(application, lambda: controller.wait_until_stopped(0))
-        assert sessions[0].stopped.is_set()
+        assert stopped.is_set()
         assert not store.load().listening_enabled
+        window._audio_ready = False
+        window._on_event(AudioCaptureReady("previous-session"))
+        assert not window._audio_ready
+        window._on_event(
+            TranscriptUpdate(
+                99,
+                "PRIVATE_SENTENCE",
+                TranscriptStatus.FINAL,
+            )
+        )
+        window.recognition_page.copy_listening_diagnostics_button.click()
+        report = QApplication.clipboard().text()
+        assert "L01-v2" in report
+        assert "PRIVATE_SENTENCE" not in report
+        assert "ui capture_ready=" in report
     finally:
         controller.request_stop()
         controller.wait_until_stopped(2)
@@ -1018,8 +1159,9 @@ def test_voice_modes_start_in_standby_and_full_off_persists(
         application.processEvents()
 
 
+@pytest.mark.parametrize("commands_active", [False, True])
 def test_applying_model_change_stops_old_session_before_restart(
-    application: QApplication, tmp_path: Path
+    application: QApplication, tmp_path: Path, commands_active: bool
 ) -> None:
     first = tmp_path / "first-model"
     second = tmp_path / "second-model"
@@ -1029,11 +1171,12 @@ def test_applying_model_change_stops_old_session_before_restart(
     store = JsonSettingsStore(tmp_path / "settings.json")
     store.save(settings)
     sessions: list[FakeSession] = []
-    controller = _controller(sessions)
+    controller = _controller(sessions, start_in_standby=True)
     window = _window(settings, store, controller)
     try:
         window.start_initial_session()
         _pump_until(application, lambda: sessions and sessions[0].running.is_set())
+        controller.set_commands_active(commands_active)
         window.model_path.setText(str(second))
         window.apply_button.click()
         _pump_until(
@@ -1043,6 +1186,7 @@ def test_applying_model_change_stops_old_session_before_restart(
         assert sessions[0].stopped.is_set()
         assert store.load().stt == SttSelection("vosk", second, "en")
         assert controller.status().state is ApplicationState.RUNNING
+        assert controller.commands_active() is commands_active
     finally:
         controller.request_stop()
         controller.wait_until_stopped(2)
@@ -1483,79 +1627,43 @@ def test_scroll_permission_can_be_saved_without_selected_apps(
 def test_telegram_control_access_is_requested_from_settings(
     application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "local-data"))
+    from PySide6.QtCore import QObject, Signal
+
     settings = AppSettings(
         listening_enabled=False,
         allowed_apps=(AllowedApp("telegram", "telegram.desktop"),),
         allowed_chat_apps=("telegram",),
         remember_telegram_pointer=True,
     )
-    calls: list[tuple[str, list[str]]] = []
-    approve = [False]
+    calls = []
+    state = {"state": "unprepared", "devices": 0}
 
-    class FakeSignal:
-        def __init__(self) -> None:
-            self.callback = None
+    class FakeJob(QObject):
+        finished = Signal(object)
 
-        def connect(self, callback) -> None:
-            self.callback = callback
-
-        def emit(self, *args) -> None:
-            assert self.callback is not None
-            self.callback(*args)
-
-    class FakeProcess:
-        def __init__(self, _parent) -> None:
-            self.finished = FakeSignal()
-            self.errorOccurred = FakeSignal()
-            self.program = ""
-            self.arguments: list[str] = []
-
-        def setProgram(self, program: str) -> None:
-            self.program = program
-
-        def setArguments(self, arguments: list[str]) -> None:
-            self.arguments = arguments
+        def __init__(
+            self, service: object, capability: str, parent: QObject
+        ) -> None:
+            super().__init__(parent)
+            self.capability = capability
 
         def start(self) -> None:
-            calls.append((self.program, self.arguments))
-            if approve[0]:
-                save_opaque_token(
-                    permission_token_path("telegram-control"), "granted-control"
-                )
-            self.finished.emit(0 if approve[0] else 1, None)
+            calls.append(self.capability)
+            state.update(state="ready", devices=3, persistent=False)
+            self.finished.emit(dict(state))
 
-        def readAllStandardOutput(self) -> bytes:
-            return b"CONTROL_GRANT_READY"
-
-        def deleteLater(self) -> None:
-            pass
-
-    monkeypatch.setattr("kyrin.app.qt.window.QProcess", FakeProcess)
-    old_keyboard = permission_token_path("telegram-keyboard")
-    old_pointer = permission_token_path("telegram-pointer")
-    save_opaque_token(old_keyboard, "old-keyboard")
-    save_opaque_token(old_pointer, "old-pointer")
+    monkeypatch.setattr("kyrin.app.qt.window.InputSetupJob", FakeJob)
     window = _window(
         settings, JsonSettingsStore(tmp_path / "settings.json"), _controller([])
     )
+    monkeypatch.setattr(window._input_sessions, "status", lambda: dict(state))
     try:
-        button = window.actions_page.telegram_pointer_grant_button
-        assert button.isEnabled()
-        button.click()
-        assert "not saved" in window.actions_page.telegram_pointer_grant_status.text()
-        assert not permission_token_path("telegram-control").exists()
-        assert old_keyboard.exists()
-        assert old_pointer.exists()
-        approve[0] = True
-        button.click()
-        assert len(calls) == 2
-        assert calls[0][0] == "/usr/bin/python3"
-        assert calls[0][1][0].endswith("telegram_portal_helper.py")
-        assert calls[0][1][1] == "grant-control"
-        assert "saved" in window.actions_page.telegram_pointer_grant_status.text()
-        assert not old_keyboard.exists()
-        assert not old_pointer.exists()
+        window.actions_page.telegram_pointer_grant_button.click()
+        application.processEvents()
+        assert calls == ["telegram_chat"]
+        assert "connected" in window.actions_page.telegram_pointer_grant_status.text()
+        # A live grant needs no restore token to be ready.
+        assert not permission_token_path("desktop-input").exists()
     finally:
         window._timer.stop()
         window.deleteLater()

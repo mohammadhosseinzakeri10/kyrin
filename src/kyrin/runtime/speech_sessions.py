@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from threading import Event, Lock
 from typing import Protocol
@@ -52,6 +52,7 @@ class SpeechSessionEnded:
     attempt: int
     error: Exception | None
     retry_delay_s: float | None = None
+    session_id: str = field(default="", compare=False)
 
 
 SpeechRuntimeEvent = LiveSpeechEvent | SpeechSessionEnded

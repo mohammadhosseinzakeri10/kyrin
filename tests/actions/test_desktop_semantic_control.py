@@ -736,7 +736,7 @@ def test_coordinate_fallback_rechecks_node_after_pointer_motion(
         assert calls == ["NotifyPointerMotion"]
 
 
-def test_semantic_cli_needs_no_portal_connection(
+def test_semantic_cli_borrows_owner_without_new_portal_connection(
     semantic: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -745,8 +745,9 @@ def test_semantic_cli_needs_no_portal_connection(
     lifetime = SimpleNamespace(
         check=semantic.owner.check, close=lambda: closed.append(True)
     )
-    monkeypatch.setattr(semantic.helper, "HelperLifetime", lambda *_a: lifetime)
-    monkeypatch.setattr(semantic.helper, "read_opaque_token", lambda _path: "grant")
+    monkeypatch.setattr(
+        semantic.helper, "shared_session", lambda _devices: (lifetime, "/live")
+    )
     monkeypatch.setattr(
         sys,
         "argv",

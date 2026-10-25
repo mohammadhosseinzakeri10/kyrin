@@ -1,5 +1,6 @@
 """Allow only final, explicitly permitted commands to reach an executor."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from kyrin.actions.models import (
@@ -37,6 +38,7 @@ class ActionPolicy:
     supported_kinds: frozenset[CommandKind] = field(
         default_factory=lambda: frozenset({CommandKind.OPEN_APP, CommandKind.OPEN_CHAT})
     )
+    authorize: Callable[[CommandIntent], bool] | None = None
     max_pending: int = 32
 
     def __post_init__(self) -> None:
@@ -182,6 +184,8 @@ class ActionGate:
         return len(self._awaiting_confirmation) + len(self._outstanding)
 
     def _allowed(self, intent: CommandIntent) -> bool:
+        if self.policy.authorize is not None:
+            return self.policy.authorize(intent)
         if intent.kind in (
             CommandKind.OPEN_APP,
             CommandKind.NEW_APP_WINDOW,

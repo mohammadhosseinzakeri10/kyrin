@@ -49,8 +49,12 @@ def test_full_queue_is_an_explicit_failure() -> None:
 
     with AudioCaptureQueue(source, max_chunks=1) as capture:
         assert source.finished.wait(1)
-        with pytest.raises(AudioQueueOverflowError):
+        with pytest.raises(AudioQueueOverflowError) as raised:
             list(capture.chunks())
+        assert raised.value.buffer == "capture_queue"
+        assert raised.value.pending == 2
+        assert raised.value.limit == 1
+        assert raised.value.unit == "chunks"
 
 
 def test_source_failure_reaches_consumer() -> None:

@@ -167,6 +167,18 @@ _TEXT: dict[str, dict[str, str]] = {
         "window_unverified": (
             "نتیجهٔ تغییر پنجره را نتوانستم تأیید کنم. لطفاً صفحه را بررسی کنید."
         ),
+        "window_close_rejected": (
+            "درخواست بستن پنجره رد شد؛ پنجرهٔ موردنظر را فعال کنید "
+            "و فرمان را دوباره بگویید."
+        ),
+        "window_close_commit_unknown": (
+            "پاسخ درخواست بستن پنجره دریافت نشد یا معتبر نبود؛ "
+            "لطفاً وضعیت پنجره را بررسی کنید."
+        ),
+        "window_close_unverified": (
+            "درخواست بستن ارسال شد، اما بسته‌شدن پنجره تأیید نشد؛ "
+            "لطفاً پنجره و پرسش احتمالی ذخیره‌سازی را بررسی کنید."
+        ),
         "window_state_changed": (
             "فهرست پنجره‌ها تغییر کرده است. لطفاً دوباره پنجره‌ها را نمایش دهید."
         ),
@@ -362,6 +374,18 @@ _TEXT: dict[str, dict[str, str]] = {
         "window_unverified": (
             "I couldn't verify the window change. Please check the screen."
         ),
+        "window_close_rejected": (
+            "The window close request was rejected. Focus the intended window "
+            "and repeat the command."
+        ),
+        "window_close_commit_unknown": (
+            "The window close reply was missing or invalid. "
+            "Please check the window's state."
+        ),
+        "window_close_unverified": (
+            "I sent the close request but couldn't verify that the window closed. "
+            "Please check the window and any save dialog."
+        ),
         "window_state_changed": (
             "The window list changed. Please show the Terminal windows again."
         ),
@@ -554,6 +578,9 @@ class ResponsePresenter:
                     "chat_search_uncertain:",
                     "visible_chat_uncertain:",
                     "visible_control_target_changed:",
+                    "window_close_rejected:",
+                    "window_close_commit_unknown:",
+                    "window_close_unverified:",
                 )
             ):
                 code = event.error_code.split(":", 1)[0]

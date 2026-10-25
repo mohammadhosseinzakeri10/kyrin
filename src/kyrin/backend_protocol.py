@@ -135,11 +135,19 @@ def probe_gnome(
 
 
 def helper_manifest(capability: str) -> str:
+    input_helper = capability in {
+        "desktop_scroll-v1",
+        "desktop_control-v1",
+        "telegram_portal-v1",
+    }
     return json.dumps(
         {
             "protocol_version": PROTOCOL_VERSION,
-            "build_id": capability + "-2026-10-24-f20",
-            "capabilities": [capability],
+            "build_id": capability
+            + ("-2026-10-25-l03" if input_helper else "-2026-10-24-f20"),
+            "capabilities": [capability, "shared-input-session-v1"]
+            if input_helper
+            else [capability],
         }
     )
 

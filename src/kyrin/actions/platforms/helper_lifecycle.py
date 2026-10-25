@@ -5,12 +5,35 @@ from __future__ import annotations
 import os
 import select
 import signal
+from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
 from kyrin.app.permission_token import read_opaque_token
-from kyrin.operations import Operation, OperationStopped, activate, remaining
+from kyrin.operations import (
+    Operation,
+    OperationStopped,
+    activate,
+    current_operation,
+    remaining,
+)
+
+# Bound only inside the app-owned system-Python process.
+SESSION_PROVIDER: ContextVar[Any] = ContextVar("input_session_provider", default=None)
+INPUT_CHECK: ContextVar[Callable[[], None] | None] = ContextVar(
+    "input_check", default=None
+)
+
+
+def shared_session(devices: int) -> tuple[Any, str] | None:
+    provider = SESSION_PROVIDER.get()
+    acquired = provider.acquire(devices) if provider is not None else None
+    if acquired is None:
+        return None
+    connection, session, path, token = acquired
+    return HelperLifetime(connection, path, token), session
 
 
 class HelperLifetime:
@@ -29,7 +52,7 @@ class HelperLifetime:
         raw_fd = os.environ.get("KYRIN_OPERATION_FD")
         if raw_fd is not None:
             self.channel_fd = int(raw_fd)
-        self.operation = Operation(
+        self.operation = current_operation() or Operation(
             float(os.environ.get("KYRIN_OPERATION_DEADLINE", str(monotonic() + 65)))
         )
         self._activation = activate(self.operation)
@@ -42,6 +65,12 @@ class HelperLifetime:
 
     def check(self, *, input_event: bool = False) -> None:
         self.operation.remaining()
+        checkpoint = INPUT_CHECK.get()
+        if input_event and checkpoint is not None:
+            provider = SESSION_PROVIDER.get()
+            if provider is None or provider.acquire(0) is None:
+                raise OperationStopped("live input session disconnected")
+            checkpoint()
         if read_opaque_token(self.token_path) != self.token:
             raise OperationStopped("input permission epoch changed")
         if input_event and self.channel_fd is not None:

@@ -16,6 +16,13 @@ class VoiceMode(StrEnum):
 @dataclass(frozen=True, slots=True)
 class VoiceModeChanged:
     mode: VoiceMode
+    previous: VoiceMode | None = None
+    source: str = "voice"
+    reason: str = "exact_final_control"
+    session_id: str = ""
+    generation: int = 0
+    revision: int = 0
+    segment_id: int | None = None
 
 
 _START = {"start listening", "شروع به گوش دادن کن"}
@@ -35,6 +42,9 @@ _OFF = {
 
 def control_phrase(text: str, *, active: bool) -> VoiceMode | None:
     """Require a whole phrase; ordinary speech cannot change microphone state."""
+    # Quotation is not an instruction. Do not erase quote marks into a control.
+    if any(mark in text for mark in ('"', "'", "«", "»", "“", "”", "‘", "’")):
+        return None
     normalized = " ".join(re.sub(r"[^\w\u0600-\u06ff]+", " ", fold_case(text)).split())
     if normalized in _OFF:
         return VoiceMode.OFF

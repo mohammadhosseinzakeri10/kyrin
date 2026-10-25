@@ -8,8 +8,13 @@ from pathlib import Path
 
 def permission_token_path(name: str) -> Path:
     if name not in {
-        "screen", "telegram-keyboard", "telegram-pointer", "telegram-control",
-        "desktop-scroll", "desktop-control",
+        "screen",
+        "telegram-keyboard",
+        "telegram-pointer",
+        "telegram-control",
+        "desktop-scroll",
+        "desktop-control",
+        "desktop-input",
     }:
         raise ValueError("unknown permission")
     configured = os.environ.get("XDG_DATA_HOME")
@@ -87,3 +92,16 @@ def save_opaque_token(path: Path, token: str) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def consume_opaque_token(path: Path) -> str | None:
+    """Atomically remove a single-use restore token before presenting it."""
+    claimed = path.with_name(path.name + ".consuming-" + secrets.token_hex(8))
+    try:
+        os.replace(path, claimed)
+    except FileNotFoundError:
+        return None
+    try:
+        return read_opaque_token(claimed)
+    finally:
+        claimed.unlink(missing_ok=True)

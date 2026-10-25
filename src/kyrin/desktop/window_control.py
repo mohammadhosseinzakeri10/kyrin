@@ -1,7 +1,7 @@
 """Platform-neutral requests to control one existing application window."""
 
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from kyrin.desktop.window_observation import WindowObservation
 
@@ -22,6 +22,21 @@ class WindowControlStatus(StrEnum):
     MULTIPLE_WINDOWS = "multiple_windows"
     UNAVAILABLE = "unavailable"
     UNKNOWN = "unknown"
+
+
+@runtime_checkable
+class NativeWindowCloseConfirmer(Protocol):
+    """Optional platform UI that preserves the prepared window's focus binding."""
+
+    def confirm_close(self, window: WindowObservation, language: str | None) -> bool:
+        """Confirm only this observation; neither close nor renew its deadline."""
+
+
+@runtime_checkable
+class AuthorizedWindowCloser(Protocol):
+    """Commit persistent app consent with the original one-use target binding."""
+
+    def close_authorized(self, window: WindowObservation) -> WindowControlStatus: ...
 
 
 class AppWindowController(Protocol):

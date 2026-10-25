@@ -82,7 +82,11 @@ class AudioCaptureQueue:
                     self._queue.put_nowait(chunk)
                 except Full:
                     self._error = AudioQueueOverflowError(
-                        "Audio capture queue filled before processing caught up"
+                        "Audio capture queue filled before processing caught up",
+                        buffer="capture_queue",
+                        pending=self._queue.maxsize + 1,
+                        limit=self._queue.maxsize,
+                        unit="chunks",
                     )
                     break
         except Exception as exc:

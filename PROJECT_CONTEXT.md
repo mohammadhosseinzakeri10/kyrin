@@ -1,44 +1,118 @@
 # KYRIN — Project Context
 
+**L04 speech-error tolerance — 2026-10-25, owner-approved direction; documentation
+step only:** The owner selected semantic understanding combined with
+language-aware phonetic similarity and valid context for all supported command
+families, with real ASR alternatives when available and bounded reprocessing of
+the same audio for difficult requests. This supersedes the earlier scroll-only
+L04 scope and blanket ban on model-proposed correction. Model proposals remain
+subject to independent input evidence, operation-specific requirements, target
+identity, cancellation, persistent permissions and the existing execution gate.
+Explicit listening controls remain separate. New operations still need their own
+registration and evaluation; no universal accent/language coverage is claimed.
+Only prerequisite step 1 (the revised contract/card) is complete. Evaluation
+data/baseline, backend and phonetic-tool feasibility, thresholds and audio/time
+budgets remain pending. No runtime, settings, dependencies or models changed;
+no behavior tests, live checks or full-project checks were run in this step.
+Contract: docs/commands/L04_SPEECH_UNDERSTANDING_CONTRACT_FA.md. L04 implementation
+and acceptance remain open; earlier handoff statements that L04 had not begun
+describe their historical point in time.
 
-<div dir="rtl" lang="fa">
+**L03 shared live desktop input — 2026-10-25, owner accepted and closed:**
+Explicit settings setup now owns a live system-Python/D-Bus RemoteDesktop session;
+scroll/control/Telegram helpers borrow it without per-command Start or restore.
+The existing FIFO broker and PermissionPolicy remain authoritative. Idle microphone
+shutdown preserves input; app exit, revocation, interrupted input or transport
+failure close/reap the owner. Single-use tokens are atomically consumed/rotated;
+live consent without persistence works. Registry identity registration is attempted
+before portal calls, with unknown fallback identity explicit. Settings show owner
+PID and Start count. Disconnect invalidates earlier waiters, serializes reaping
+before replacement, and old Closed signals cannot invalidate a new session.
+Malformed/late replies never authorize replay. Scroll returns dispatched_unverified.
+Final original checker: 2338 tests passed; syntax/lint passed; 23-file scoped strict
+types passed. Full mypy remains red with 524 errors (526 at the continuation's
+start; two Qt test errors removed, none added by normalized comparison). This is
+not a claim that every existing error predates all L03 work. Isolated synthetic
+Gio/private-D-Bus tests prove ten scrolls/two identities with one Start/sender/
+session, both with and without Registry. An actual isolated headless GNOME/Wayland
+probe registered local.kyrin.KYRIN and displayed the real consent dialog, but
+could not complete its UI consent within the existing deadline; that isolated
+agent-run probe dispatched no real scroll. Subsequently the owner completed
+explicit scroll setup, showed connected/ready status, and confirmed correct
+visible scrolling in KYRIN and Telegram, explicitly accepting closure. Six supplied
+commands (up/down and repeat via "more") all returned dispatched_unverified;
+visual success is owner-confirmed, not automatically verified by that outcome.
+The owner's ten-operation/PID/Start-count series was not supplied, so that exact
+live criterion is not independently measured. The supplied listening report shows
+settings-triggered restarts and explicit GUI standby, with no unexpected listening
+shutdown in that sample; this does not close L01. No code changed or behavior tests
+were rerun during this diagnostic follow-up and documentation-only acceptance.
+Evidence, limitations and optional reproduction steps are in
+docs/development/L03_SHARED_INPUT_SESSION_2026-10-25_FA.md. Contract:
+docs/actions/SHARED_INPUT_SESSION_FA.md. No agent interaction with personal apps,
+extension installation, logout, commit/reset, L04, speech/model behavior or accepted
+Chrome consent changes occurred. Historical one-shot input descriptions below are
+superseded by L03.
 
-**استخراج محدود F22 — ۲۰۲۶/۱۰/۲۴:** مسئولیت ساخت `IdentifiedWindowText`
-از capture و OCR در `from_capture` مشترک شد؛ مسیر مستقل اکنون اندازهٔ تصویر
-و مستطیل‌ها را نیز حمل می‌کند. Qt همین سازنده را پس از تبدیل مختصات مصرف
-می‌کند و سازندهٔ مستقیم سازگار مانده است. سایر استخراج‌های توابع بزرگ،
-نام‌گذاری و قالب‌بندی عمومی F22 باقی‌اند؛ رفع کامل ادعا نمی‌شود.
-آزمون زنده انجام نشده است. [قرارداد](docs/vision/OCR_ARCHITECTURE.md).
 
-</div>
+**Persistent action consent — 2026-10-25 (owner decision):** Saved granular
+permissions, or an explicit persistent trust-all policy covering current and
+future registered command capabilities, now authorize supported actions without
+per-operation KYRIN dialogs or spoken approval. Schema 17 preserves older grants
+without enabling global trust. The shared PermissionPolicy governs admission,
+execution and power; settings changes retain stop-before-save cancellation.
+Target/name ambiguity, request validity, focus, PID/token/generation, deadlines,
+helper permission epochs and one-use close bindings remain independent checks.
+The former F02/F11 per-operation consent and actual two-stage power requirements
+below are historical and superseded. The inert two-stage power preview remains.
+GNOME adds CloseAuthorizedWindow in build
+active-app@kyrin.local-2026-10-25-persistent-permissions; the package was prepared
+for owner installation/loading, never installed by the agent. An isolated real GNOME/Wayland synthetic-window
+probe passed with confirmed close and no dialog; the owner's session was not
+modified. The owner explicitly confirmed Chrome closed with the previous native
+confirmation build; do not reopen that issue without new evidence. Subsequently,
+on 2026-10-25, the owner tested the new change and explicitly reported that the
+issue was fixed and no longer occurred. This confirms acceptance of the tested
+permission workflow; no new capability handshake, exhaustive capability results
+or separate restart-persistence test details were supplied. This documentation
+follow-up changed no code and reran no execution tests.
+See [the contract](docs/actions/PERSISTENT_PERMISSIONS_FA.md) and
+[implementation report](docs/development/PERSISTENT_PERMISSIONS_2026-10-25_FA.md).
 
-<div dir="rtl" lang="fa">
 
-**حفاظت مدل سند — ۲۰۲۶/۱۰/۲۴، F21:** بارگذاری به منشأ/revision و manifest
-مستقلِ بازبینی‌شده با SHA-256 همهٔ فایل‌ها وابسته شد؛ فهرست تأیید فعلاً خالی
-است و از وزن‌های نصب‌شده تأیید ساختگی تولید نشده است. کپیِ بررسی‌شدهٔ مدل
-فقط در پروفایل محدود CPU و پس از probe موفق bubblewrap اجرا می‌شود؛ نبود
-حفاظت موجب توقف است. محیط و cache نشست ارث نمی‌رسند؛ دسترسی GPU غیرفعال
-است. این قرارداد، دسترس‌پذیری و مشاهدات تاریخی مدل‌های سند/GPU را مشروط می‌کند.
-آزمون‌های بی‌خطر تغییر artifact، مدل نامعتبر، timeout و خروج/فرزند worker را
-پوشش می‌دهند. در محیط بررسی namespace رد شد؛ اجرای موفق sandbox، مدل واقعی
-و آزمون زنده انجام نشده‌اند و اعتماد کامل ادعا نمی‌شود.
-[قرارداد و محدودیت‌ها](docs/vision/DOCUMENT_MODEL_PROTECTION.md).
+ **Limited F22 extraction — 2026-10-24:** Construction of `IdentifiedWindowText`
+from capture and OCR is now shared through `from_capture`; the standalone path
+also carries image dimensions and rectangles. Qt uses the same constructor after
+coordinate conversion, and direct construction remains compatible. Other F22
+work on extracting large functions, naming, and general formatting remains open;
+this is not a claim of complete resolution. No live validation was performed.
+See the [contract](docs/vision/OCR_ARCHITECTURE.md).
 
-</div>
+**Document model protection — 2026-10-24, F21:** Loading now requires a
+provenance/revision record and an independently reviewed manifest containing
+SHA-256 hashes for every file. The approval list is currently empty; installed
+weights were not used to fabricate approvals. A verified model copy runs only in
+a restricted CPU profile after a successful bubblewrap probe; execution stops if
+protection is unavailable. The session environment and caches are not inherited,
+and GPU access is disabled. This contract qualifies historical observations
+about document model/GPU availability. Harmless tests cover artifact changes,
+invalid models, timeouts, and worker exit/child processes. Namespace creation
+was denied in the check environment; successful sandbox execution, real-model
+execution, and live validation have not been performed, and full trust is not
+claimed. See the [contract and
+limitations](docs/vision/DOCUMENT_MODEL_PROTECTION.md).
 
-<div dir="rtl" lang="fa">
-
-**نصب و بررسی خودکار — ۲۰۲۶/۱۰/۲۴، بخش دوم F20:** نسخه‌های حل‌شدهٔ هسته،
-ابزار ساخت، توسعه و آزمون Qt جدا در `requirements/` ثبت شده‌اند؛ `pip` و
-`setuptools` حفظ شدند. بررسی‌گر مشترک محلی/CI، نحو، lint، نوع‌های سخت‌گیرانه
-و کل آزمون‌ها را با خانهٔ موقت و بدون اتصال به نشست شخصی اجرا می‌کند؛ شکست
-هیچ مرحله‌ای مخفی نمی‌شود. نصب تازه بدون مدل خارجی یا دادهٔ شخصی تأیید شد؛
-خطاهای نوع موجود مانع سبزشدن کل بررسی‌اند. اجرای واقعی GitHub Actions و
-آزمون زنده انجام نشده‌اند. این یادداشت، گزارش تاریخی بررسی‌های بخش ۹ را
-تکمیل می‌کند. [روش اجرا، نتایج و محدودیت‌ها](docs/development/QUALITY_CHECKS.md).
-
-</div>
+**Installation and automated checks — 2026-10-24, F20 part two:** Resolved
+versions for core dependencies, build tools, development tools, and Qt tests are
+recorded separately in `requirements/`; `pip` and `setuptools` remain in use.
+The shared local/CI checker runs syntax checks, lint, strict type checks, and
+the entire test suite with a temporary home and no connection to the personal
+desktop session. No stage failure is hidden. A fresh installation without
+external models or personal data was verified; existing type errors prevent the
+overall gate from passing. Actual GitHub Actions execution and live validation
+have not been performed. This note supplements the historical check results in
+section 9. See the [procedure, results, and
+limitations](docs/development/QUALITY_CHECKS.md).
 
 > Engineering handoff for the current repository state.
 > Updated: 2026-10-22.
@@ -47,153 +121,176 @@
 > current direction, experiments, and open questions. The repository remains
 > the source of truth when this document and the code disagree.
 
-<div dir="rtl" lang="fa">
+Non-English speech and OCR examples below use English glosses or Latin
+romanization. Romanized spellings distinguish recognition errors but are not
+verbatim Unicode transcripts; historical character-error metrics refer to the
+original script, not these English renderings.
 
-**کشف backend — ۲۰۲۶/۱۰/۲۴، F20:** هر سه افزونهٔ GNOME نسخه، شناسهٔ ساخت
-کد واقعاً بارشده و قابلیت‌ها را از `GetCapabilities` اعلام می‌کنند؛ نصب یا
-introspection جای handshake نیست. مبدل‌های نشست برای سرویس دیررس باقی
-می‌مانند؛ probe بدون ورودی حداکثر سه تلاش دارد و درخواست بعدی دوباره بررسی
-می‌کند. ناسازگاری، نبود handshake و قابلیت ناقص علت مشخص دارند؛ خود عمل
-تکرار نمی‌شود. helperهای ورودی پیش از اجرا با `--capabilities` بررسی می‌شوند.
-تصویر legacy فقط با گزینهٔ سازگاری صریح پذیرفته می‌شود و در ترکیب عادی
-خاموش است. آزمون‌های قطعی بدون GNOME زنده اجرا می‌شوند؛ افزونهٔ نصب‌شده یا
-نشست مالک تغییر نکرده و آزمون زنده انجام نشده است.
-[قرارداد و محدودیت‌ها](docs/desktop/BACKEND_PROTOCOL.md).
+**Backend discovery — 2026-10-24, F20:** All three GNOME extensions report their
+version, the build identity of the code actually loaded, and their capabilities
+through `GetCapabilities`; installation or introspection does not replace the
+handshake. Session adapters remain available for services that appear late. The
+probe sends no input and makes at most three attempts; the next request checks
+again. Incompatibility, a missing handshake, and incomplete capabilities have
+distinct reasons; the action itself is not retried. Input helpers are checked
+with `--capabilities` before execution. Legacy images are accepted only with an
+explicit compatibility option, disabled in the normal composition. Deterministic
+tests run without a live GNOME session; neither the installed extensions nor the
+owner's session was changed, and live validation was not performed. See the
+[contract and limitations](docs/desktop/BACKEND_PROTOCOL.md).
 
-</div>
+**History retention — 2026-10-24, F17:** With the owner's approval, storage is
+disabled for fresh installations; older settings preserve the previous enabled
+behavior. The defaults remain 2,000 active texts without time-based expiry and
+an unlimited archive. Count and age limits are configured separately for each
+area; reducing a limit requires confirmation. Disabling storage stops history
+reads and writes for microphone/file sessions while retaining existing data.
+Archiving and removing from context, deleting active entries, and deleting all
+active/archived database entries are separate operations; separate backups are
+not deleted. Tests used a temporary database, an injected clock, and an
+offscreen interface; the personal database was not opened, and live validation
+was not performed. This contract supplements the historical descriptions in
+sections 112 and 113. See [retention details and deletion
+scope](docs/commands/CONVERSATION_MEMORY.md).
 
-<div dir="rtl" lang="fa">
+**Model resources and command budgets — 2026-10-24, F19:** Shared model
+admission in the Ubuntu composition, STT/command priority, a bounded queue, STT
+residency until the end of the session, and unloading command/TTS models after
+use are implemented. Peak memory is not assumed to equal weight size; an
+explicit limit requires a measured profile, and operation without a profile does
+not guarantee protection against OOM. Context is budgeted using the selected
+GGUF tokenizer, the complete Ollama template, the response budget, and
+relevance. Operation/permission evidence and confirmation text are not removed.
+The rendering API is version-dependent; an unavailable tokenizer causes the
+model path to fail closed. Synthetic tests provide coverage, but baseline
+measurements, actual peak measurements, and live validation have not been
+performed; no speed or memory improvement is claimed. Details, profile keys, and
+preemption limitations are documented in the [model resource
+contract](docs/app/MODEL_RESOURCE_POLICY.md).
 
-**نگهداری تاریخچه ــ ۲۰۲۶/۱۰/۲۴، F17:** با تأیید مالک، ذخیره در نصب تازه
-خاموش است و تنظیمات قدیمی رفتار روشن قبلی را حفظ می‌کنند. پیش‌فرض فعال
-۲۰۰۰ متن بدون انقضای زمانی و بایگانی نامحدود حفظ شده است. سقف تعداد/سن هر
-بخش جدا تنظیم می‌شود؛ کاهش سقف تأیید می‌خواهد. خاموش‌بودن ذخیره، خواندن و
-نوشتن تاریخچهٔ نشست میکروفون/فایل را قطع می‌کند و دادهٔ قبلی را نگه می‌دارد.
-بایگانی و خروج از زمینه، حذف فعال و حذف همهٔ فعال/بایگانی پایگاه داده از هم
-جدا هستند؛ نسخه‌های پشتیبان جدا حذف نمی‌شوند. آزمون با پایگاه دادهٔ موقت،
-ساعت تزریقی و رابط بدون نمایش انجام شده؛ دیتابیس شخصی باز نشده و آزمون زنده
-انجام نشده است. این قرارداد توضیح تاریخی بخش‌های ۱۱۲ و ۱۱۳ را تکمیل می‌کند.
-[جزئیات نگهداری و دامنهٔ حذف](docs/commands/CONVERSATION_MEMORY.md).
+**Speech interruption — 2026-10-24, F16:** The AEC path now checks the actual
+resolved microphone identity and accepts only a unique mapping with connected
+microphone and speaker-reference inputs. Unsupported input falls back to
+half-duplex operation. Confirmed speech onset in the AEC path invalidates the
+spoken response and late audio, while all onset audio reaches STT. Model
+queuing/generation is separate from playback and the echo guard. Manually
+stopping a response in the interface is independent of the microphone and
+operation cancellation; VAD does not authorize actions. The system backend uses
+a local SSIP connection to cancel only its own message. In-process generation
+may continue until its call finishes, but late output is not played. This
+supplements the historical descriptions in sections 49 and 124–127. Synthetic
+tests provide coverage; echo quality, real speech interruption, and
+compatibility with the installed service still require live hardware validation.
+See the [contract, supported paths, and
+limitations](docs/responses/OFFLINE_SPEECH_OUTPUT.md).
 
-</div>
+**Latency measurement — 2026-10-24, F18:** Producer timestamps are recorded with
+unique session, stream, segment, and stage identifiers. The first stage result
+is distinct from completion of plan processing. Audio acquisition time is
+carried through queuing and conversion; uncertain attribution in streaming
+backends remains unknown. Queuing, model calls, the executor, and existing
+postcondition boundaries are recorded separately; executor duration includes its
+internal checks. Bounded reports exclude private content and publish p50/p95
+only with at least 20 valid samples per path/condition. Cold/warm status is not
+inferred from execution order. Deterministic tests do not replace live
+measurements. Live validation and actual cold/warm benchmarks have not been
+performed. This contract supplements the historical description in section 113.
+See the [contract and measurement tool](docs/app/COMMAND_LATENCY.md).
 
-<div dir="rtl" lang="fa">
+**Telegram navigation and typing — 2026-10-24, F10:** The fixed menu click was
+removed. A unique live accessibility control is resolved using its role, name,
+ancestry, state, geometry, and window token. The previously validated two-Escape
+path remains, but Search focus is now semantic; Ctrl+A and global typing of the
+name were removed. Text is sent directly to the same EditableText object in
+chunks of at most four characters. Focus, identity, and text are checked between
+chunks, and shared ownership/cancellation/permission checks run before every
+mutation. The initial window token is captured before portal interaction.
+Missing AT-SPI capabilities, recognized labels, or unique evidence stops
+menu/search execution; there is no coordinate fallback or blind typing. OCR row
+and destination recognition remains conservative and dependent on a supported
+layout. Synthetic tests cover focus, window, size, sidebar, and RTL changes;
+compatibility with the installed version, localized labels, and live
+Telegram/AT-SPI/portal execution remains unverified.
 
-**منابع مدل و بودجهٔ فرمان — ۲۰۲۶/۱۰/۲۴، F19:** پذیرش مشترک مدل‌ها در
-ترکیب Ubuntu، اولویت STT/فرمان، صف محدود، اقامت STT تا پایان نشست و تخلیهٔ
-مدل فرمان/TTS پس از استفاده پیاده شده‌اند. peak وزن فرض نمی‌شود؛ سقف صریح
-به پروفایل اندازه‌گیری‌شده نیاز دارد و حالت بدون پروفایل تضمین OOM نمی‌دهد.
-context با توکن‌سازی GGUF منتخب و قالب کامل Ollama، بودجهٔ پاسخ و relevance
-بسته می‌شود؛ شواهد عملیات/مجوز و متن تأیید حذف نمی‌شوند. API رندر نسخه‌وابسته
-و نبود توکن‌ساز موجب رد محافظه‌کارانهٔ مسیر مدل است. آزمون‌های ساختگی پوشش
-دارند؛ baseline، peak واقعی و آزمون زنده انجام نشده و بهبود سرعت/حافظه ادعا
-نمی‌شود. جزئیات، کلیدهای پروفایل و محدودیت پیش‌دستی در
-[قرارداد منابع مدل](docs/app/MODEL_RESOURCE_POLICY.md) آمده است.
+**Capture geometry pipeline — 2026-10-24, F13:** The producer no longer assumes
+symmetric shadows or equal monitor/PNG scales. Buffer bounds must match the
+actor; the PNG-to-buffer ratio determines scale, and the frame is the permitted
+interaction area. Versioned metadata makes coordinate spaces explicit; Qt
+rejects the old version. The legacy path no longer guesses shadows or scale when
+dimensions differ. Qt performs crop/zoom conversion once, and both actuators
+consume original-image pixels. Deterministic tests spanning GJS, Qt, and input
+cover asymmetric shadows, scales of 1/1.25/1.5/2, negative origins, and window
+movement. This supersedes the historical symmetric-shadow assumption in the
+2026-10-22 note. Extension installation/loading and live mixed-DPI, Wayland, and
+XWayland validation have not been performed. See the [contract and
+limitations](docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md).
 
-</div>
+**Shared OCR phrase handling — 2026-10-24, F12:** The OCR inventory and locator
+now share `assemble_phrases` and `normalize_phrase` in `text_targets.py`.
+Backend reading order, Persian, English, and mixed-script single-span/multi-span
+phrases, and ambiguity from duplicates are preserved. Confidence filtering
+follows phrase assembly; missing confidence remains unknown. Same-line, spacing,
+and bounded-overlap rules are shared; the target language and 0.65 threshold are
+unchanged. This replaces the inventory's separate four-word grouping.
+Deterministic regression tests were added; live validation was not performed.
+See the [OCR contract](docs/vision/OCR_ARCHITECTURE.md).
 
-<div dir="rtl" lang="fa">
+**Shared window-close confirmation — 2026-10-24, F11:** Direct and numbered
+close commands for Terminal and ordinary applications now require shared
+button-based confirmation for the same action/request/window in addition to
+application permission. Earlier name-disambiguation or action-selection
+dialogues alone do not authorize closing. The decision is bound to the PID,
+token, observation generation, and a fixed ten-second deadline. GNOME resolves
+the target again in the same execution turn before closing and consumes the
+decision once. Focus changes, even when focus returns, window or selection-list
+changes, and stale responses are rejected. Normal close requests are preserved,
+and save dialogues are not answered. The independent two-confirmation power flow
+is unchanged. The updated extension must be installed and loaded; live
+validation was not performed. This contract supplements the historical
+name/action confirmation descriptions in sections 101 and 123. See the [current
+contract](docs/desktop/ACTIVE_APP_OBSERVATION.md).
 
-**وقفهٔ صوتی ــ ۲۰۲۶/۱۰/۲۴، F16:** مسیر AEC اکنون هویت واقعی میکروفون
-حل‌شده را بررسی و فقط نگاشت یکتا و اتصال میکروفون/مرجع بلندگو را می‌پذیرد؛
-ورودی پشتیبانی‌نشده به حالت نیمه‌دوطرفه می‌رود. شروع تأییدشدهٔ گفتار در
-مسیر AEC پاسخ صوتی و صوت دیررس را باطل می‌کند و همهٔ صوت آغاز گفتار به
-STT می‌رسد. صف/تولید مدل از پخش و محافظ پژواک جداست. توقف دستی پاسخ در
-رابط، مستقل از میکروفون و لغو عملیات است؛ VAD مجوز عمل نمی‌دهد. backend
-سیستم با اتصال محلی SSIP فقط پیام خودش را لغو می‌کند. تولید درون‌پردازه‌ای
-ممکن است تا پایان فراخوانی ادامه یابد؛ خروجی دیررس پخش نمی‌شود. این وضعیت
-توضیح تاریخی بخش‌های ۴۹ و ۱۲۴ تا ۱۲۷ را تکمیل می‌کند. آزمون‌های ساختگی
-پوشش دارند؛ کیفیت پژواک، قطع گفتار واقعی و سازگاری سرویس نصب‌شده هنوز با
-آزمون زندهٔ سخت‌افزار تأیید نشده‌اند.
-[قرارداد، مسیرهای پشتیبانی‌شده و محدودیت‌ها](docs/responses/OFFLINE_SPEECH_OUTPUT.md).
+**Capability-based control policy — 2026-10-24, F02:** Reviewed multilingual
+navigation is now tied to tool capabilities. An unknown control executes only
+with independent observation and explicit confirmation for the same operation,
+target, window, and desired state. The decision is single-use, does not extend
+the initial observation deadline, and requires target resolution again after the
+dialogue. Changes to structure, position, state, or window block execution.
+Generic confirmation does not enable sending, deletion, or payment; these
+require dedicated tools and permissions. The model boundary and OCR threshold
+are unchanged. The Qt button interface is connected to the Ubuntu session;
+deterministic tests pass, while live GNOME/AT-SPI/portal validation has not been
+performed. This supersedes the historical statement that the F02 policy was
+unchanged in earlier notes. See the [current
+contract](docs/actions/CONTROL_POLICY.md).
 
-</div>
+**Tool postconditions — 2026-10-24, F03:** Generic control and Telegram input
+now distinguish `DISPATCHED_UNVERIFIED` from verified state and an unknown
+transport outcome. An active dialogue with an exact title, the boolean state of
+the same node, and the Telegram destination header/title provide bounded
+verification evidence; a duplicate chat title does not establish exact identity.
+Bounded rereads were added for delayed results, and an unknown outcome does not
+trigger a fallback click. The automatic second click on an unobserved menu was
+removed; a fresh request first reads the state. A dependent step does not run
+without verification, but launching a different independent application may
+continue. The F02 policy was unchanged by this update, and live validation was
+not performed. Historical dispatch descriptions in older sections are
+supplemented by the [current contract](docs/actions/ACTION_POSTCONDITIONS.md).
 
-<div dir="rtl" lang="fa">
-
-**سنجش تأخیر — ۲۰۲۶/۱۰/۲۴، F18:** زمان‌های تولیدکننده با شناسهٔ یکتای نشست،
-جریان، قطعه و مرحله ثبت می‌شوند؛ اولین نتیجهٔ مرحله از پایان پردازش طرح جداست.
-زمان دریافت صوت از صف و تبدیل عبور می‌کند و انتساب نامطمئنِ backend جریانی
-نامعلوم می‌ماند. صف، فراخوانی مدل، executor و مرزهای موجود پس‌شرط جدا ثبت
-می‌شوند؛ مدت executor شامل بررسی‌های درونی است. گزارش محدود و بدون محتوای
-خصوصی، صدک‌های ۵۰/۹۵ را فقط با حداقل ۲۰ نمونهٔ معتبر در هر مسیر/شرایط منتشر
-می‌کند؛ سرد/گرم از ترتیب اجرا حدس زده نمی‌شود. آزمون‌های قطعی جای اندازه‌گیری
-زنده را نمی‌گیرند. آزمون زنده و بنچمارک واقعی سرد/گرم انجام نشده‌اند.
-این قرارداد، شرح تاریخی بخش ۱۱۳ را تکمیل می‌کند.
-[قرارداد و ابزار اندازه‌گیری](docs/app/COMMAND_LATENCY.md).
-
-</div>
-
-<div dir="rtl" lang="fa">
-
-**ناوبری و تایپ Telegram ــ ۲۰۲۶/۱۰/۲۴، F10:** کلیک ثابت منو حذف شد؛
-کنترل یکتای زندهٔ دسترس‌پذیری با نقش، نام، ancestry، وضعیت، هندسه و token
-پنجره حل می‌شود. مسیر دو Escape معتبر قبلی حفظ شده، اما تمرکز روی Search
-معنایی است؛ Ctrl+A و تایپ سراسری نام حذف شده‌اند. متن در بخش‌های حداکثر
-چهارنویسه‌ای مستقیماً به همان شیء EditableText می‌رود؛ بین بخش‌ها تمرکز،
-هویت و متن بررسی و مالک/لغو/مجوز مشترک پیش از هر تغییر کنترل می‌شوند.
-token اولیهٔ پنجره پیش از portal گرفته می‌شود. نبود قابلیت AT-SPI، برچسب
-شناخته‌شده یا شاهد یکتا اجرای منو/جست‌وجو را متوقف می‌کند؛ fallback مختصاتی
-یا تایپ کور وجود ندارد. تشخیص OCR سطرها و مقصدها همچنان محافظه‌کارانه و
-وابسته به چیدمان پشتیبانی‌شده است. آزمون‌های ساختگی تغییر focus، پنجره،
-اندازه، sidebar و RTL را پوشش می‌دهند؛ سازگاری نسخهٔ نصب‌شده، برچسب‌های
-محلی و اجرای زندهٔ Telegram/AT-SPI/portal هنوز تأیید نشده‌اند.
-
-</div>
-
-<div dir="rtl" lang="fa">
-
-**زنجیرهٔ هندسهٔ تصویر — ۲۰۲۶/۱۰/۲۴، F13:** فرض تقارن سایه و برابری مقیاس
-مانیتور/PNG در تولیدکننده حذف شد. محدودهٔ بافر باید با actor تطبیق کند؛
-نسبت PNG به بافر مقیاس را تعیین می‌کند و قاب، محدودهٔ مجاز تعامل است.
-فرادادهٔ نسخه‌دار فضاهای مختصات را صریح می‌کند؛ Qt نسخهٔ قدیمی را رد می‌کند.
-مسیر قدیمی برای اختلاف ابعاد، دیگر سایه یا مقیاس حدس نمی‌زند. تبدیل
-برش/بزرگ‌نمایی در Qt یک‌بار انجام می‌شود و هر دو actuator پیکسل تصویر اصلی
-را مصرف می‌کنند. آزمون قطعی از GJS تا Qt و ورودی، سایهٔ نامتقارن، مقیاس‌های
-۱/۱٫۲۵/۱٫۵/۲، مبدأ منفی و حرکت پنجره را پوشش می‌دهد. این وضعیت جایگزین
-فرض تاریخیِ سایهٔ متقارن در یادداشت ۲۰۲۶/۱۰/۲۲ است. نصب/بارگذاری افزونه و
-آزمون زندهٔ mixed-DPI، Wayland و XWayland هنوز انجام نشده‌اند.
-[قرارداد و محدودیت‌ها](docs/vision/GNOME_ACTIVE_WINDOW_CAPTURE_PROTOTYPE.md).
-
-</div>
-
-<div dir="rtl" lang="fa">
-
-**یکسان‌سازی عبارت OCR — ۲۰۲۶/۱۰/۲۴، F12:** فهرست OCR و مکان‌یاب اکنون
-از `assemble_phrases` و `normalize_phrase` مشترک در `text_targets.py`
-استفاده می‌کنند؛ ترتیب خواندن backend، عبارت‌های تک‌span/چندspan فارسی،
-انگلیسی و ترکیبی و ابهام تکرارها حفظ می‌شوند. پالایش confidence پس از
-ساخت عبارت است و مقدار ناموجود همچنان نامعلوم می‌ماند. قواعد هم‌سطری،
-فاصله و overlap محدود مشترک‌اند؛ زبان هدف و آستانهٔ ۰٫۶۵ تغییر نکرده‌اند.
-این وضعیت جایگزین گروه‌بندی جداگانهٔ چهارکلمه‌ای inventory می‌شود.
-آزمون‌های رگرسیون قطعی اضافه شده‌اند؛ آزمون زنده انجام نشده است.
-[قرارداد OCR](docs/vision/OCR_ARCHITECTURE.md).
-
-</div>
-
-<div dir="rtl">
-
-**تأیید مشترک بستن پنجره — ۲۰۲۶/۱۰/۲۴، F11:** بستن مستقیم و شماره‌ای، برای Terminal و برنامه‌های معمولی، اکنون علاوه بر مجوز برنامه به تأیید دکمه‌ای مشترک همان عمل/درخواست/پنجره نیاز دارد. گفت‌وگوی قبلیِ تشخیص نام یا انتخاب عمل به‌تنهایی مجوز بستن نیست. تصمیم به PID، token و نسل مشاهده و مهلت ثابت ده‌ثانیه‌ای متصل است؛ GNOME پیش از بستن، هدف را در همان نوبت اجرا دوباره حل و تصمیم را یک‌بار مصرف می‌کند. تغییر تمرکز حتی با بازگشت، تغییر پنجره یا فهرست انتخاب و پاسخ قدیمی رد می‌شوند. درخواست معمول بستن حفظ شده و dialog ذخیره‌سازی پاسخ داده نمی‌شود. مسیر مستقل دو تأیید power تغییر نکرده است. افزونهٔ به‌روز باید نصب و بارگذاری شود؛ آزمون زنده انجام نشده است. این قرارداد توضیح‌های تاریخیِ تأیید نام/عمل در بخش‌های ۱۰۱ و ۱۲۳ را تکمیل می‌کند. [قرارداد فعلی](docs/desktop/ACTIVE_APP_OBSERVATION.md).
-
-</div>
-
-<div dir="rtl">
-
-**سیاست کنترل مبتنی بر قابلیت — ۲۰۲۶/۱۰/۲۴، F02:** ناوبری مرورشدهٔ چندزبانه اکنون به قابلیت ابزار متصل است؛ کنترل ناشناخته فقط با مشاهدهٔ مستقل و تأیید صریح همان عملیات/هدف/پنجره/وضعیت مطلوب اجرا می‌شود. تصمیم یک‌بارمصرف است، مهلت اولیهٔ مشاهده را تمدید نمی‌کند و پس از dialog هدف دوباره حل می‌شود. تغییر ساختار، موقعیت، وضعیت یا پنجره مانع اجراست. ارسال/حذف/پرداخت با تأیید عمومی آزاد نشده‌اند؛ ابزار و مجوز اختصاصی لازم دارند. مرز مدل و آستانهٔ OCR تغییر نکرده‌اند. رابط دکمه‌ای Qt به نشست Ubuntu متصل شده؛ آزمون‌های قطعی موفق‌اند و آزمون زندهٔ GNOME/AT-SPI/portal انجام نشده است. این وضعیت جایگزین توضیح تاریخیِ «سیاست F02 تغییر نکرده» در یادداشت‌های پیشین است. [قرارداد فعلی](docs/actions/CONTROL_POLICY.md).
-
-</div>
-
-<div dir="rtl">
-
-**پس‌شرط ابزارها — ۲۰۲۶/۱۰/۲۴، F03:** کنترل عمومی و ورودی تلگرام اکنون نتیجهٔ `DISPATCHED_UNVERIFIED` را از تأیید وضعیت و پاسخ انتقال نامعلوم جدا می‌کنند. dialog فعال با عنوان دقیق، وضعیت boolean همان node و header/عنوان مقصد تلگرام، شاهدهای محدودِ تأیید هستند؛ عنوان تکراری چت هویت دقیق تولید نمی‌کند. بازخوانی محدود برای نتیجهٔ کند اضافه شده و پاسخ نامعلوم موجب کلیک جایگزین نمی‌شود. کلیک دوم خودکارِ منوی مشاهده‌نشده حذف شده است؛ درخواست تازه ابتدا وضعیت را می‌خواند. مرحلهٔ وابسته بدون تأیید اجرا نمی‌شود، ولی راه‌اندازی برنامهٔ متفاوت مستقل می‌تواند ادامه یابد. سیاست F02 تغییر نکرده و آزمون زنده انجام نشده است. شرح تاریخیِ dispatch در بخش‌های قدیمی با [قرارداد فعلی](docs/actions/ACTION_POSTCONDITIONS.md) تکمیل می‌شود.
-
-</div>
-
-<div dir="rtl">
-
-**استقلال مسیر AT-SPI از OCR ــ ۲۰۲۶/۱۰/۲۴، F04:** فهرست‌سازی، قابلیت نشست و اجرای کنترل استاندارد اکنون بدون سرویس OCR، مجوز تصویر یا screenshot کار می‌کنند؛ مجوز مستقل کنترل دسکتاپ همچنان لازم است. نقش و زنجیرهٔ والدهای گزینه تا فرمان حفظ می‌شود. حل مجدد کنترل به پنجرهٔ فعال یکتا، token اولیه، هندسه، ancestry و وضعیت visible/showing/enabled/sensitive وابسته است؛ hidden/defunct/stale، ابهام و تغییر پنجره رد می‌شوند. helper عمل واقعی Action را با نام و شمارهٔ اعلام‌شده فراخوانی می‌کند و پیش از آن مالک ورودی و مجوز را بررسی می‌کند. فراخوانی عادی فقط پذیرفته‌شدن اجراست؛ تأیید تغییر boolean نیازمند بازخوانی وضعیت است. fallback مختصاتی فقط برای نبود قابلیت Action باقی است و همان مالک مشترک ورودی و بررسی دوباره پیش از فشردن را دارد. سیاست فعلی پیامد و محدودیت toggleهای عمومی مربوط به F02 تغییر نکرده است. آزمون‌های قطعی اضافه شده‌اند؛ آزمون زندهٔ GNOME/AT-SPI انجام نشده است.
-
-</div>
+**AT-SPI independence from OCR — 2026-10-24, F04:** Inventory, session
+capabilities, and standard control execution now work without an OCR service,
+image permission, or screenshots; separate desktop-control permission remains
+required. The option's role and ancestry are preserved through the command.
+Resolving the control again requires a unique active window, the initial token,
+geometry, ancestry, and visible/showing/enabled/sensitive states.
+Hidden/defunct/stale controls, ambiguity, and window changes are rejected. The
+helper invokes the actual Action by its advertised name and index after checking
+input ownership and permission. A normal return establishes only that dispatch
+was accepted; verifying a boolean change requires a state reread. Coordinate
+fallback remains only when the Action capability is absent and uses the same
+shared input owner and recheck before pressing. The current F02 consequence
+policy and restrictions on generic toggles are unchanged. Deterministic tests
+were added; live GNOME/AT-SPI validation was not performed.
 
 > **Initial visible-control window evidence (2026-10-24, F14):** The existing
 > GNOME stable window token is now recorded before final interpretation and
@@ -329,7 +426,7 @@ token اولیهٔ پنجره پیش از portal گرفته می‌شود. نب�
 > operations in unreviewed languages require an exact spoken app name and an
 > explicit, operation-specific confirmation before the normal permission gate.
 > Chat and power operations do not use that fallback.
-> The owner's colloquial Persian `سیستمم رو خاموش کن` now enters the existing
+> The owner's colloquial Persian phrase meaning "shut down my system" now enters the existing
 > independent two-confirmation power flow. Model-only system-power proposals
 > remain blocked because prior scope benchmarks found unsafe proposals.
 > Synthetic tests pass; model accuracy, spoken-language coverage and live
@@ -944,96 +1041,88 @@ token اولیهٔ پنجره پیش از portal گرفته می‌شود. نب�
 
 ## 1. Project Overview
 
-- **Name:** KYRIN.
-- **Package name:** `kyrin`.
-- **Project version:** `0.1.0`.
-- **Product status:** early development.
-- **Current major engineering area:** GNOME screen-access boundary for V1
-  desktop vision, alongside the existing voice/audio pipeline.
-- **Current completed foundation:** audio capture, core PCM data model,
-  streaming mono INT16 sample-rate conversion, configurable audio framing,
-  an offline VAD adapter, continuous speech-activity monitoring, replaceable
-  STT contracts, and a bounded live VAD/STT pipeline.
-- **Current next direction:** measure and improve the speech-to-command path
-  before more chat automation. The owner reported that non-English speech,
-  varying spellings of KYRIN, and `Open chat Save Message` were not reliably
-  understood. The application now displays an in-memory decision trace,
-  accepts configurable wake-name spellings, and supports `auto` language
-  detection with the installed multilingual Whisper adapter. These are
-  diagnostics and bounded improvements, not general multilingual command
-  understanding or an installed translation engine. The permission-gated
-  `Saved Messages` action still needs a live product-path test. Runtime
-  packaging and broader model management remain future work.
-  Settings, lifecycle control, Ubuntu session composition, a Qt control
-  window, a single-instance guard, and user-scoped XDG registration exist.
-  English development uses the locally
-  installed Whisper `small` CPU/GPU adapter while Vosk remains replaceable; this
-  is not a packaged default or a general accuracy claim. The terminal
-  diagnostic stays dry-run by default. Explicitly allowlisted app launch and
-  registered app-name matching have passed focused tests, and the owner
-  validated a real microphone-to-Telegram launch. Model packaging,
-  multilingual setup, a complete product UI, broader stability validation, and
-  Windows/macOS/mobile adapters remain future work.
-- **Conversational response boundary (2026-10-11):** The selected local command
+- **Name:** KYRIN. - **Package name:** `kyrin`. - **Project version:** `0.1.0`.
+  - **Product status:** early development. - **Current major engineering area:**
+  GNOME screen-access boundary for V1 desktop vision, alongside the existing
+  voice/audio pipeline. - **Current completed foundation:** audio capture, core
+  PCM data model, streaming mono INT16 sample-rate conversion, configurable
+  audio framing, an offline VAD adapter, continuous speech-activity monitoring,
+  replaceable STT contracts, and a bounded live VAD/STT pipeline. - **Current
+  next direction:** measure and improve the speech-to-command path before more
+  chat automation. The owner reported that non-English speech, varying spellings
+  of KYRIN, and `Open chat Save Message` were not reliably understood. The
+  application now displays an in-memory decision trace, accepts configurable
+  wake-name spellings, and supports `auto` language detection with the installed
+  multilingual Whisper adapter. These are diagnostics and bounded improvements,
+  not general multilingual command understanding or an installed translation
+  engine. The permission-gated `Saved Messages` action still needs a live
+  product-path test. Runtime packaging and broader model management remain
+  future work. Settings, lifecycle control, Ubuntu session composition, a Qt
+  control window, a single-instance guard, and user-scoped XDG registration
+  exist. English development uses the locally installed Whisper `small` CPU/GPU
+  adapter while Vosk remains replaceable; this is not a packaged default or a
+  general accuracy claim. The terminal diagnostic stays dry-run by default.
+  Explicitly allowlisted app launch and registered app-name matching have passed
+  focused tests, and the owner validated a real microphone-to-Telegram launch.
+  Model packaging, multilingual setup, a complete product UI, broader stability
+  validation, and Windows/macOS/mobile adapters remain future work. -
+  **Conversational response boundary (2026-10-11):** The selected local command
   model can now return a short response to direct speech such as a greeting.
   This becomes a response event with no action intent. A model response to
   recognizable command text is rejected; executable model proposals still
   require independent source, target, and permission checks. The existing
-  pending app-name confirmation accepts exact German `Ja` and `Nein` as well
-  as its English and Persian words. These are local code and deterministic
-  test results; a live microphone and spoken-response check remains open.
-- **Mixed-script and multilingual opening (2026-10-11):** Owner diagnostics
+  pending app-name confirmation accepts exact German `Ja` and `Nein` as well as
+  its English and Persian words. These are local code and deterministic test
+  results; a live microphone and spoken-response check remains open. -
+  **Mixed-script and multilingual opening (2026-10-11):** Owner diagnostics
   showed `Open Telegram` transcribed as Arabic, Urdu, Swedish, and Persian,
-  including `اوپن تلگرام` and `اپن ٹیلیگرام`. Reviewed spellings of the open
-  verb now use exact registered app-name matching, with ambiguous `Opend`
-  asking for confirmation. For other languages, a model-proposed single app
-  opening with a literal, exact, permitted target requires a second short
-  confirmation; model-proposed actions in uncovered languages do not execute
-  directly. A local model can classify that reply in its spoken language.
-  Deterministic tests pass; actual model quality and microphone behavior still
-  require a user-session trial. Other operations and localized confirmation
-  prompts remain open work.
-- **Registered app names and STT hints (2026-10-11):** The owner reported
-  `Please open Visual Studio Code` transcribed as Turkish, Arabic, or only
-  `Please open.` The installed Snap desktop entry is named `Visual Studio
-  Code` and is already in the owner's allowed-app settings. The app-name
-  resolver now derives short forms such as `VS Code` and `VSCode` from
-  registered multiword names, preserving ambiguity when names collide.
-  STT backends that advertise vocabulary-hint support receive up to 16
-  bounded names/short forms from permitted installed apps; the Whisper
-  adapter already passes such hints to local inference. Tests cover the
-  mapping and hint wiring. The reported real audio has not been replayed,
-  and lost or badly transcribed words cannot safely be reconstructed from
-  a model guess.
-- **Generic browser requests (2026-10-11):** `Open browser` was correctly
-  transcribed but could not resolve when only specific browsers such as Chrome
-  and Firefox were permitted. The XDG catalog now reads the registered
+  including Persian- and Urdu-script phonetic renderings of "Open Telegram".
+  Reviewed spellings of the open verb now use exact registered app-name
+  matching, with ambiguous `Opend` asking for confirmation. For other languages,
+  a model-proposed single app opening with a literal, exact, permitted target
+  requires a second short confirmation; model-proposed actions in uncovered
+  languages do not execute directly. A local model can classify that reply in
+  its spoken language. Deterministic tests pass; actual model quality and
+  microphone behavior still require a user-session trial. Other operations and
+  localized confirmation prompts remain open work. - **Registered app names and
+  STT hints (2026-10-11):** The owner reported `Please open Visual Studio Code`
+  transcribed as Turkish, Arabic, or only `Please open.` The installed Snap
+  desktop entry is named `Visual Studio Code` and is already in the owner's
+  allowed-app settings. The app-name resolver now derives short forms such as
+  `VS Code` and `VSCode` from registered multiword names, preserving ambiguity
+  when names collide. STT backends that advertise vocabulary-hint support
+  receive up to 16 bounded names/short forms from permitted installed apps; the
+  Whisper adapter already passes such hints to local inference. Tests cover the
+  mapping and hint wiring. The reported real audio has not been replayed, and
+  lost or badly transcribed words cannot safely be reconstructed from a model
+  guess. - **Generic browser requests (2026-10-11):** `Open browser` was
+  correctly transcribed but could not resolve when only specific browsers such
+  as Chrome and Firefox were permitted. The XDG catalog now reads the registered
   `WebBrowser` category. The Ubuntu session offers only installed, explicitly
-  allowed browsers as clarification candidates; it does not launch one until
-  the user names it. With one candidate it asks for confirmation. Exact app
-  names still follow the existing direct path. Focused unit and composition
-  tests pass; live microphone validation remains open.
-- **Mascot alignment (2026-10-11):** The owner observed that long status
-  captions left the mascot at the left edge. The GNOME extension now gives
-  the mascot a row matching the caption width and positions it at that row's
-  center after each caption resize. The revised extension file was installed
-  in the current user's GNOME extension directory. A fresh Shell session and
-  visual confirmation of short and long captions remain pending.
-- **Current speech and window-focus correction (2026-10-09):** The owner supplied
-  diagnostic traces showing standalone wake-name spellings `Kairin`, `Kyreen`,
-  `Kyrie`, and `Kairi`. The standalone name is now acknowledged with text-only
-  readiness and cannot create an action; the observed variants are exact wake
-  aliases. An unsupported phrase after the name still asks for repetition.
-  The owner also requested that `Open Telegram` raise its existing window.
-  The Ubuntu composition now optionally uses a GNOME Shell adapter to request
-  activation of an existing registered app window, confirms foreground focus
-  with a fresh observation, and launches only when the extension explicitly
-  reports no window. Uncertain activation never triggers a second launch.
-  Focused Python and GJS tests cover these paths. The updated extension file
-  is installed for the current user, but the running GNOME session still
-  exposes the old D-Bus methods after a disable/enable cycle; a fresh GNOME
-  session and live user validation remain required.
-  After that restart, the owner reported repeated `Open Telegram` finals with
+  allowed browsers as clarification candidates; it does not launch one until the
+  user names it. With one candidate it asks for confirmation. Exact app names
+  still follow the existing direct path. Focused unit and composition tests
+  pass; live microphone validation remains open. - **Mascot alignment
+  (2026-10-11):** The owner observed that long status captions left the mascot
+  at the left edge. The GNOME extension now gives the mascot a row matching the
+  caption width and positions it at that row's center after each caption resize.
+  The revised extension file was installed in the current user's GNOME extension
+  directory. A fresh Shell session and visual confirmation of short and long
+  captions remain pending. - **Current speech and window-focus correction
+  (2026-10-09):** The owner supplied diagnostic traces showing standalone
+  wake-name spellings `Kairin`, `Kyreen`, `Kyrie`, and `Kairi`. The standalone
+  name is now acknowledged with text-only readiness and cannot create an action;
+  the observed variants are exact wake aliases. An unsupported phrase after the
+  name still asks for repetition. The owner also requested that `Open Telegram`
+  raise its existing window. The Ubuntu composition now optionally uses a GNOME
+  Shell adapter to request activation of an existing registered app window,
+  confirms foreground focus with a fresh observation, and launches only when the
+  extension explicitly reports no window. Uncertain activation never triggers a
+  second launch. Focused Python and GJS tests cover these paths. The updated
+  extension file is installed for the current user, but the running GNOME
+  session still exposes the old D-Bus methods after a disable/enable cycle; a
+  fresh GNOME session and live user validation remain required. After that
+  restart, the owner reported repeated `Open Telegram` finals with
   `activation_unverified` while the Telegram window was minimized; GNOME showed
   "Telegram is ready" instead of focusing it. One attempt did confirm. The
   interpreter and allowlist were working; the focus request was intermittent.
@@ -1042,55 +1131,54 @@ token اولیهٔ پنجره پیش از portal گرفته می‌شود. نب�
   existing window. The extension now uses the same `Main.activateWindow` path
   used by Ubuntu Dock, with a fresh display timestamp, for this allowlisted
   voice action. Deterministic extension and Python tests pass; the revised
-  installed extension still needs a fresh GNOME session and live verification.
-- **Application foundation:** immutable, versioned settings, an injectable
-  JSON store, and a UI-independent lifecycle controller now exist under
+  installed extension still needs a fresh GNOME session and live verification. -
+  **Application foundation:** immutable, versioned settings, an injectable JSON
+  store, and a UI-independent lifecycle controller now exist under
   `src/kyrin/app/`. Ubuntu composition and an optional Qt control UI connect
-  them to the live runtime. User-scoped login startup registration exists. A missing settings
-  file yields no selected STT model and no action permission. See
-  `docs/app/UBUNTU_APPLICATION_LIFECYCLE_DESIGN.md`.
-- **Visual feedback in progress:** a backend-independent status controller and
-  optional GNOME Shell 50 character adapter now exist in the repository. The
-  character distinguishes processing, clarification, actual action execution,
-  confirmed completion, accepted-but-unverified launch, and failure. Focused
-  Python tests and extension packaging passed. After correcting a GNOME 50
-  drag API incompatibility, the owner observed a visible, draggable character
-  and GNOME reported the extension as `ACTIVE`. Dragging felt laggy, so the
-  extension now coalesces pointer motion and updates position once before each
-  redraw. A separate fresh GNOME Shell 50.1 session verified status delivery
-  and newest-position application. The owner reported that this was much
-  better but still lagged. A visual-translation experiment passed a separate
-  coordinate check but felt much worse on the user's actual desktop, so it was
-  rolled back to frame-coalesced position updates. The remaining live delay
-  needs measurement before another change. The owner rejected the dark static
-  preview and authorized a smaller electric blue/violet animated mascot with
-  contextual captions and a hide control. The optional GNOME
-  adapter now uses a compact vector character and short state-driven motion;
-  the UI has a × button and a top-bar restore control. The owner confirmed
-  dragging, × hide, and restore after restarting the desktop session. The visual
-  caption contract is independent of STT and TTS adapters. Headless GNOME
-  tests verified movement, captions, hide/reopen, and queued position changes.
-  The owner reported that real dragging failed; GNOME logs identified a null
-  pointer-event source passed to `Clutter.Actor.contains()`. The owner later
-  confirmed dragging after a session restart, but × did not hide the mascot.
-  Drag starts on the image-and-caption content now, leaving × as a separate
-  click target. A follow-up made × always clickable, handled primary press
-  directly, and added a hover hint; the owner validated hide/restore after
-  restarting the session. The owner approved more distinct state reactions.
-  The mascot now uses head, eye, body, arm, and leg SVG layers, with
-  compositor-only poses for ready, listening, processing, clarification,
-  actual execution, confirmed/unverified results, and failure. The revised
-  package is installed for the current user. A separate headless GNOME Shell
-  50.1 session loaded all eight states without an extension error. After a
-  restart, the owner observed distinct listening, processing, and execution
-  motion; correct symbols and captions; smooth movement; and working ×
-  hide/restore in a no-action display run. The user-session log showed no
-  extension error. A later local `Open Telegram` microphone run produced a
-  confirmed Telegram foreground action; the owner independently saw Telegram
-  activate and observed the character change states during the real command.
-  A later non-command transcript was the owner's spoken reaction and caused no
-  action. Broader timing and other desktop environments remain unverified.
-  This is not packaged product UI.
+  them to the live runtime. User-scoped login startup registration exists. A
+  missing settings file yields no selected STT model and no action permission.
+  See `docs/app/UBUNTU_APPLICATION_LIFECYCLE_DESIGN.md`. - **Visual feedback in
+  progress:** a backend-independent status controller and optional GNOME Shell
+  50 character adapter now exist in the repository. The character distinguishes
+  processing, clarification, actual action execution, confirmed completion,
+  accepted-but-unverified launch, and failure. Focused Python tests and
+  extension packaging passed. After correcting a GNOME 50 drag API
+  incompatibility, the owner observed a visible, draggable character and GNOME
+  reported the extension as `ACTIVE`. Dragging felt laggy, so the extension now
+  coalesces pointer motion and updates position once before each redraw. A
+  separate fresh GNOME Shell 50.1 session verified status delivery and
+  newest-position application. The owner reported that this was much better but
+  still lagged. A visual-translation experiment passed a separate coordinate
+  check but felt much worse on the user's actual desktop, so it was rolled back
+  to frame-coalesced position updates. The remaining live delay needs
+  measurement before another change. The owner rejected the dark static preview
+  and authorized a smaller electric blue/violet animated mascot with contextual
+  captions and a hide control. The optional GNOME adapter now uses a compact
+  vector character and short state-driven motion; the UI has a × button and a
+  top-bar restore control. The owner confirmed dragging, × hide, and restore
+  after restarting the desktop session. The visual caption contract is
+  independent of STT and TTS adapters. Headless GNOME tests verified movement,
+  captions, hide/reopen, and queued position changes. The owner reported that
+  real dragging failed; GNOME logs identified a null pointer-event source passed
+  to `Clutter.Actor.contains()`. The owner later confirmed dragging after a
+  session restart, but × did not hide the mascot. Drag starts on the
+  image-and-caption content now, leaving × as a separate click target. A
+  follow-up made × always clickable, handled primary press directly, and added a
+  hover hint; the owner validated hide/restore after restarting the session. The
+  owner approved more distinct state reactions. The mascot now uses head, eye,
+  body, arm, and leg SVG layers, with compositor-only poses for ready,
+  listening, processing, clarification, actual execution, confirmed/unverified
+  results, and failure. The revised package is installed for the current user. A
+  separate headless GNOME Shell 50.1 session loaded all eight states without an
+  extension error. After a restart, the owner observed distinct listening,
+  processing, and execution motion; correct symbols and captions; smooth
+  movement; and working × hide/restore in a no-action display run. The
+  user-session log showed no extension error. A later local `Open Telegram`
+  microphone run produced a confirmed Telegram foreground action; the owner
+  independently saw Telegram activate and observed the character change states
+  during the real command. A later non-command transcript was the owner's spoken
+  reaction and caused no action. Broader timing and other desktop environments
+  remain unverified. This is not packaged product UI.
 
 The 2026-10-07 repository audit read the project files by component and found
 two small gaps in the current vertical slice. A final non-command could leave
@@ -2783,24 +2871,24 @@ capture timing. The Vosk CLI in `scripts/stt/evaluate_offline_stt.py` adds no
 dependency and never downloads a model or audio. Focused tests use a fake
 engine and generated PCM files; they do not establish recognition quality.
 
-The temporary `/tmp/kyrin-stt-eval-20261003` corpus/model directory is absent
-in the current environment. No STT model weights are tracked in Git. An
-official `vosk-model-small-fa-0.42` ZIP was downloaded and kept in the ignored
-local `models/archive/` directory. Its extracted files live in `models/local/`;
-ZIP CRC passed and the bundled WAV/reference
-were processed with paced 20 ms chunks. Vosk loaded and produced “من عرضه این
-کار رو ندارم” against “من عرضه اين کارو ندارم”; the defined character metric
-counted 2 edits in 22 normalized characters. The one-file result shows that
-this local model runs, not that it is suitable for KYRIN commands or other
-languages. A small six-command Persian corpus was then recorded with explicit
-consent using one USB microphone and kept under Git-ignored
-`datasets/stt/recordings/`. The speaker confirmed the `fa-05` reference. On
-these six clips, Vosk exactly matched four; aggregate normalized CER was
-12/133 (9.0%). It misheard “کایرین” as “طاهری” and the `fa-05` phrase
-“چت علی را در واتساپ” as “ساعت علی را در صبح”. This is a local baseline, not a
-representative quality claim. A first cross-engine file comparison has now
-been run, but representative multilingual samples and live comparison remain
-open. See `docs/stt/STT_EVALUATION_FA.md`.
+The temporary `/tmp/kyrin-stt-eval-20261003` corpus/model directory is absent in
+the current environment. No STT model weights are tracked in Git. An official
+`vosk-model-small-fa-0.42` ZIP was downloaded and kept in the ignored local
+`models/archive/` directory. Its extracted files live in `models/local/`; ZIP
+CRC passed and the bundled WAV/reference were processed with paced 20 ms chunks.
+Vosk loaded and produced a Persian rendering of "I am not capable of doing this"
+with different character/spacing forms from the Persian reference; the defined
+character metric counted 2 edits in 22 normalized characters. The one-file
+result shows that this local model runs, not that it is suitable for KYRIN
+commands or other languages. A small six-command Persian corpus was then
+recorded with explicit consent using one USB microphone and kept under
+Git-ignored `datasets/stt/recordings/`. The speaker confirmed the `fa-05`
+reference. On these six clips, Vosk exactly matched four; aggregate normalized
+CER was 12/133 (9.0%). It misheard the Persian name "Kyrin" as "Taheri" and the
+`fa-05` phrase meaning "Ali's chat in WhatsApp" as "Ali's clock in the morning".
+This is a local baseline, not a representative quality claim. A first
+cross-engine file comparison has now been run, but representative multilingual
+samples and live comparison remain open. See `docs/stt/STT_EVALUATION_FA.md`.
 
 The repository now tracks `models/README.md` and `models/.gitignore` so the
 development model location and recorded ZIP checksum are discoverable while
@@ -3756,20 +3844,20 @@ attempt missed the start cue and was rejected as nearly silent. After the USB
 input level was set to 60%, four 20-second recordings were saved locally under
 Git-ignored `datasets/stt/recordings/`; the manifest is also ignored. The raw
 recordings are preserved. Single-utterance segments were extracted into the
-ignored `recordings/segments/` directory. The owner confirmed saying each of
-the four template sentences and intentionally repeating them. One complete
-utterance per prompt is selected in the local manifest. Local Whisper `small`
-on GPU returned exact normalized English text for `Close Telegram` and `Open
-browser`; Persian results were `مرورگی را باز کن` and `مارورگره باز نکن` for
-the affirmative and negative browser requests. The four-clip, one-speaker
-character error rate was 5/59 (8.5%). The negative verb remained negative;
-the proposal-only rule pack rejects it as non-executable. The misspelled
-affirmative browser name produces a fuzzy candidate but not an exact app
-match, so the proposal-only boundary would clarify. A separate read-only call
-to the current live `DemoCommandInterpreter` returned actionable close/open
-intents for the two English transcripts, clarification for the Persian
-affirmative, and `NotACommand` for the Persian negative. This was an
-interpreter call only, not a live end-to-end command or executor run. The local report is at
+ignored `recordings/segments/` directory. The owner confirmed saying each of the
+four template sentences and intentionally repeating them. One complete utterance
+per prompt is selected in the local manifest. Local Whisper `small` on GPU
+returned exact normalized English text for `Close Telegram` and `Open browser`;
+Persian results were `morurgi ra baz kon` and `marurgare baz nakon` for the
+affirmative and negative browser requests. The four-clip, one-speaker character
+error rate was 5/59 (8.5%). The negative verb remained negative; the
+proposal-only rule pack rejects it as non-executable. The misspelled affirmative
+browser name produces a fuzzy candidate but not an exact app match, so the
+proposal-only boundary would clarify. A separate read-only call to the current
+live `DemoCommandInterpreter` returned actionable close/open intents for the two
+English transcripts, clarification for the Persian affirmative, and
+`NotACommand` for the Persian negative. This was an interpreter call only, not a
+live end-to-end command or executor run. The local report is at
 `datasets/stt/results/whisper-small-gpu-safety-2026-10-10.json` and is
 Git-ignored. No command was executed. More speakers and languages are needed
 before any broader accuracy or safety claim.
@@ -3785,35 +3873,37 @@ audited against the owner's verified spoken words. This is a read-only
 development comparison; no command executor or app action was invoked.
 
 All four models produced correct resolved proposals for `Close Telegram` and
-`Open browser`. All missed spoken `مرورگر را باز کن`: Qwen 4B/9B requested
-clarification, while Gemma E4B/12B proposed the browser but the source-target
-grounder rejected the misspelled STT target `مرورگی` as non-exact. For spoken
-`مرورگر را باز نکن`, Whisper retained the negation. Qwen 9B and both Gemma
-models produced `no_action`; Qwen 4B returned an invalid model response that
-failed closed. No unsafe resolved proposal appeared. A combined audit of the
-original four clips and these four clips found four correct actions and one
-missed action per model, with two or three correct no-actions depending on the
-model. Eight one-speaker clips are not sufficient to select a model or claim
-general safety. The isolated local Ollama server was stopped after the run.
-The recorded links are tracked in `datasets/commands/verified_speech_links.jsonl`;
-WAV files and model/audit reports remain Git-ignored.
+`Open browser`. All missed spoken `morurgar ra baz kon` ("open the browser"):
+Qwen 4B/9B requested clarification, while Gemma E4B/12B proposed the browser but
+the source-target grounder rejected the misspelled STT target `morurgi` as
+non-exact. For spoken `morurgar ra baz nakon` ("do not open the browser"),
+Whisper retained the negation. Qwen 9B and both Gemma models produced
+`no_action`; Qwen 4B returned an invalid model response that failed closed. No
+unsafe resolved proposal appeared. A combined audit of the original four clips
+and these four clips found four correct actions and one missed action per model,
+with two or three correct no-actions depending on the model. Eight one-speaker
+clips are not sufficient to select a model or claim general safety. The isolated
+local Ollama server was stopped after the run. The recorded links are tracked in
+`datasets/commands/verified_speech_links.jsonl`; WAV files and model/audit
+reports remain Git-ignored.
 
 ## 85. Existing spoken app clarification completed for the observed Persian misspelling
 
 The current live `DemoCommandInterpreter` already offered a single fuzzy,
 registered app as an explicit `CONFIRM_APP` question. A deterministic run with
-Whisper's observed `مرورگی را باز کن` confirmed that no action request was
-issued before the next final transcript `بله`; `نه` declined the suggestion.
-The question is sent through the existing text-and-voice response channel.
-Two narrow corrections were made: the generic `browser` display label is
-rendered as `مرورگر` in a Persian confirmation question, and a later explicit
-negative open command now cancels the pending suggestion. Previously a
-negative final had no action but left the old suggestion pending, so a still
-later `بله` could have authorized the older open request. Focused tests use
-the actual saved Persian STT spellings for the positive and negative turns,
-check the action gate, and confirm no stale request remains. The full test
-suite passed (543 tests). No new command model was integrated and no live
-microphone or desktop action was run for this correction.
+Whisper's observed `morurgi ra baz kon` confirmed that no action request was
+issued before the next final transcript, Persian "yes"; Persian "no" declined
+the suggestion. The question is sent through the existing text-and-voice
+response channel. Two narrow corrections were made: the generic `browser`
+display label is rendered as `morurgar` (the Persian word for "browser") in a
+Persian confirmation question, and a later explicit negative open command now
+cancels the pending suggestion. Previously a negative final had no action but
+left the old suggestion pending, so a still later Persian "yes" could have
+authorized the older open request. Focused tests use the actual saved Persian
+STT spellings for the positive and negative turns, check the action gate, and
+confirm no stale request remains. The full test suite passed (543 tests). No new
+command model was integrated and no live microphone or desktop action was run
+for this correction.
 
 ## 86. Live clarification attempt and recorded-audio replay
 
@@ -3825,65 +3915,66 @@ parser and engine-injection tests passed. This is a development-tool option,
 not a change to product settings or the selected STT model.
 
 With GPU inference, a short Persian utterance under `--language auto` was
-misclassified as Greek. A subsequent `--language fa` run produced the final
-text `مرور گیر را باسکن`; an intentionally slow repeat was split into several
-short VAD turns and yielded word fragments. No confirmation question, voice
-reply, app action, or desktop execution occurred in those live runs. No audio
-was saved during them. These observations concern this speaker and session;
-they do not establish a general Whisper accuracy rate or a VAD defect.
+misclassified as Greek. A subsequent `--language fa` run produced the final text
+`morur gir ra baskon`; an intentionally slow repeat was split into several short
+VAD turns and yielded word fragments. No confirmation question, voice reply, app
+action, or desktop execution occurred in those live runs. No audio was saved
+during them. These observations concern this speaker and session; they do not
+establish a general Whisper accuracy rate or a VAD defect.
 
 To isolate the path, a previously authorized, locally ignored recording of
-spoken `مرورگر را باز کن` was replayed at real-time chunk pace through the
-current `LiveSpeechPipeline`, Silero VAD, and Whisper `small` GPU with Persian
-selected. One speech start, one pause, and the final `مرورگی را باز کن` were
-observed. Deterministic command tests show that this text asks for explicit
-browser confirmation, and `بله` or `نه` then authorizes or declines the
-suggestion. No command was executed during replay. Live microphone validation
-of the complete question-and-answer exchange is still open. The next focused
-check should observe the live STT final before testing that exchange; avoid
-repeating app execution until the question actually appears.
+spoken `morurgar ra baz kon` ("open the browser") was replayed at real-time
+chunk pace through the current `LiveSpeechPipeline`, Silero VAD, and Whisper
+`small` GPU with Persian selected. One speech start, one pause, and the final
+`morurgi ra baz kon` were observed. Deterministic command tests show that this
+text asks for explicit browser confirmation, and Persian "yes" or Persian "no"
+then authorizes or declines the suggestion. No command was executed during
+replay. Live microphone validation of the complete question-and-answer exchange
+is still open. The next focused check should observe the live STT final before
+testing that exchange; avoid repeating app execution until the question actually
+appears.
 
 In the next owner-approved live dry run, the USB microphone at 48 kHz and
-Whisper `small` GPU with `--language fa` received complete speech turns.
-The first final was `مورورگیر را باسکو`; two later finals were
-`مرورگیار روباسکن` and `مورورگیر را باسکن`. The demo interpreter classified
-each as `NotACommand`, so there was no clarification question or action.
-The microphone was stopped cleanly. These observations point to unstable
-recognition of both the app name and the operation in this session; they do
-not justify silently correcting an uncertain operation into an executable
-open command. A product decision is still needed on how command-like but
-unrecognized speech should request repetition or clarification without
-turning ordinary speech or a missed negation into an action.
+Whisper `small` GPU with `--language fa` received complete speech turns. The
+first final was `mururgir ra basku`; two later finals were `morurgiar rubaskon`
+and `mururgir ra baskon`. The demo interpreter classified each as `NotACommand`,
+so there was no clarification question or action. The microphone was stopped
+cleanly. These observations point to unstable recognition of both the app name
+and the operation in this session; they do not justify silently correcting an
+uncertain operation into an executable open command. A product decision is still
+needed on how command-like but unrecognized speech should request repetition or
+clarification without turning ordinary speech or a missed negation into an
+action.
 
-The USB source was then found at 36% input volume, compared with 60% during
-the earlier successful recording. With the owner's prior authorization for
-this input setting, a second dry run temporarily used 60% and restored 36%
-afterward. The two final transcripts were `مورور جره باز کن` and
-`مرور جار را باز کن.` Both received the existing Persian repeat-command
-response and no action; the first lacked the expected `را` pattern, while the
-second app-name spelling fell below the registered-name proposal threshold.
-The action verb was clearer at 60%, but two samples do not prove volume alone
-caused the difference. No clarification confirmation or browser launch was
-tested. A safer next design would generate non-executable app suggestions for
-credible command-shaped text, retain explicit verbal confirmation, and keep
-uncertain or negative operations from becoming actions. That behavior needs
-owner approval and focused safety cases before implementation.
+The USB source was then found at 36% input volume, compared with 60% during the
+earlier successful recording. With the owner's prior authorization for this
+input setting, a second dry run temporarily used 60% and restored 36% afterward.
+The two final transcripts were `murur jare baz kon` and `morur jar ra baz kon.`
+Both received the existing Persian repeat-command response and no action; the
+first lacked the expected `ra` (the formal object marker) pattern, while the
+second app-name spelling fell below the registered-name proposal threshold. The
+action verb was clearer at 60%, but two samples do not prove volume alone caused
+the difference. No clarification confirmation or browser launch was tested. A
+safer next design would generate non-executable app suggestions for credible
+command-shaped text, retain explicit verbal confirmation, and keep uncertain or
+negative operations from becoming actions. That behavior needs owner approval
+and focused safety cases before implementation.
 
 ## 87. Candidate-only recovery for observed spoken app names
 
-The owner approved a narrow recovery step after the live findings in section
-86. `AppNameResolver.resolve()` retains its original stricter suggestion
-threshold for normal lookups. A separate `suggest()` operation now tolerates
-weaker, longer names and spacing differences, but returns candidates only;
-it never marks them exact. The demo interpreter uses this only after a clear
-Persian `باز کن` phrase, including a missing or colloquial case marker, and
-asks for explicit confirmation before any action. Observed live forms such as
-`مرور جار را باز کن` and `مورور جره باز کن` now lead to the browser question.
-An uncertain verb such as `مورورگیر را باسکو` can request repetition but
-cannot become an open action. An explicit negative command cancels a pending
-question, so a later `بله` cannot approve it. The model-neutral semantic
-proposal/grounding boundary remains separate and no language model was
-connected to the live runtime.
+The owner approved a narrow recovery step after the live findings in section 86.
+`AppNameResolver.resolve()` retains its original stricter suggestion threshold
+for normal lookups. A separate `suggest()` operation now tolerates weaker,
+longer names and spacing differences, but returns candidates only; it never
+marks them exact. The demo interpreter uses this only after a clear Persian `baz
+kon` ("open") phrase, including a missing or colloquial case marker, and asks
+for explicit confirmation before any action. Observed live forms such as `morur
+jar ra baz kon` and `murur jare baz kon` now lead to the browser question. An
+uncertain verb such as `mururgir ra basku` can request repetition but cannot
+become an open action. An explicit negative command cancels a pending question,
+so a later Persian "yes" cannot approve it. The model-neutral semantic
+proposal/grounding boundary remains separate and no language model was connected
+to the live runtime.
 
 Focused tests cover these paths and stale catalog-name behavior. A wider
 commands/desktop/runtime/app run had 300 passing tests and two local socket
@@ -3894,35 +3985,37 @@ validated in a fresh live microphone question-and-answer run.
 ## 88. Follow-up live microphone check of candidate-only recovery
 
 The owner approved a live dry run of section 87. The first diagnostic launch
-used a stale PortAudio device index 23 and stopped without capturing speech;
-the USB source had moved to index 22. With the current device and a temporary
-60% input volume, Whisper `small` GPU with Persian selected produced one
-non-command-like final and then `مروریا را باسکن` for the target phrase.
-Because the operation `باز کن` was not recognized, no browser suggestion or
-action was issued. Audio was not saved and the microphone was stopped. The
-USB volume was restored to the 30% value observed immediately before this
-test. A live `بله`/`نه` exchange still has not been validated.
+used a stale PortAudio device index 23 and stopped without capturing speech; the
+USB source had moved to index 22. With the current device and a temporary 60%
+input volume, Whisper `small` GPU with Persian selected produced one
+non-command-like final and then `moruria ra baskon` for the target phrase.
+Because the operation `baz kon` ("open") was not recognized, no browser
+suggestion or action was issued. Audio was not saved and the microphone was
+stopped. The USB volume was restored to the 30% value observed immediately
+before this test. A live Persian "yes"/Persian "no" exchange still has not been
+validated.
 
 The new text also exposed a response gap: the uncertain-verb repeat path
-required a plausible app-name candidate, but `مروریا` fell below even the
-question-only name threshold. The path now recognizes a command-shaped
-Persian `name را/رو operation` utterance whose operation resembles `باز کن`
-as unrecognized, and requests repetition without opening an app or retaining
-a pending confirmation. Negated `باز نکن` is handled earlier and cannot enter
-this path. Focused tests use both observed uncertain-verb spellings and confirm
-that a later `بله` has no action. Commands/desktop/runtime tests passed (187);
-the affected code passes Ruff and Mypy. This change does not improve the
-underlying Whisper transcript or establish broad Persian speech accuracy.
+required a plausible app-name candidate, but `moruria` fell below even the
+question-only name threshold. The path now recognizes a command-shaped Persian
+`name ra/ro operation` utterance whose operation resembles `baz kon` ("open") as
+unrecognized, and requests repetition without opening an app or retaining a
+pending confirmation. Negated `baz nakon` ("do not open") is handled earlier and
+cannot enter this path. Focused tests use both observed uncertain-verb spellings
+and confirm that a later Persian "yes" has no action. Commands/desktop/runtime
+tests passed (187); the affected code passes Ruff and Mypy. This change does not
+improve the underlying Whisper transcript or establish broad Persian speech
+accuracy.
 
 ## 89. USB microphone input-level comparison
 
 The owner approved a bounded three-level check and confirmed reading the same
-Persian phrase `مرورگر را باز کن` once at 30%, 60%, and 100% USB input volume.
-Each 15-second mono 48 kHz WAV was recorded locally under Git-ignored
-`datasets/stt/recordings/gain-comparison-2026-10-10/`. No desktop command was
-executed. The source was 27% immediately before the check and was restored to
-27% afterward. An ephemeral capture script in `/tmp` was used; no product
-microphone behavior or default gain was changed.
+Persian phrase `morurgar ra baz kon` ("open the browser") once at 30%, 60%, and
+100% USB input volume. Each 15-second mono 48 kHz WAV was recorded locally under
+Git-ignored `datasets/stt/recordings/gain-comparison-2026-10-10/`. No desktop
+command was executed. The source was 27% immediately before the check and was
+restored to 27% afterward. An ephemeral capture script in `/tmp` was used; no
+product microphone behavior or default gain was changed.
 
 Silero VAD identified one speech interval in each file. The cropped speech
 RMS values were -13.3, -16.0, and -16.6 dBFS respectively; the 30% clip had
@@ -3968,25 +4061,27 @@ from approximate text or evidence of general multilingual accuracy. See
 
 ## 95. Narrow spoken-Persian command recovery
 
-The live Ubuntu composition now registers `مرورگر` as a spoken alias only
-when the configured browser application is installed and explicitly bound.
-The demonstration interpreter accepts both `را` and colloquial `رو` before
-the explicit `باز کن` operation, but still requires an exact registered app
-name for direct action. An approximate name remains a confirmation question;
-an uncertain verb such as `باسکن` still requests repetition without action.
-A fresh incomplete or unrecognized command clears an older pending app
-confirmation, so a later `بله` cannot authorize that stale suggestion.
-Focused composition, command, and grounding tests pass. This does not repair
-Whisper's transcript itself or establish multilingual speech accuracy; no
-microphone or desktop action was run for this change.
+The live Ubuntu composition now registers `morurgar` (the Persian word for
+"browser") as a spoken alias only when the configured browser application is
+installed and explicitly bound. The demonstration interpreter accepts both the
+formal object marker `ra` and its colloquial form `ro` before the explicit `baz
+kon` ("open") operation, but still requires an exact registered app name for
+direct action. An approximate name remains a confirmation question; an uncertain
+verb such as `baskon` still requests repetition without action. A fresh
+incomplete or unrecognized command clears an older pending app confirmation, so
+a later Persian "yes" cannot authorize that stale suggestion. Focused
+composition, command, and grounding tests pass. This does not repair Whisper's
+transcript itself or establish multilingual speech accuracy; no microphone or
+desktop action was run for this change.
 
-The owner then confirmed two fresh live test utterances, positive
-`مرورگر را باز کن` followed by negative `مرورگر را باز نکن`, during a
-35-second STT-only microphone run with the four-term hint. Their final
-transcripts were `مورورگر، بوسکن.` and `مورورگر را باز نکن.`. The first
-remained ambiguous; the second retained negation. No audio was stored or
-desktop command executed. Because the hint did not solve the positive live
-case, automatic hint generation/activation in the product remains deferred.
+The owner then confirmed two fresh live test utterances, positive `morurgar ra
+baz kon` ("open the browser") followed by negative `morurgar ra baz nakon` ("do
+not open the browser"), during a 35-second STT-only microphone run with the
+four-term hint. Their final transcripts were `mururgar, buskon.` and `mururgar
+ra baz nakon.`. The first remained ambiguous; the second retained negation. No
+audio was stored or desktop command executed. Because the hint did not solve the
+positive live case, automatic hint generation/activation in the product remains
+deferred.
 
 ## 91. Direct/live STT path and language-mode comparison
 
@@ -4003,13 +4098,13 @@ Four speaker-verified safety clips and four additional verified commands were
 replayed on the existing Whisper `small` and `large-v3-turbo-q5_0` GPU models.
 With automatic language detection, `small` attributed 5/8 languages correctly
 and `turbo-q5` 3/8. In the four safety clips, short English `Close Telegram`
-became Arabic-script text on both models; short Persian `مرورگر را باز کن`
-became Greek-script text on `small` and Icelandic-like Latin text on `turbo-q5`.
-The live path had one speech start and pause per clip and no backlog notice.
-Explicit `en` gave correct normalized English text on both models; explicit
-`fa` gave usable but misspelled Persian from `small` and still poor phonetic
-Latin text from `turbo-q5`. No desktop action was run. The corpus is too small
-to select a product default or language-routing policy.
+became Arabic-script text on both models; short Persian `morurgar ra baz kon`
+("open the browser") became Greek-script text on `small` and Icelandic-like
+Latin text on `turbo-q5`. The live path had one speech start and pause per clip
+and no backlog notice. Explicit `en` gave correct normalized English text on
+both models; explicit `fa` gave usable but misspelled Persian from `small` and
+still poor phonetic Latin text from `turbo-q5`. No desktop action was run. The
+corpus is too small to select a product default or language-routing policy.
 
 On this workstation, the warmed GPU returned the four safety-clip finals no
 later than about 0.10 seconds (`small`) or 0.24 seconds (`turbo-q5`) after file
@@ -4596,15 +4691,15 @@ silently mapped to v2rayN. The actual live failure stage remains unconfirmed.
 The next OCR change was started after this report. The local Ubuntu Persian
 Tesseract data package was downloaded to `local-data/downloads/ocr/tesseract/`
 and `fas.traineddata` placed beside the existing `eng.traineddata` in
-`local-data/kyrin/models/ocr/tesseract/`; the downloaded package SHA-256
-matched Ubuntu's package metadata. The OCR contract now accepts bounded
-multi-language codes, and the Telegram verifier selects `fas+eng` only for
-Persian-script chat targets. Persian OCR uses Tesseract page segmentation mode
-3 and phrase matching accepts right-to-left word geometry. A synthetic
-Persian image recognized `آموزش هوش مصنوعی` with three confidence scores above
-0.91 and produced one exact phrase match. The owner has not yet checked a
-private Telegram chat in the live application, so real chat-name accuracy and
-input behavior remain unconfirmed.
+`local-data/kyrin/models/ocr/tesseract/`; the downloaded package SHA-256 matched
+Ubuntu's package metadata. The OCR contract now accepts bounded multi-language
+codes, and the Telegram verifier selects `fas+eng` only for Persian-script chat
+targets. Persian OCR uses Tesseract page segmentation mode 3 and phrase matching
+accepts right-to-left word geometry. OCR on a synthetic Persian image recognized
+a phrase meaning "artificial intelligence education" with three confidence
+scores above 0.91 and produced one exact phrase match. The owner has not yet
+checked a private Telegram chat in the live application, so real chat-name
+accuracy and input behavior remain unconfirmed.
 
 The OCR architecture already had an `OcrEngine` contract but the Qt app always
 selected the discovered Tesseract runtime in code. A saved `OcrSelection` and
@@ -4673,19 +4768,19 @@ five negative commands). The transcript, never the verified spoken reference,
 was supplied to Spark; the reference was used only for scoring. A conservative
 spelling prompt changed none of the 15 texts. An exploratory prompt restricted
 to names already present changed six texts, mostly capitalization, but the
-dry-run rule interpreter still recognized only five of 10 positive intents,
-the same as without correction. Neither variant produced an intent from the
-five negative cases. Crucially, the exploratory prompt shortened
-`مرورگر رو باسکن` to `مرورگر`, deleting the command words and increasing its
-character distance from the verified speech. The five no-intent negative
-results include unreadable transcripts and are not evidence that the model
-understood negation. The second prompt was revised after inspecting the same
-cases, so its result is exploratory, not held-out performance. The two detailed
-reports are in ignored `datasets/stt/results/spark-q8-*-2026-10-14.json` files.
-This experiment does not support adding an unrestricted correction layer to
-the live command path. A future candidate needs independent evidence and a
-validator that rejects changes to operation or negation words before any live
-integration.
+dry-run rule interpreter still recognized only five of 10 positive intents, the
+same as without correction. Neither variant produced an intent from the five
+negative cases. Crucially, the exploratory prompt shortened `morurgar ro baskon`
+to `morurgar` (the Persian word for "browser"), deleting the command words and
+increasing its character distance from the verified speech. The five no-intent
+negative results include unreadable transcripts and are not evidence that the
+model understood negation. The second prompt was revised after inspecting the
+same cases, so its result is exploratory, not held-out performance. The two
+detailed reports are in ignored
+`datasets/stt/results/spark-q8-*-2026-10-14.json` files. This experiment does
+not support adding an unrestricted correction layer to the live command path. A
+future candidate needs independent evidence and a validator that rejects changes
+to operation or negation words before any live integration.
 
 ## 118. Spark versus selected Qwen 4B command-understanding diagnostic
 
@@ -4808,12 +4903,13 @@ not change permissions, settings, or start the microphone.
 
 A no-action dry run against the machine's current XDG catalog found 145
 registered apps, 65 bound app IDs, and 80 unbound registrations. Exact
-`Telegram`, `تلگرام`, `Visual Studio Code`, and `Firefox` resolved to their
-configured IDs. Approximate `Visual Studio Cod` produced only a suggestion.
-An exact sample unbound app name returned no command candidate. This confirms
-the editable installation and actual catalog integration for these examples;
-it does not replace a coordinated live microphone test or measure recognition
-quality across users and operating systems.
+`Telegram`, the Persian-script name for Telegram, `Visual Studio Code`, and
+`Firefox` resolved to their configured IDs. Approximate `Visual Studio Cod`
+produced only a suggestion. An exact sample unbound app name returned no command
+candidate. This confirms the editable installation and actual catalog
+integration for these examples; it does not replace a coordinated live
+microphone test or measure recognition quality across users and operating
+systems.
 
 The existing 15 verified Whisper-auto transcript cases were also replayed
 through the bounded interpreter with the current user catalog and settings,
@@ -5469,16 +5565,16 @@ reports an accepted dispatch, not a verified change of content. The generic gran
 Telegram chat-control grant; disabling the setting deletes its token.
 
 The Telegram named-chat action now uses the same bounded pointer-axis helper
-with its existing `telegram-control` token, aiming inside the left results
-pane. If no exact selectable row is visible after search, it tries up to
-four scrolls within an 18-second scan deadline, rereading stable OCR choices
-after each. While a numbered choice is pending, `next`/`more results`/`بعدی`
-scrolls to another visible page, with at most five pages. A changed digest
-of visible left-pane OCR text is required for the next-page prompt. The
-digest is transient and not logged. A selected number still undergoes the
-existing fresh row, focus, and header checks. Duplicate names are numbered
-within each visible page rather than accumulated across pages. Live portal
-and microphone tests of Telegram result paging remain pending.
+with its existing `telegram-control` token, aiming inside the left results pane.
+If no exact selectable row is visible after search, it tries up to four scrolls
+within an 18-second scan deadline, rereading stable OCR choices after each.
+While a numbered choice is pending, `next`, `more results`, or the Persian
+equivalent of "next" scrolls to another visible page, with at most five pages. A
+changed digest of visible left-pane OCR text is required for the next-page
+prompt. The digest is transient and not logged. A selected number still
+undergoes the existing fresh row, focus, and header checks. Duplicate names are
+numbered within each visible page rather than accumulated across pages. Live
+portal and microphone tests of Telegram result paging remain pending.
 
 The first owner microphone test of generic scrolling recognized `Scroll down`
 three times and showed the Remote Desktop dialog on the first action only.
@@ -5751,20 +5847,20 @@ is current; Qt's deferred widget deletion follows. GPU-to-GPU transitions
 reuse the widget and replace its point buffer with the selected mode's data.
 
 The owner reported that visible Telegram chat opening still fails when an
-English speech recognizer hears `martin` for the visible `matin` chat, renders
-a Persian name such as «ابوالفضل عبادی» in Latin phonetic words, or hears only
-the Latin portion of a mixed Latin/Persian title. The command interpreter
-continues to preserve the heard target; a separate, bounded OCR grounding
-step now proposes titles actually observed in the left chat list. It compares
-case-folded forms, close Latin spellings, and a conservative Persian-to-Latin
-phonetic approximation. Suggested rows must pass the existing title-row
-anchors, and the app asks for a numbered choice before clicking any corrected
-title. It re-reads the rows and verifies the opened header against the OCR
-title. A Latin request may trigger a focused `fas+eng` read if the English
-read cannot find a row. This is deterministic visual grounding rather than
-sending screenshots to the command-understanding model. Live Telegram tests
-for these new examples are still pending; OCR quality, transliteration, and
-the installed language data remain limiting factors.
+English speech recognizer hears `martin` for the visible `matin` chat, renders a
+Persian name such as "Abolfazl Ebadi" in Latin phonetic words, or hears only the
+Latin portion of a mixed Latin/Persian title. The command interpreter continues
+to preserve the heard target; a separate, bounded OCR grounding step now
+proposes titles actually observed in the left chat list. It compares case-folded
+forms, close Latin spellings, and a conservative Persian-to-Latin phonetic
+approximation. Suggested rows must pass the existing title-row anchors, and the
+app asks for a numbered choice before clicking any corrected title. It re-reads
+the rows and verifies the opened header against the OCR title. A Latin request
+may trigger a focused `fas+eng` read if the English read cannot find a row. This
+is deterministic visual grounding rather than sending screenshots to the
+command-understanding model. Live Telegram tests for these new examples are
+still pending; OCR quality, transliteration, and the installed language data
+remain limiting factors.
 
 The next live `openvisibly chat martin` still failed with
 `visible_chat_uncertain:title_not_read_matches_0`, despite the earlier

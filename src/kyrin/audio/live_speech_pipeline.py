@@ -1,5 +1,6 @@
 """Run activity detection and streaming transcription from one audio source."""
 
+from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import partial
@@ -11,6 +12,7 @@ from typing import cast
 from kyrin.audio.activity.speech_activity_monitor import (
     SpeechActivityFrame,
     SpeechActivityMonitor,
+    SpeechState,
     SpeechTransition,
 )
 from kyrin.audio.activity.voice_activity_detector import VoiceActivityDetector
@@ -55,8 +57,10 @@ class LiveSpeechPipeline:
         backlog_maximum_ms: int = 5000,
         start_confirm_ms: int = 64,
         pause_confirm_ms: int = 384,
+        idle_preroll_ms: int | None = None,
         on_compute_device: Callable[[ComputeDevice], None] | None = None,
         on_audio_ready: Callable[[], None] | None = None,
+        on_audio_chunk: Callable[[], None] | None = None,
         on_speech_started: Callable[[], None] | None = None,
         clock_ns: Callable[[], int] = perf_counter_ns,
     ) -> None:
@@ -67,6 +71,17 @@ class LiveSpeechPipeline:
             raise ValueError("audio source cannot be converted to detector format")
         if max_capture_chunks <= 0:
             raise ValueError("max_capture_chunks must be positive")
+        self._idle_preroll_windows: int | None = None
+        if idle_preroll_ms is not None:
+            if idle_preroll_ms < start_confirm_ms:
+                raise ValueError("idle preroll must cover speech onset")
+            window_units = detector.frames_per_window * 1000
+            rate = detector.input_format.sample_rate
+            # Round up so confirmation/onset audio is retained.
+            count = (idle_preroll_ms * rate + window_units - 1) // window_units
+            if count * window_units >= backlog_maximum_ms * rate:
+                raise ValueError("idle preroll must fit within the audio backlog")
+            self._idle_preroll_windows = count
         self._clock_ns = clock_ns
         self.source = source
         self.source_format = source_format
@@ -79,8 +94,11 @@ class LiveSpeechPipeline:
         self.backlog_maximum_ms = backlog_maximum_ms
         self.start_confirm_ms = start_confirm_ms
         self.pause_confirm_ms = pause_confirm_ms
+        # Opt in only for windowed backends that accept gaps outside turns.
+        self.idle_preroll_ms = idle_preroll_ms
         self.on_compute_device = on_compute_device
         self.on_audio_ready = on_audio_ready
+        self.on_audio_chunk = on_audio_chunk
         self.on_speech_started = on_speech_started
         self._vad_converter = vad_converter
         self._session_lock = Lock()
@@ -206,6 +224,8 @@ class LiveSpeechPipeline:
                 def source_chunks(capture: AudioCaptureQueue) -> Iterator[AudioData]:
                     nonlocal audio_ready
                     for chunk in capture.chunks():
+                        if self.on_audio_chunk is not None:
+                            self.on_audio_chunk()
                         if errors or stopped.is_set():
                             return
                         if not audio_ready:
@@ -221,12 +241,17 @@ class LiveSpeechPipeline:
 
                 def vad_worker(capture: AudioCaptureQueue) -> None:
                     try:
+                        idle_audio: deque[AudioData] | None = (
+                            deque(maxlen=self._idle_preroll_windows)
+                            if turn_aware and self._idle_preroll_windows is not None
+                            else None
+                        )
                         converted = self._vad_converter.convert(source_chunks(capture))
                         for window in framer.frame(converted):
                             frame = monitor.process(window)
                             # Playback interruption must not wait behind STT or the
-                            # UI event queue. All windows still enter STT in order,
-                            # including the onset before VAD confirmation.
+                            # UI event queue. Speech/onset audio retains its order;
+                            # opted-in idle gaps stay in the bounded preroll below.
                             if (
                                 frame.transition is SpeechTransition.STARTED
                                 and self.on_speech_started is not None
@@ -234,9 +259,22 @@ class LiveSpeechPipeline:
                                 self.on_speech_started()
                             if turn_aware:
                                 with notice_lock:
-                                    notice = backlog.put(window)
-                                    if notice is not None:
-                                        publish(notice)
+                                    pending: tuple[AudioData, ...] = (window,)
+                                    if idle_audio is not None:
+                                        if frame.transition is SpeechTransition.STARTED:
+                                            idle_audio.append(window)
+                                            pending = tuple(idle_audio)
+                                            idle_audio.clear()
+                                        elif (
+                                            frame.state is SpeechState.LISTENING
+                                            and frame.transition is None
+                                        ):
+                                            idle_audio.append(window)
+                                            pending = ()
+                                    for audio in pending:
+                                        notice = backlog.put(audio)
+                                        if notice is not None:
+                                            publish(notice)
                                     if frame.transition is SpeechTransition.STARTED:
                                         backlog.put_marker(
                                             TimedSpeechBoundary(

@@ -128,6 +128,7 @@ def test_live_pipeline_uses_one_capture_and_keeps_vad_and_stt_independent() -> N
         start_confirm_ms=1,
         pause_confirm_ms=1,
         on_audio_ready=lambda: capture_ready.append(True),
+        idle_preroll_ms=20,  # A streaming session still receives every chunk.
     )
 
     with pipeline.open() as stream:
@@ -425,6 +426,7 @@ def test_speech_start_interrupts_before_slow_stt_and_preserves_preroll() -> None
         start_confirm_ms=20,
         pause_confirm_ms=20,
         on_speech_started=interrupted.set,
+        idle_preroll_ms=30,
     )
     with pipeline.open() as stream:
         events = list(stream)
@@ -459,6 +461,7 @@ def test_half_duplex_echo_never_starts_turn_or_generates_transcript() -> None:
         lambda: None,
         emit_partials=False,
     )
+    chunks: list[bool] = []
     pipeline = LiveSpeechPipeline(
         PlaybackGuardInput(
             Source([AudioData(b"\x01\x00" * 160, FORMAT)] * 4), Playback()
@@ -467,7 +470,10 @@ def test_half_duplex_echo_never_starts_turn_or_generates_transcript() -> None:
         SignalDetector(),
         Engine(session),  # type: ignore[arg-type]
         start_confirm_ms=10,
+        on_audio_chunk=lambda: chunks.append(True),
+        idle_preroll_ms=20,
         on_speech_started=lambda: pytest.fail("echo must not interrupt playback"),
     )
     with pipeline.open() as stream:
         assert not list(stream)
+    assert chunks == [True] * 4

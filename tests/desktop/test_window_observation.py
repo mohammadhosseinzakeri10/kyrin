@@ -1,11 +1,23 @@
 """Window identity never degrades to process/app matching or renewed evidence."""
 
 from dataclasses import replace
+from math import inf, nextafter
 
 import pytest
 
 from kyrin.desktop import window_observation
 from kyrin.desktop.window_observation import WindowObservation, observe_window
+
+
+def test_exact_deadline_survives_float_rounding_without_accepting_extra_time() -> None:
+    # Subtraction rounds this valid ten-second interval to 10.000000000000057.
+    now = 510.860852727
+    deadline = now + 10
+    window = WindowObservation("test.desktop", 42, "7", "g", now, deadline)
+    assert WindowObservation.from_json(window.to_json()) == window
+    assert not window.current("7", deadline)
+    with pytest.raises(ValueError):
+        replace(window, deadline=nextafter(deadline, inf))
 
 
 @pytest.mark.parametrize("tokens", [(None, None), ("7", "8"), ("7", None)])

@@ -75,13 +75,49 @@ const Shell = {
     WindowTracker: {get_default: () => ({get_window_app: candidate =>
         candidate === window ? {get_id: () => 'telegram.desktop'} : null})},
 };
-const Gio = {DBus: {session: {}}, DBusExportedObject: {
+let vanished = null;
+let unwatchCount = 0;
+class WindowCloseConfirmation {
+    constructor(done) { this.done = done; this.finished = false; }
+    show(observation, language) {
+        this.observation = observation;
+        this.language = language;
+    }
+    decide(approved) {
+        if (!this.finished) { this.finished = true; this.done(approved); }
+    }
+    cancel() { this.decide(false); }
+}
+function invocation(replies) {
+    return {get_connection: () => ({}), get_sender: () => ':test',
+        return_value: value => replies.push(value.value[0])};
+}
+function prepareApproved(extension, appId, number) {
+    const value = extension.PrepareWindowClose(appId, number);
+    if (value) {
+        const replies = [];
+        extension.ConfirmWindowCloseAsync(
+            [JSON.parse(value).generation, 'en'], invocation(replies));
+        extension._closeDialog.decide(true);
+        if (replies[0] !== 'approved') throw new Error('test confirmation failed');
+    }
+    return value;
+}
+const Gio = {
+    BusNameWatcherFlags: {NONE: 0},
+    bus_watch_name_on_connection: (_conn, _name, _flags, _appeared, gone) => {
+        vanished = gone;
+        return 1;
+    },
+    bus_unwatch_name: () => { unwatchCount++; vanished = null; },
+    DBus: {session: {}}, DBusExportedObject: {
     wrapJSObject: () => ({export: () => {}, unexport: () => {}}),
 }};
 let clock = 1000000;
 let generation = 0;
 let focusChanged = () => {};
 const GLib = {
+    Variant: class { constructor(_type, value) { this.value = value; } },
     get_monotonic_time: () => clock,
     uuid_string_random: () => String(++generation),
 };
@@ -209,7 +245,15 @@ def test_extension_activates_only_an_existing_registered_window() -> None:
         "globalThis.KyrinActiveAppExtension = class KyrinActiveAppExtension",
     )
     result = subprocess.run(
-        [gjs, "-c", _HARNESS + source + _CASES],
+        [
+            gjs,
+            "-c",
+            _HARNESS
+            + source
+            + _CASES.replace(
+                "extension.PrepareWindowClose(", "prepareApproved(extension, "
+            ),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -330,7 +374,10 @@ _CLOSE_CASES = {
 
 
 @pytest.mark.parametrize("case", _CLOSE_CASES)
-def test_extension_close_is_atomic_bound_and_single_use(case: str) -> None:
+@pytest.mark.parametrize("persistent", [False, True])
+def test_extension_close_is_atomic_bound_and_single_use(
+    case: str, persistent: bool
+) -> None:
     gjs = shutil.which("gjs")
     if gjs is None:
         pytest.skip("GJS is not installed")
@@ -352,8 +399,111 @@ def test_extension_close_is_atomic_bound_and_single_use(case: str) -> None:
         const extension = new KyrinActiveAppExtension();
         extension.enable();
         """
-            + _CLOSE_CASES[case]
+            + (
+                _CLOSE_CASES[case].replace(
+                    "CloseConfirmedWindow", "CloseAuthorizedWindow"
+                )
+                if persistent
+                else _CLOSE_CASES[case].replace(
+                    "extension.PrepareWindowClose(", "prepareApproved(extension, "
+                )
+            )
             + "\nprint('bound close passed');",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["approve", "cancel", "expiry", "focus", "caller_gone", "disable", "replace"],
+)
+def test_native_confirmation_lifetime(change: str) -> None:
+    gjs = shutil.which("gjs")
+    if gjs is None:
+        pytest.skip("GJS is not installed")
+    source = "\n".join(
+        line
+        for line in _EXTENSION.read_text().splitlines()
+        if not line.startswith("import ")
+    ).replace("export default class", "class")
+    body = """
+        const extension = new KyrinActiveAppExtension();
+        extension.enable();
+        focus = window;
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        const replies = [];
+        extension.ConfirmWindowCloseAsync(
+            [prepared.generation, 'fa'], invocation(replies));
+        const dialog = extension._closeDialog;
+        if (!dialog || replies.length || windows !== 1 || dialog.language !== 'fa')
+            throw new Error('confirmation did not wait for explicit consent');
+        if (dialog.observation.deadline !== prepared.deadline)
+            throw new Error('confirmation extended original deadline');
+        CHANGE
+        dialog.decide(true); // A late click cannot revive a completed decision.
+        if (replies.length !== 1 || replies[0] !== EXPECTED || unwatchCount !== 1)
+            throw new Error('confirmation lifetime was not single-use');
+        const result = extension.CloseConfirmedWindow(prepared.generation);
+        if (result !== RESULT || windows !== WINDOWS)
+            throw new Error('invalid confirmation changed a window');
+        if (extension.CloseConfirmedWindow(prepared.generation) !== 'stale')
+            throw new Error('confirmation replayed');
+    """
+    changes = {
+        "approve": "dialog.decide(true);",
+        "cancel": "dialog.cancel();",
+        "expiry": "clock += 10000000; dialog.decide(true);",
+        "focus": "focus = {}; focusChanged(); focus = window;",
+        "caller_gone": "vanished();",
+        "disable": "extension.disable();",
+        "replace": "extension.PrepareWindowClose('telegram.desktop', 0);",
+    }
+    body = body.replace("CHANGE", changes[change])
+    body = body.replace(
+        "EXPECTED", "'approved'" if change == "approve" else "'declined'"
+    )
+    body = body.replace("RESULT", "'requested'" if change == "approve" else "'stale'")
+    body = body.replace("WINDOWS", "0" if change == "approve" else "1")
+    result = subprocess.run(
+        [gjs, "-c", _HARNESS + source + body],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_extension_refuses_close_without_native_consent() -> None:
+    gjs = shutil.which("gjs")
+    if gjs is None:
+        pytest.skip("GJS is not installed")
+    source = "\n".join(
+        line
+        for line in _EXTENSION.read_text().splitlines()
+        if not line.startswith("import ")
+    ).replace("export default class", "class")
+    result = subprocess.run(
+        [
+            gjs,
+            "-c",
+            _HARNESS
+            + source
+            + """
+        const extension = new KyrinActiveAppExtension();
+        extension.enable();
+        const prepared = JSON.parse(
+            extension.PrepareWindowClose('telegram.desktop', 0));
+        const status = extension.CloseConfirmedWindow(prepared.generation);
+        if (status !== 'confirmation_required' || windows !== 1)
+            throw new Error('close bypassed native consent');
+        """,
         ],
         capture_output=True,
         text=True,

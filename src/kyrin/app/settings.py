@@ -166,6 +166,8 @@ class AppSettings:
     tts_languages: tuple[TtsLanguageRoute, ...] = ()
     tts_enabled: bool = True
     action_execution_enabled: bool = False
+    trust_all_capabilities: bool = False
+    capability_grants: tuple[str, ...] = ()
     system_power_enabled: bool = False
     allowed_apps: tuple[AllowedApp, ...] = ()
     allowed_chat_apps: tuple[str, ...] = ()
@@ -220,6 +222,17 @@ class AppSettings:
             raise ValueError("TTS language routes must have unique languages")
         if type(self.action_execution_enabled) is not bool:
             raise ValueError("action_execution_enabled must be a boolean")
+        if type(self.trust_all_capabilities) is not bool:
+            raise ValueError("trust_all_capabilities must be a boolean")
+        if (
+            not isinstance(self.capability_grants, tuple)
+            or any(
+                not isinstance(item, str) or not _IDENTIFIER.fullmatch(item)
+                for item in self.capability_grants
+            )
+            or len(set(self.capability_grants)) != len(self.capability_grants)
+        ):
+            raise ValueError("capability grants must be unique identifiers")
         if type(self.system_power_enabled) is not bool:
             raise ValueError("system_power_enabled must be a boolean")
         if not isinstance(self.allowed_apps, tuple) or not all(

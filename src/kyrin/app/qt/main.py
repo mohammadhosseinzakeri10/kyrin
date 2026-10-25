@@ -17,6 +17,7 @@ from kyrin.app.model_library import (
     ModelLibraryError,
     linux_model_library_path,
 )
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.platforms.ubuntu import UbuntuSessionFactory, standard_stt_openers
 from kyrin.app.platforms.xdg_startup import (
@@ -162,7 +163,10 @@ def _close_speech(
 
 
 def main() -> int:
+    from kyrin.actions.platforms.input_session import INPUT_SESSIONS
+
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(INPUT_SESSIONS.disconnect)
     app.setApplicationName("KYRIN")
     app.setApplicationDisplayName("KYRIN")
     app.setDesktopFileName(DESKTOP_FILE_ID)
@@ -266,12 +270,9 @@ def main() -> int:
     power_flow = SystemPowerFlow(
         GnomePowerBackend(),
         publish_power,
-        enabled=bool(
-            settings
-            and settings.action_execution_enabled
-            and settings.system_power_enabled
-        ),
+        enabled=bool(settings and PermissionPolicy(settings).allows("system_power")),
         preview_backend=InertPowerBackend(),
+        permissions=PermissionPolicy(settings) if settings is not None else None,
     )
     power_flow.set_voice_ready(lambda: not speaker.is_playing)
 

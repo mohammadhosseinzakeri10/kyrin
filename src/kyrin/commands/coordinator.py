@@ -55,10 +55,12 @@ class CommandCoordinator:
         interpreter: CommandInterpreter,
         *,
         fragment_buffer: CommandFragmentBuffer | None = None,
+        action_authorizer: Callable[[CommandIntent], bool] | None = None,
         recent_utterances: Callable[[], tuple[str, ...]] | None = None,
         window_observer: Callable[[], WindowObservation | None] | None = None,
     ) -> None:
         self.interpreter = interpreter
+        self._action_authorizer = action_authorizer
         self._window_observer = window_observer
         self._fragments = fragment_buffer or CommandFragmentBuffer()
         self._recent_utterances = recent_utterances
@@ -205,6 +207,28 @@ class CommandCoordinator:
             ),
             pending=self._pending,
         )
+        # A concrete operation/number already identifies the target. Persistent
+        # consent replaces only its redundant approval; name and target choices
+        # remain clarifications. Candidates never gain execution authority.
+        if (
+            update.status is TranscriptStatus.FINAL
+            and self._action_authorizer is not None
+            and isinstance(interpretation, NeedsClarification)
+        ):
+            pending_action = interpretation.pending
+            known_action: CommandIntent | None = None
+            if isinstance(pending_action, PendingActionConfirmation):
+                known_action = CommandIntent(
+                    pending_action.operation, pending_action.app_candidate.app_id
+                )
+            elif isinstance(pending_action, PendingNumberedCloseConfirmation):
+                known_action = CommandIntent(
+                    CommandKind.CLOSE_SHOWN_WINDOW,
+                    pending_action.app_candidate.app_id,
+                    window_index=pending_action.window_index,
+                )
+            if known_action is not None and self._action_authorizer(known_action):
+                interpretation = ReadyCommand(known_action)
         if (
             self._window_observer is not None
             and update.status is TranscriptStatus.FINAL

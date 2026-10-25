@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
-from uuid import uuid4
 
 # A read-only handshake must not import GI or open a desktop connection.
 if __name__ == "__main__" and sys.argv[1:] == ["--capabilities"]:
@@ -30,23 +29,23 @@ from kyrin.actions.platforms.desktop_accessibility import (  # noqa: E402
     resolve_control,
     valid_node,
 )
-from kyrin.actions.platforms.helper_lifecycle import HelperLifetime  # noqa: E402
+from kyrin.actions.platforms.helper_lifecycle import (  # noqa: E402
+    HelperLifetime,
+    shared_session,
+)
 from kyrin.actions.platforms.telegram_portal_helper import (  # noqa: E402
     BUS,
     LEFT_BUTTON,
     OBJECT,
     REMOTE,
-    SESSION,
     _capture_still_current,
     _focused_identity,
     _focused_window_token,
-    _request,
     _wait_for_expected_focus,
     _window_and_pointer,
 )
 from kyrin.app.permission_token import (  # noqa: E402
     permission_token_path,
-    read_opaque_token,
 )
 from kyrin.backend_protocol import BackendUnavailable, probe_gnome  # noqa: E402
 from kyrin.desktop.accessibility_target import AccessibilityTarget
@@ -569,11 +568,11 @@ def main() -> int:
         semantic_desired = {"click": None, "on": True, "off": False}[args[4]]
         semantic_observation = WindowObservation.from_json(args[6])
         target = AccessibilityTarget.from_json(args[7]) if len(args) == 8 else None
-        remembered = read_opaque_token(TOKEN_PATH)
-        if remembered is None:
+        acquired = shared_session(2)
+        if acquired is None:
             print("CONTROL_SETUP_REQUIRED", flush=True)
             return 3
-        lifetime = HelperLifetime(None, TOKEN_PATH, remembered)
+        lifetime, _session = acquired
         try:
             try:
                 result = _semantic_control(
@@ -662,43 +661,12 @@ def main() -> int:
         if _focused_identity() != expected:
             print("FOCUS_CHANGED", flush=True)
             return 2
-    remembered = read_opaque_token(TOKEN_PATH)
-    if not grant and remembered is None:
+    acquired = shared_session(2)
+    if acquired is None:
         print("CONTROL_SETUP_REQUIRED", flush=True)
         return 3
-    connection = HelperLifetime(
-        Gio.bus_get_sync(Gio.BusType.SESSION, None), TOKEN_PATH, remembered
-    )
-    session: str | None = None
+    connection, session = acquired
     try:
-        created = _request(
-            connection,
-            "CreateSession",
-            ({"session_handle_token": GLib.Variant("s", "kyrin_" + uuid4().hex)},),
-            8000,
-        )
-        if created is None:
-            return 1
-        session = created["session_handle"]
-        options = {
-            "types": GLib.Variant("u", 2),
-            "persist_mode": GLib.Variant("u", 2),
-        }
-        if remembered is not None:
-            options["restore_token"] = GLib.Variant("s", remembered)
-        if _request(connection, "SelectDevices", (session, options), 8000) is None:
-            return 1
-        started = _request(connection, "Start", (session, "", {}), 30000)
-        if started is None or started.get("devices", 0) & 2 != 2:
-            return 1
-        replacement = started.get("restore_token")
-        if not isinstance(replacement, str):
-            TOKEN_PATH.unlink(missing_ok=True)
-            return 1
-        connection.rotate(replacement)
-        if grant:
-            print("CONTROL_GRANT_READY", flush=True)
-            return 0
         assert expected is not None and box is not None
         if not _wait_for_expected_focus(expected):
             print("FOCUS_CHANGED", flush=True)
@@ -730,21 +698,6 @@ def main() -> int:
             else 2
         )
     finally:
-        if session is not None:
-            try:
-                connection.call_sync(
-                    BUS,
-                    session,
-                    SESSION,
-                    "Close",
-                    None,
-                    None,
-                    Gio.DBusCallFlags.NONE,
-                    3000,
-                    None,
-                )
-            except GLib.Error:
-                pass
         connection.close()
 
 

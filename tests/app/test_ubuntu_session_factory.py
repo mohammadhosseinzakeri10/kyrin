@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from kyrin.actions.control_policy import ControlCapability, ControlConfirmation
+from kyrin.actions.control_policy import ControlConfirmation
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import (
     ActionFeedback,
@@ -285,9 +285,9 @@ def test_session_applies_selected_active_and_archive_retention(
         history.close()
 
 
-@pytest.mark.parametrize("approved", [True, False])
-def test_live_close_uses_shared_confirmation_and_close_permission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: bool
+@pytest.mark.parametrize("trust", [True, False])
+def test_live_close_uses_persistent_permission_without_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trust: bool
 ) -> None:
     from collections.abc import Iterator
     from time import monotonic
@@ -318,12 +318,14 @@ def test_live_close_uses_shared_confirmation_and_close_permission(
             return WindowObservation(app_id, 42, "17", "close", now, now + 10)
 
         def close_confirmed(self, window: WindowObservation) -> WindowControlStatus:
+            pytest.fail("persistent consent must not use the legacy commit")
+
+        def close_authorized(self, window: WindowObservation) -> WindowControlStatus:
             closed.append(window)
             return WindowControlStatus.CONFIRMED
 
     def confirm(prompt: ControlConfirmation) -> bool:
-        prompts.append(prompt)
-        return approved
+        pytest.fail("saved consent must not request confirmation")
 
     def receive(event: ApplicationEvent) -> None:
         events.append(event)
@@ -343,22 +345,23 @@ def test_live_close_uses_shared_confirmation_and_close_permission(
         control_confirmation=confirm,
     )
     settings = _settings(
-        tmp_path, action_execution_enabled=True, allowed_close_apps=("telegram",)
+        tmp_path,
+        action_execution_enabled=True,
+        trust_all_capabilities=trust,
+        allowed_close_apps=() if trust else ("telegram",),
     )
     with factory(settings) as runtime:
         runtime.run()
-    assert len(prompts) == 1
-    assert prompts[0].capability is ControlCapability.CLOSE_WINDOW
-    assert closed == ([prompts[0].window] if approved else [])
+    assert not prompts
+    assert len(closed) == 1
+    assert closed[0].app_id == "telegram"
     assert not fallback.requests
     feedback = [event for event in events if isinstance(event, ActionFeedback)]
     assert len(feedback) == 1
-    assert feedback[0].outcome is (
-        ActionOutcome.CONFIRMED if approved else ActionOutcome.FAILED
-    )
+    assert feedback[0].outcome is ActionOutcome.CONFIRMED
 
 
-def test_power_reply_during_voice_playback_is_accepted_with_echo_cancellation(
+def test_saved_power_consent_does_not_ask_during_voice_playback(
     tmp_path: Path,
 ) -> None:
     class BusySpeaker:
@@ -397,11 +400,13 @@ def test_power_reply_during_voice_playback_is_accepted_with_echo_cancellation(
     with factory(settings):
         assert flow.start(PowerAction.RESTART)
         for _ in range(100):
-            if any(prompt.stage is PowerStage.FIRST for prompt in prompts):
+            if any(prompt.stage is PowerStage.FINISHED for prompt in prompts):
                 break
             Event().wait(0.01)
-        assert flow.on_final_speech("Yes")
-        assert any(prompt.stage is PowerStage.SECOND for prompt in prompts)
+        assert any(prompt.stage is PowerStage.FINISHED for prompt in prompts)
+        assert not any(
+            prompt.stage in (PowerStage.FIRST, PowerStage.SECOND) for prompt in prompts
+        )
     assert echo.closed
 
 
@@ -768,17 +773,19 @@ def test_omnilingual_uses_longer_pause_without_changing_other_engines(
             yield TranscriptUpdate(0, "", TranscriptStatus.FINAL, "en")
 
     pauses: list[int] = []
+    prerolls: list[object] = []
 
     def pipeline(*args: object, **kwargs: object) -> object:
         pause = kwargs["pause_confirm_ms"]
         assert isinstance(pause, int)
         pauses.append(pause)
+        prerolls.append(kwargs["idle_preroll_ms"])
         return object()
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", CaptureSpeechController)
     monkeypatch.setattr(ubuntu, "LiveSpeechPipeline", pipeline)
     catalog = _catalog(tmp_path)
-    for backend in ("fake", "omnilingual"):
+    for backend in ("fake", "omnilingual", "whisper"):
         settings = _settings(
             tmp_path, stt=SttSelection(backend, tmp_path / "model", "en")
         )
@@ -793,7 +800,8 @@ def test_omnilingual_uses_longer_pause_without_changing_other_engines(
         with factory(settings) as runtime:
             runtime.run()
 
-    assert pauses == [384, 800]
+    assert pauses == [384, 800, 384]
+    assert prerolls == [None, 500, 500]
 
 
 def test_ubuntu_session_registers_persian_browser_name_only_when_allowed(
@@ -1379,11 +1387,7 @@ def test_all_input_routes_share_compound_ownership(
                     ),
                 )
             )
-            assert result.outcome is (
-                ActionOutcome.DISPATCHED_UNVERIFIED
-                if contender is CommandKind.VISIBLE_CONTROL
-                else ActionOutcome.LAUNCH_ACCEPTED
-            )
+            assert result.outcome is ActionOutcome.DISPATCHED_UNVERIFIED
         except BaseException as exc:
             errors.append(exc)
 
@@ -1579,6 +1583,10 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
         )
     ) as runtime:
         runtime.run()
+        from kyrin.runtime.command_runtime import LiveCommandRuntime
+
+        assert isinstance(runtime, LiveCommandRuntime)
+        assert runtime.voice_mode_state().mode.value == "active"
     assert keys == [selected]
     assert AudioDuplexChanged(aec_available) in events
     assert speaker.interrupts == int(aec_available)

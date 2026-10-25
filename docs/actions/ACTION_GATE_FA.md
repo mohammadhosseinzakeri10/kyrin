@@ -1,8 +1,16 @@
+<div dir="rtl" lang="fa">
+
+قرارداد جاری اجرای واقعی: [مجوز ماندگار](PERSISTENT_PERMISSIONS_FA.md).
+متن پایین سابقهٔ دروازهٔ تشخیصی است.
+
+
 # دروازهٔ آزمایشی اجرای فرمان در KYRIN
 
 ## جایگاه و هدف
 
 لایهٔ فهم فرمان، متن موقت را به `CommandCandidateUpdate` و متن نهایی را به `CommandResolution` تبدیل می‌کند. `ActionGate` میان این تصمیم‌ها و اجراکنندهٔ آینده قرار دارد:
+
+</div>
 
 ```text
 TranscriptUpdate → CommandCoordinator → CommandCandidateUpdate / CommandResolution
@@ -15,6 +23,8 @@ TranscriptUpdate → CommandCoordinator → CommandCandidateUpdate / CommandReso
                                                    ↓
                                   ActionResult → ActionFeedback / VerifiedContext
 ```
+
+<div dir="rtl" lang="fa">
 
 `ActionGate` هیچ برنامه‌ای را باز نمی‌کند و به سیستم‌عامل، Vosk یا میکروفن وابسته نیست. `ActionRequest` تنها دادهٔ ساختاریافتهٔ «درخواست انجام این کار» است و رشتهٔ فرمان پایانه یا `shell` در آن وجود ندارد.
 
@@ -55,3 +65,5 @@ TranscriptUpdate → CommandCoordinator → CommandCandidateUpdate / CommandReso
 ## فرمان‌های چندمرحله‌ای
 
 برای هر گامِ یک `CommandPlanResolution`، شناسهٔ `ActionKey` علاوه بر شناسهٔ جریان و قطعه، `step_index` جدا دارد. `ActionPlanRunner` گام‌ها را به ترتیب به دروازه و سپس اجراکننده می‌دهد و پس از ردشدن یا شکست یک گام متوقف می‌شود؛ گام‌های قبلی برگردانده نمی‌شوند. اگر گام چت هنوز در قابلیت‌های سیاست نباشد، پاسخ «هنوز نمی‌توانم چت را باز کنم» می‌آید. اگر اجراکنندهٔ آینده چت را پشتیبانی کند، درست پیش از آن باید یک مشاهده‌گر، فعال‌بودن همان برنامه را تازه تأیید کند؛ پذیرش درخواست راه‌اندازی یا سابقهٔ قبلی کافی نیست. ابزار میکروفن در حالت پیش‌فرض فقط تصمیم آزمایشی را نشان می‌دهد و با فعال‌سازی صریح می‌تواند گام بازکردن برنامه را اجرا کند. جزئیات در `docs/commands/MULTI_STEP_COMMANDS.md` است.
+
+</div>

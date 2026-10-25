@@ -25,6 +25,8 @@ class SttDeviceReady:
 class AudioCaptureReady:
     """The selected microphone has supplied its first audio chunk."""
 
+    session_id: str = ""
+
 
 @dataclass(frozen=True, slots=True)
 class AudioDuplexChanged:

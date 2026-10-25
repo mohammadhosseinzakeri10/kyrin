@@ -25,6 +25,7 @@ def helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     spec.loader.exec_module(module)
     module.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
     module.GLib.Variant = lambda signature, value: (signature, value)
+    monkeypatch.setattr(module, "_focused_window_token", lambda: "window-1")
     return module
 
 
@@ -103,3 +104,24 @@ def test_chat_scroll_aims_inside_telegram_conversation(
         smooth=True,
     )
     assert calls.count("NotifyPointerAxis") == 4
+
+
+def test_same_process_window_switch_stops_reused_session_input(
+    helper: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = ("example.desktop", 42)
+    frame = (*expected, 0, 0, 1000, 800, 500, 440)
+    monkeypatch.setattr(helper, "_window_and_pointer", lambda: frame)
+    monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "sleep", lambda _: None)
+    tokens = iter(("window-1", "window-1", "window-1", "window-2"))
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: next(tokens))
+    calls = []
+
+    class Bus:
+        def call_sync(self, _bus, _object, _interface, method, *_args):
+            calls.append(method)
+
+    assert not helper._scroll(Bus(), "/same-session", expected,
+                              direction="down", steps=3, left_pane=False, smooth=True)
+    assert calls == ["NotifyPointerMotion", "NotifyPointerAxis"]

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from kyrin.app.app_permissions import AppChoice, AppPickerCatalog, app_choices
-from kyrin.app.permission_token import permission_token_path, read_opaque_token
+from kyrin.app.permissions import CAPABILITIES, LEGACY_CAPABILITIES
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import AllowedApp, AppSettings, AppSpokenAliases
 from kyrin.system_power.flow import PowerAction
@@ -57,6 +57,38 @@ class DesktopActionsPage(QWidget):
         layout.addSpacing(24)
         self.enabled_checkbox = QCheckBox()
         layout.addWidget(self.enabled_checkbox)
+        self.trust_all_checkbox = QCheckBox()
+        layout.addWidget(self.trust_all_checkbox)
+        self._input_status: dict[str, object] = {"state": "unprepared", "devices": 0}
+        self.input_disconnect_button = QPushButton()
+        layout.addWidget(self.input_disconnect_button)
+        self.input_session_details = QLabel()
+        self.input_session_details.setWordWrap(True)
+        layout.addWidget(self.input_session_details)
+        self.input_revoke_help = QLabel()
+        self.input_revoke_help.setWordWrap(True)
+        layout.addWidget(self.input_revoke_help)
+        self.permission_help = QLabel()
+        self.permission_help.setWordWrap(True)
+        layout.addWidget(self.permission_help)
+        self.revoke_permissions_button = QPushButton()
+        self.revoke_permissions_button.clicked.connect(self._revoke_permissions)
+        layout.addWidget(self.revoke_permissions_button)
+        self.capability_checkboxes: dict[str, QCheckBox] = {}
+        self._unknown_grants = set(settings.capability_grants if settings else ()) - {
+            item.identifier for item in CAPABILITIES
+        }
+        for capability in CAPABILITIES:
+            if capability.identifier in LEGACY_CAPABILITIES:
+                continue
+            checkbox = QCheckBox()
+            checkbox.setEnabled(settings is not None)
+            checkbox.setChecked(
+                settings is not None
+                and capability.identifier in settings.capability_grants
+            )
+            self.capability_checkboxes[capability.identifier] = checkbox
+            layout.addWidget(checkbox)
         self.search = QLineEdit()
         self.search.textChanged.connect(self._filter)
         layout.addWidget(self.search)
@@ -151,6 +183,7 @@ class DesktopActionsPage(QWidget):
 
         if settings is not None:
             self.enabled_checkbox.setChecked(settings.action_execution_enabled)
+            self.trust_all_checkbox.setChecked(settings.trust_all_capabilities)
             if catalog is not None:
                 choices = app_choices(catalog, settings.allowed_apps)
             else:
@@ -203,6 +236,17 @@ class DesktopActionsPage(QWidget):
             self.close_window_checkbox.setEnabled(False)
             self.system_power_checkbox.setEnabled(False)
             self.power_preview_button.setEnabled(False)
+        self.trust_all_checkbox.setEnabled(settings is not None)
+        self.revoke_permissions_button.setEnabled(settings is not None)
+        self.trust_all_checkbox.toggled.connect(
+            self._update_chat_permission_availability
+        )
+        self.trust_all_checkbox.toggled.connect(
+            self._update_scroll_permission_availability
+        )
+        self.trust_all_checkbox.toggled.connect(
+            self._update_control_permission_availability
+        )
         self.translate()
         self._show_aliases()
         self._update_chat_permission_availability()
@@ -288,6 +332,7 @@ class DesktopActionsPage(QWidget):
         self._update_pointer_permission_availability()
 
     def _update_pointer_permission_availability(self) -> None:
+        trusted = self.trust_all_checkbox.isChecked()
         enabled = self.telegram_chat_checkbox.isEnabled() and (
             self.telegram_chat_checkbox.isChecked()
         )
@@ -295,12 +340,10 @@ class DesktopActionsPage(QWidget):
         if not enabled:
             self.telegram_pointer_checkbox.setChecked(False)
         self.telegram_pointer_grant_button.setEnabled(
-            enabled and self.telegram_pointer_checkbox.isChecked()
+            self.apps.isEnabled()
+            and (trusted or (enabled and self.telegram_pointer_checkbox.isChecked()))
         )
 
-    def set_pointer_grant_ready(self, ready: bool) -> None:
-        key = "telegram_pointer_ready" if ready else "telegram_pointer_not_ready"
-        self.telegram_pointer_grant_status.setText(self._translations.text(key))
 
     def _update_scroll_permission_availability(self) -> None:
         enabled = self.apps.isEnabled()
@@ -308,12 +351,13 @@ class DesktopActionsPage(QWidget):
         if not enabled:
             self.desktop_scroll_checkbox.setChecked(False)
         self.desktop_scroll_grant_button.setEnabled(
-            enabled and self.desktop_scroll_checkbox.isChecked()
+            enabled
+            and (
+                self.desktop_scroll_checkbox.isChecked()
+                or self.trust_all_checkbox.isChecked()
+            )
         )
 
-    def set_scroll_grant_ready(self, ready: bool) -> None:
-        key = "desktop_scroll_ready" if ready else "desktop_scroll_not_ready"
-        self.desktop_scroll_grant_status.setText(self._translations.text(key))
 
     def _update_control_permission_availability(self) -> None:
         enabled = self.apps.isEnabled()
@@ -321,34 +365,67 @@ class DesktopActionsPage(QWidget):
         if not enabled:
             self.desktop_control_checkbox.setChecked(False)
         self.desktop_control_grant_button.setEnabled(
-            enabled and self.desktop_control_checkbox.isChecked()
+            enabled
+            and (
+                self.desktop_control_checkbox.isChecked()
+                or self.trust_all_checkbox.isChecked()
+            )
         )
 
-    def set_control_grant_ready(self, ready: bool) -> None:
-        key = "desktop_control_ready" if ready else "desktop_control_not_ready"
-        self.desktop_control_grant_status.setText(self._translations.text(key))
+
+    def set_input_session_status(self, status: dict[str, object]) -> None:
+        self._input_status = status
+        self.input_session_details.setText(
+            self._translations.text("input_session_details").format(
+                owner=status.get("owner_pid", "—"), starts=status.get("starts", 0)
+            )
+        )
+        state = str(status.get("state", "unprepared"))
+        devices = int(str(status.get("devices", 0)))
+        for label, required in (
+            (self.telegram_pointer_grant_status, 3),
+            (self.desktop_scroll_grant_status, 2),
+            (self.desktop_control_grant_status, 2),
+        ):
+            key = state
+            if state == "ready" and devices & required != required:
+                key = "unprepared"
+            message = self._translations.text("input_session_" + key)
+            if key == "ready":
+                persistence = "persistent" if status.get("persistent") else "temporary"
+                message += " " + self._translations.text("input_session_" + persistence)
+            label.setText(message)
+        self.input_disconnect_button.setEnabled(state in {"ready", "preparing", "busy"})
 
     def translate(self) -> None:
         text = self._translations.text
+        self.input_disconnect_button.setText(text("input_session_disconnect"))
+        self.input_revoke_help.setText(text("input_session_revoke_help"))
+        self.set_input_session_status(self._input_status)
         self.heading.setText(text("actions_heading"))
         self.caption.setText(text("actions_caption"))
         self.enabled_checkbox.setText(text("enable_actions"))
+        self.trust_all_checkbox.setText(text("trust_all_capabilities"))
+        self.permission_help.setText(text("persistent_permission_help"))
+        self.revoke_permissions_button.setText(text("revoke_permissions"))
+        for capability in CAPABILITIES:
+            checkbox = self.capability_checkboxes.get(capability.identifier)
+            if checkbox is not None:
+                checkbox.setText(
+                    capability.persian
+                    if self._translations.active_locale == "fa"
+                    else capability.english
+                )
         self.telegram_chat_checkbox.setText(text("allow_telegram_chats"))
         self.telegram_pointer_checkbox.setText(text("remember_telegram_pointer"))
         self.telegram_pointer_grant_button.setText(text("telegram_pointer_grant_now"))
-        self.set_pointer_grant_ready(
-            read_opaque_token(permission_token_path("telegram-control")) is not None
-        )
+
         self.desktop_scroll_checkbox.setText(text("allow_desktop_scroll"))
         self.desktop_scroll_grant_button.setText(text("desktop_scroll_grant_now"))
-        self.set_scroll_grant_ready(
-            read_opaque_token(permission_token_path("desktop-scroll")) is not None
-        )
+
         self.desktop_control_checkbox.setText(text("allow_desktop_control"))
         self.desktop_control_grant_button.setText(text("desktop_control_grant_now"))
-        self.set_control_grant_ready(
-            read_opaque_token(permission_token_path("desktop-control")) is not None
-        )
+
         self.window_control_checkbox.setText(text("allow_window_controls"))
         self.close_window_checkbox.setText(text("allow_window_close"))
         self.system_power_checkbox.setText(text("allow_system_power"))
@@ -384,6 +461,38 @@ class DesktopActionsPage(QWidget):
             item = self.apps.item(index)
             if item is not None:
                 item.setHidden(needle not in item.text().casefold())
+
+    def _revoke_permissions(self) -> None:
+        self.trust_all_checkbox.setChecked(False)
+        self.enabled_checkbox.setChecked(False)
+        for checkbox in (
+            self.telegram_chat_checkbox,
+            self.telegram_pointer_checkbox,
+            self.desktop_scroll_checkbox,
+            self.desktop_control_checkbox,
+            self.window_control_checkbox,
+            self.close_window_checkbox,
+            self.system_power_checkbox,
+            *self.capability_checkboxes.values(),
+        ):
+            checkbox.setChecked(False)
+        self._unknown_grants.clear()
+        for index in range(self.apps.count()):
+            item = self.apps.item(index)
+            if item is not None:
+                item.setCheckState(Qt.CheckState.Unchecked)
+
+    def selected_capability_grants(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                self._unknown_grants
+                | {
+                    identifier
+                    for identifier, checkbox in self.capability_checkboxes.items()
+                    if checkbox.isChecked()
+                }
+            )
+        )
 
     def selected_apps(self) -> tuple[AllowedApp, ...]:
         bindings: list[AllowedApp] = []
@@ -429,7 +538,9 @@ class DesktopActionsPage(QWidget):
 
     def has_unsaved_changes(self, settings: AppSettings) -> bool:
         return (
-            self.enabled_checkbox.isChecked() != settings.action_execution_enabled
+            self.trust_all_checkbox.isChecked() != settings.trust_all_capabilities
+            or set(self.selected_capability_grants()) != set(settings.capability_grants)
+            or self.enabled_checkbox.isChecked() != settings.action_execution_enabled
             or set(self.selected_apps()) != set(settings.allowed_apps)
             or self.selected_chat_apps() != settings.allowed_chat_apps
             or self.remember_telegram_pointer() != settings.remember_telegram_pointer

@@ -4,7 +4,6 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 import pytest
 
@@ -476,7 +475,7 @@ def test_accessibility_also_rejects_replaced_same_app_window(
 
 
 @pytest.mark.parametrize("accessible", [True, False])
-def test_window_switch_during_portal_confirmation_rejects_original_request(
+def test_window_switch_after_shared_session_acquire_rejects_original_request(
     helper: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     accessible: bool,
@@ -517,21 +516,11 @@ def test_window_switch_during_portal_confirmation_rejects_original_request(
             calls.append(method)
             assert method == "Close", "must not send any Notify after switching windows"
 
-    def portal(_bus: object, method: str, *_args: object) -> dict[str, Any]:
-        if method == "CreateSession":
-            return {"session_handle": "/session"}
-        if method == "Start":
-            token[0] = "window-8"  # user changed to an identical same-process window
-            return {"devices": 2, "restore_token": "replacement"}
-        return {}
+    def acquire(_devices: int) -> tuple[Bus, str]:
+        token[0] = "window-8"
+        return Bus(), "/session"
 
-    helper.GLib.Variant = lambda _signature, value: value
-    helper.Gio.DBusCallFlags = type("Flags", (), {"NONE": 0})
-    helper.Gio.BusType = type("BusType", (), {"SESSION": 0})
-    helper.Gio.bus_get_sync = lambda *_args: Bus()
-    monkeypatch.setattr(helper, "HelperLifetime", lambda bus, *_args: bus)
-    monkeypatch.setattr(helper, "read_opaque_token", lambda _path: "remembered")
-    monkeypatch.setattr(helper, "_request", portal)
+    monkeypatch.setattr(helper, "shared_session", acquire)
     monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda *_a: True)
     monkeypatch.setattr(helper, "_focused_identity", lambda: observation.identity)
     monkeypatch.setattr(helper, "_focused_window_token", lambda: token[0])
@@ -557,7 +546,7 @@ def test_window_switch_during_portal_confirmation_rejects_original_request(
         ],
     )
     assert helper.main() == 2
-    assert calls == ["Close"]
+    assert calls == []
 
 
 @pytest.mark.parametrize("change", ["window", "deadline", "missing"])

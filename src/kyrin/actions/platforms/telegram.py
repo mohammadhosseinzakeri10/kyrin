@@ -15,13 +15,14 @@ from kyrin.actions.desktop_input import DesktopInputBroker
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
+from kyrin.actions.platforms.input_session import run_input_helper as run_process
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
 from kyrin.actions.visible_control import VisibleControlTarget, VisibleTextOption
 from kyrin.backend_protocol import BackendStatus, BackendUnavailable
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
-from kyrin.operations import OperationStopped, budget, check_operation, run_process
+from kyrin.operations import OperationStopped, budget, check_operation
 from kyrin.text_normalization import fold_case
 from kyrin.timing import timed_stage
 

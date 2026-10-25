@@ -21,12 +21,14 @@ from kyrin.actions.control_policy import (
 )
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.platforms.input_session import run_input_helper as run_process
 from kyrin.actions.visible_control import VisibleControlTarget
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.backend_protocol import BackendUnavailable
 from kyrin.commands.models import CommandKind
 from kyrin.desktop.accessibility_target import AccessibilityTarget
 from kyrin.desktop.platforms.gnome import read_active_window_token
-from kyrin.operations import check_operation, run_process
+from kyrin.operations import check_operation
 
 CONTROL_HELPER = Path(__file__).with_name("desktop_control_helper.py")
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
@@ -73,6 +75,7 @@ class DesktopControlExecutor:
         system_python: str = "/usr/bin/python3",
         token_reader: Callable[[], str | None] | None = None,
         confirmation: ControlConfirmer | None = None,
+        permissions: PermissionPolicy | None = None,
         control_resolver: Callable[
             [ActionRequest, tuple[str, int], str], ControlEvidence | None
         ]
@@ -86,6 +89,7 @@ class DesktopControlExecutor:
         self._helper_path = helper_path
         self._system_python = system_python
         self._confirmation = confirmation
+        self._permissions = permissions
         self._resolve = control_resolver or self._resolve_control
         self._capabilities = capabilities
 
@@ -197,7 +201,7 @@ class DesktopControlExecutor:
         capability: ControlCapability,
     ) -> tuple[ActionRequest, ControlEvidence] | ActionResult:
         observation = request.intent.control_observation
-        assert observation is not None and self._confirmation is not None
+        assert observation is not None
 
         def failure(reason: str) -> ActionResult:
             return ActionResult(request.key, ActionOutcome.FAILED, error_code=reason)
@@ -230,7 +234,10 @@ class DesktopControlExecutor:
             request.language,
         )
         check_operation()
-        if self._confirmation(prompt) is not True:
+        if self._permissions is not None:
+            if not self._permissions.allows("desktop_control"):
+                return failure("action_not_allowed")
+        elif self._confirmation is None or self._confirmation(prompt) is not True:
             return failure("visible_control_confirmation_declined")
         approval = ControlApproval(prompt)
         check_operation()
@@ -322,6 +329,12 @@ class DesktopControlExecutor:
     def _execute(self, request: ActionRequest) -> ActionResult:
         if request.intent.kind is not CommandKind.VISIBLE_CONTROL:
             return self._delegate.execute(request)
+        if self._permissions is not None and not self._permissions.allows_intent(
+            request.intent
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="action_not_allowed"
+            )
         # STT may quote a spoken control name. Those marks describe the name;
         # they are not part of the accessible control's actual label.
         label = request.intent.target.strip().strip("\"'“”‘’«»").strip()
@@ -337,7 +350,7 @@ class DesktopControlExecutor:
             risk = "visible_control_capability_required"
         if risk is not None and (
             consequence is not ControlConsequence.UNKNOWN
-            or self._confirmation is None
+            or (self._confirmation is None and self._permissions is None)
             or capability not in self._capabilities
         ):
             return ActionResult(

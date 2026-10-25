@@ -5,7 +5,7 @@ import math
 import subprocess
 from collections.abc import Mapping
 from dataclasses import replace
-from time import sleep
+from time import monotonic, sleep
 
 from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.window_control import WindowControlStatus, WindowOperation
@@ -43,6 +43,8 @@ class GnomeAppWindowController:
         self._attempts = attempts
         self._retry_delay_s = retry_delay_s
         self.backend_status = BackendStatus(False, "not_probed")
+        self.close_error_code: str | None = None
+        self._call_failure: str | None = None
 
     @staticmethod
     def available() -> bool:
@@ -52,17 +54,27 @@ class GnomeAppWindowController:
                 "ControlAppWindow",
                 "GetAppWindowState",
                 "PrepareWindowClose",
+                "CloseAuthorizedWindow",
                 "CloseConfirmedWindow",
             },
             run=subprocess.run,
         ).ready
 
-    def _call(self, method: str, signature: str, *args: str) -> tuple[str, ...] | None:
+    def _call(
+        self, method: str, signature: str, *args: str, timeout_s: float | None = None
+    ) -> tuple[str, ...] | None:
+        self._call_failure = None
         required = {method}
-        if method in {"ControlAppWindow", "PrepareWindowClose", "CloseConfirmedWindow"}:
+        if method in {
+            "ControlAppWindow",
+            "PrepareWindowClose",
+            "CloseConfirmedWindow",
+            "CloseAuthorizedWindow",
+        }:
             required.add("GetAppWindowState")
         if method == "PrepareWindowClose":
             required.add("CloseConfirmedWindow")
+            required.add("CloseAuthorizedWindow")
         self.backend_status = probe_gnome("ActiveApp", required, run=run_process)
         if not self.backend_status.ready:
             return None
@@ -83,24 +95,33 @@ class GnomeAppWindowController:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=self._timeout_s,
+                timeout=self._timeout_s if timeout_s is None else timeout_s,
             )
-        except OSError, subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired:
+            self._call_failure = "timeout"
+            return None
+        except OSError:
+            self._call_failure = "transport_unavailable"
             return None
         if completed.returncode != 0:
+            self._call_failure = "call_failed"
             return None
         try:
             reply: object = json.loads(completed.stdout)
         except json.JSONDecodeError, UnicodeError:
+            self._call_failure = "invalid_reply"
             return None
         if not isinstance(reply, dict) or reply.get("type") not in ("s", "ss"):
+            self._call_failure = "invalid_reply"
             return None
         data = reply.get("data")
         if not isinstance(data, list) or not all(
             isinstance(item, str) for item in data
         ):
+            self._call_failure = "invalid_reply"
             return None
         if len(data) != len(reply["type"]):
+            self._call_failure = "invalid_reply"
             return None
         return tuple(data)
 
@@ -182,13 +203,46 @@ class GnomeAppWindowController:
         # prompt and allowlist use the same internal app IDs as ActionGate.
         return replace(observation, app_id=resolved_app)
 
+    def confirm_close(self, window: WindowObservation, language: str | None) -> bool:
+        if not window.current(window.window_token, monotonic()):
+            return False
+        return self._call(
+            "ConfirmWindowClose",
+            "ss",
+            window.generation,
+            language or "en",
+            timeout_s=max(0.001, window.deadline - monotonic()),
+        ) == ("approved",)
+
+    def close_authorized(self, window: WindowObservation) -> WindowControlStatus:
+        return self._commit_close(window, "CloseAuthorizedWindow")
+
     def close_confirmed(self, window: WindowObservation) -> WindowControlStatus:
+        return self._commit_close(window, "CloseConfirmedWindow")
+
+    def _commit_close(
+        self, window: WindowObservation, method: str
+    ) -> WindowControlStatus:
+        self.close_error_code = None
         desktop_id = self._desktop_ids.get(window.app_id)
         if desktop_id is None:
+            self.close_error_code = "window_close_rejected:unregistered_app"
             return WindowControlStatus.UNKNOWN
-        reply = self._call("CloseConfirmedWindow", "s", window.generation)
+        if not window.current(window.window_token, monotonic()):
+            self.close_error_code = "window_close_rejected:stale"
+            return WindowControlStatus.UNKNOWN
+        reply = self._call(method, "s", window.generation)
         if reply != ("requested",):
+            # Only fixed protocol labels cross into diagnostics, never stdout,
+            # stderr, titles or tokens. A transport failure may follow dispatch.
+            if reply in (("stale",), ("unavailable",), ("confirmation_required",)):
+                self.close_error_code = "window_close_rejected:" + reply[0]
+            else:
+                self.close_error_code = "window_close_commit_unknown:" + (
+                    self._call_failure or "invalid_reply"
+                )
             return WindowControlStatus.UNKNOWN
+        reason = "state_unavailable"
         for index in range(self._attempts):
             if index:
                 sleep(self._retry_delay_s)
@@ -197,6 +251,19 @@ class GnomeAppWindowController:
             )
             if state == ("no_window",):
                 return WindowControlStatus.CONFIRMED
+            reason = self._call_failure or "state_unavailable"
+            if state is not None and len(state) == 1:
+                try:
+                    observed: object = json.loads(state[0])
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if (
+                        isinstance(observed, dict)
+                        and type(observed.get("minimized")) is bool
+                    ):
+                        reason = "window_present"
         # A save dialog, an ignored request or an uncertain transport is never
         # permission to force-close, retry close or answer the application's UI.
+        self.close_error_code = "window_close_unverified:" + reason
         return WindowControlStatus.UNKNOWN

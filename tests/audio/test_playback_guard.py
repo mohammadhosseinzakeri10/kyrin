@@ -30,7 +30,8 @@ class Playback:
 def test_only_playback_time_chunks_are_silenced_and_capture_remains_open() -> None:
     source = Source()
     playback = Playback()
-    guarded = PlaybackGuardInput(source, playback)
+    guard_states: list[bool] = []
+    guarded = PlaybackGuardInput(source, playback, on_guard=guard_states.append)
     chunks = guarded.capture()
 
     assert next(chunks).data == b"\x01\x02" * 160
@@ -40,6 +41,7 @@ def test_only_playback_time_chunks_are_silenced_and_capture_remains_open() -> No
     assert next(chunks).data == b"\x01\x02" * 160
     guarded.stop_capture()
     assert source.stopped
+    assert guard_states == [False, True, False]
 
 
 def test_echo_guard_preserves_timestamps_and_silences_until_tail_expires(

@@ -102,6 +102,8 @@ ENGLISH: dict[str, str] = {
     "gpu": "GPU",
     "device_actual": "Active STT device",
     "device_actual_pending": "Active STT device: waiting for session",
+    "copy_listening_diagnostics": "Copy listening state report",
+    "listening_diagnostics": "Listening state diagnostics (no speech text or audio)",
     "diagnostics_heading": "Recent speech decisions (this session only)",
     "diagnostics_clear": "Clear speech diagnostics",
     "diagnostics_decision": "Interpreted command",
@@ -151,6 +153,16 @@ ENGLISH: dict[str, str] = {
     "actions_off": "Desktop actions disabled",
     "allowed_apps": "allowed apps",
     "actions_heading": "Desktop actions",
+    "trust_all_capabilities": "Trust all current and future KYRIN capabilities",
+    "persistent_permission_help": (
+        "Permissions are saved until changed or revoked. Authorized commands "
+        "run without another KYRIN approval, including closing windows and "
+        "system power. Trust covers all supported current and future command "
+        "capabilities and installed apps. Granular choices apply when trust is "
+        "off. Ambiguous targets still need clarification. OS or app prompts "
+        "may remain. Save changes to apply or revoke permissions."
+    ),
+    "revoke_permissions": "Revoke all permissions (then Save)",
     "actions_caption": "Choose which installed apps KYRIN may control.",
     "enable_actions": "Enable the selected desktop actions",
     "allow_telegram_chats": (
@@ -175,6 +187,34 @@ ENGLISH: dict[str, str] = {
     "desktop_scroll_not_ready": (
         "No saved scroll access. Save settings, then set up access here."
     ),
+    "input_session_unprepared": "Live input is not prepared. Use the setup button.",
+    "input_session_preparing": (
+        "Waiting for system consent; setup may show an OS dialog."
+    ),
+    "input_session_interaction_required": (
+        "System consent is needed. Retry setup explicitly."
+    ),
+    "input_session_ready": (
+        "Live input is connected and ready. Microphone shutdown keeps this session."
+    ),
+    "input_session_disconnected": "Input disconnected. Use setup to reconnect.",
+    "input_session_unsupported": (
+        "The portal does not support the requested input devices."
+    ),
+    "input_session_persistent": (
+        "A restore token is saved; restart still requires explicit setup."
+    ),
+    "input_session_temporary": (
+        "No restore token was issued; this live session works until disconnection."
+    ),
+    "input_session_revoke_help": (
+        "Revoke a capability and Save to close input and remove KYRIN's restore token."
+    ),
+    "input_session_details": (
+        "Input owner PID: {owner} · Session Start count: {starts}"
+    ),
+    "input_session_busy": "The input owner is processing an operation.",
+    "input_session_disconnect": "Disconnect live input (setup is needed to reconnect)",
     "desktop_scroll_ready": "Desktop scroll access is saved.",
     "desktop_scroll_running": "Confirm the system's Remote Desktop request…",
     "desktop_scroll_done": "Desktop scroll access is saved.",
@@ -195,7 +235,9 @@ ENGLISH: dict[str, str] = {
         "Allow KYRIN to restore, minimize, maximize, or fullscreen selected apps"
     ),
     "allow_window_close": "Allow KYRIN to close a window of selected apps",
-    "allow_system_power": "Allow two-step system power requests (off by default)",
+    "allow_system_power": (
+        "Allow system power requests without repeated KYRIN confirmation"
+    ),
     "actions_search": "Search installed apps…",
     "app_spoken_aliases": "Other spoken names for the selected app",
     "app_spoken_aliases_placeholder": "Separate names with commas",

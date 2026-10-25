@@ -8,6 +8,7 @@ from copy import copy
 from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
+from kyrin.actions.authorized import PermissionExecutor
 from kyrin.actions.control_policy import ControlConfirmer
 from kyrin.actions.desktop_input import DesktopInputBroker, DesktopInputExecutor
 from kyrin.actions.executor import ActionExecutor
@@ -41,6 +42,7 @@ from kyrin.app.events import (
     AudioDuplexChanged,
     SttDeviceReady,
 )
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.app.platforms.pipewire_aec import PipeWireEchoCancellation
 from kyrin.app.settings import AppSettings, CommandModelSelection, SttSelection
 from kyrin.audio.activity.silero_vad import SileroVad
@@ -297,6 +299,12 @@ class UbuntuSessionFactory:
             previous_broker.close()
         self._input_brokers.clear()
 
+        from kyrin.actions.platforms.input_session import INPUT_SESSIONS
+
+        permissions = PermissionPolicy(settings)
+        INPUT_SESSIONS.configure(permissions)
+        settings = permissions.effective_settings(self._catalog)
+
         # Resolve exact registered IDs. Missing apps stay in the action policy
         # but cannot acquire a launch path or a spoken registered name.
         entry_paths = self._catalog.entry_paths()
@@ -422,6 +430,10 @@ class UbuntuSessionFactory:
             )
         gate = ActionGate(
             ActionPolicy(
+                # Diagnostic admission remains available without an executor.
+                authorize=permissions.allows_intent
+                if settings.action_execution_enabled
+                else None,
                 allowed_apps=frozenset(
                     binding.app_id for binding in settings.allowed_apps
                 ),
@@ -489,7 +501,9 @@ class UbuntuSessionFactory:
                 interpreter = ModelAssistedInterpreter(
                     rules,
                     OllamaCommandEngine(
-                        endpoint, command_selection.model, command_selection.device,
+                        endpoint,
+                        command_selection.model,
+                        command_selection.device,
                         resources=self._model_resources,
                         model_store=command_selection.store_path,
                     ),
@@ -542,6 +556,7 @@ class UbuntuSessionFactory:
             focused_window = self._focused_window
             coordinator = CommandCoordinator(
                 interpreter,
+                action_authorizer=permissions.allows_intent,
                 recent_utterances=recent_utterances,
                 window_observer=(
                     lambda: observe_window(focused_window, read_active_window_token)
@@ -589,6 +604,15 @@ class UbuntuSessionFactory:
                 ):
                     self._on_event(SpeechSynthesisError("voice response queue is full"))
 
+            def report_guard(guarded: bool) -> None:
+                runtime.listening_diagnostics.state(
+                    "input_guard",
+                    "silenced" if guarded else "open",
+                    reason="playback_guard",
+                    source="tts",
+                    generation=runtime.speech_generation,
+                )
+
             def create_pipeline() -> LiveSpeechPipeline | FileSpeechPipeline:
                 if self._audio_file is not None:
                     file_source = AudioFileInput(self._audio_file)
@@ -616,7 +640,7 @@ class UbuntuSessionFactory:
                     if self._audio_file is not None
                     or echo_cancel is not None
                     or speaker is None
-                    else PlaybackGuardInput(source, speaker)
+                    else PlaybackGuardInput(source, speaker, on_guard=report_guard)
                 )
                 options = SpeechToTextOptions(
                     device=selection.device,
@@ -635,7 +659,36 @@ class UbuntuSessionFactory:
                     self._on_event(SttDeviceReady(device))
 
                 def on_audio_ready() -> None:
-                    self._on_event(AudioCaptureReady())
+                    runtime.listening_diagnostics.state(
+                        "capture",
+                        "ready",
+                        reason="first_chunk",
+                        source="microphone",
+                        generation=runtime.speech_generation,
+                    )
+                    runtime.listening_diagnostics.state(
+                        "stt",
+                        "ready",
+                        reason="pipeline_ready",
+                        source="stt",
+                        generation=runtime.speech_generation,
+                    )
+                    self._on_event(
+                        AudioCaptureReady(runtime.listening_diagnostics.session_id)
+                    )
+
+                def on_audio_chunk() -> None:
+                    runtime.listening_diagnostics.pulse("audio_consumed")
+                    if echo_cancel is not None or speaker is None:
+                        runtime.listening_diagnostics.state(
+                            "input_guard",
+                            "open",
+                            reason="aec_path"
+                            if echo_cancel is not None
+                            else "no_speaker",
+                            source="audio",
+                            generation=runtime.speech_generation,
+                        )
 
                 if self._audio_file is not None:
                     return FileSpeechPipeline(
@@ -659,6 +712,10 @@ class UbuntuSessionFactory:
                     pause_confirm_ms=pause_confirm_ms,
                     on_compute_device=on_compute_device,
                     on_audio_ready=on_audio_ready,
+                    on_audio_chunk=on_audio_chunk,
+                    idle_preroll_ms=(
+                        500 if selection.backend in {"whisper", "omnilingual"} else None
+                    ),
                     on_speech_started=(
                         speaker.interrupt
                         if echo_cancel is not None and speaker is not None
@@ -734,8 +791,7 @@ class UbuntuSessionFactory:
                 and settings.system_power_enabled,
             )
             power_flow.configure(
-                enabled=settings.action_execution_enabled
-                and settings.system_power_enabled
+                permissions=permissions, enabled=permissions.allows("system_power")
             )
             power_flow.set_voice_ready(
                 lambda: (
@@ -833,6 +889,7 @@ class UbuntuSessionFactory:
                         identity_reader=self._focused_window,
                         verifier=self._chat_verifier,
                         confirmation=self._control_confirmation,
+                        permissions=permissions,
                     )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
@@ -840,9 +897,11 @@ class UbuntuSessionFactory:
                         executor,
                         controller,
                         confirmation=self._control_confirmation,
+                        permissions=permissions,
                         allowed_close_apps=frozenset(settings.allowed_close_apps),
                         allowed_window_apps=frozenset(settings.allowed_window_apps),
                     )
+                executor = PermissionExecutor(executor, permissions)
                 executor = DesktopInputExecutor(executor, input_broker)
                 if visual is not None:
                     executor = _VisualActionExecutor(executor, visual)

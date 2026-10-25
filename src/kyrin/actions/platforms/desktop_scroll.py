@@ -7,9 +7,9 @@ from pathlib import Path
 from kyrin.actions.cancellation import execute_with_budget
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.platforms.input_session import run_input_helper as run_process
 from kyrin.backend_protocol import BackendUnavailable
 from kyrin.commands.models import CommandKind
-from kyrin.operations import run_process
 
 SCROLL_HELPER = Path(__file__).with_name("desktop_scroll_helper.py")
 WindowIdentityReader = Callable[[], tuple[str, int] | None]
@@ -110,7 +110,7 @@ class DesktopScrollExecutor:
         if completed.returncode == 0 and "SCROLL_DISPATCHED" in completed.stdout:
             return ActionResult(
                 request.key,
-                ActionOutcome.LAUNCH_ACCEPTED,
+                ActionOutcome.DISPATCHED_UNVERIFIED,
             )
         return ActionResult(
             request.key, ActionOutcome.UNKNOWN, error_code="scroll_unavailable"

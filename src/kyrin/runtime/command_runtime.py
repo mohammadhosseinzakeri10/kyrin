@@ -8,6 +8,7 @@ import logging
 import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import closing
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from threading import Event, Lock
@@ -33,6 +34,7 @@ from kyrin.actions.queued_dispatch import (
     QueuedActionDispatcher,
 )
 from kyrin.actions.telegram_selection import TelegramChatSelection
+from kyrin.audio.audio_errors import AudioQueueOverflowError
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.models import (
@@ -51,6 +53,7 @@ from kyrin.runtime.command_worker import (
     CommandWork,
     UnderstoodCommand,
 )
+from kyrin.runtime.listening_diagnostics import ListeningDiagnostics
 from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged, control_phrase
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
@@ -193,7 +196,20 @@ class LiveCommandRuntime:
         self._timing_temperature = timing_temperature
         self._history_stream_id = 0
         self._voice_lock = Lock()
-        self._commands_active = not voice_standby
+        self.listening_diagnostics = ListeningDiagnostics()
+        self._voice_state = VoiceModeChanged(
+            VoiceMode.STANDBY if voice_standby else VoiceMode.ACTIVE,
+            source="startup",
+            reason="configured_initial_mode",
+            session_id=self.listening_diagnostics.session_id,
+        )
+        self.listening_diagnostics.state(
+            "mode",
+            self._voice_state.mode.value,
+            reason="configured_initial_mode",
+            source="startup",
+        )
+        self._last_mode_request_ns = 0
         self._reset_dialogue = False
         self._on_voice_mode = on_voice_mode
         self._finite_source = finite_source
@@ -215,7 +231,7 @@ class LiveCommandRuntime:
                 coordinator,
                 self._understand,
                 self._on_understood,
-                self._controller.stop,
+                self._understanding_failed,
             )
             if coordinator is not None
             else None
@@ -272,6 +288,12 @@ class LiveCommandRuntime:
         )
         with timing_scope(scope):
             scope.mark("action_started")
+            self.listening_diagnostics.state(
+                "action",
+                "busy",
+                reason="execution_started",
+                source="worker",
+            )
             try:
                 return execute_final_command(
                     command,
@@ -282,8 +304,29 @@ class LiveCommandRuntime:
                 )
             finally:
                 scope.mark("command_completed")
+                self.listening_diagnostics.state(
+                    "action",
+                    "idle",
+                    reason="execution_returned",
+                    source="worker",
+                )
+
+    def _understanding_failed(self) -> None:
+        self.listening_diagnostics.state(
+            "understanding",
+            "failed",
+            reason="worker_error",
+            source="error",
+        )
+        self._controller.stop()
 
     def stop(self) -> None:
+        self.listening_diagnostics.state(
+            "runtime",
+            "stopping",
+            reason="stop_requested",
+            source="controller",
+        )
         self._stop_requested.set()
         if self._worker is not None:
             self._worker.invalidate_pending()
@@ -295,16 +338,72 @@ class LiveCommandRuntime:
             self._system_power.cancel()
         self._controller.stop()
 
-    def set_commands_active(self, active: bool) -> None:
-        """Let the GUI button switch modes without rebuilding the STT session."""
+    @property
+    def speech_generation(self) -> int:
+        return self._history_stream_id
+
+    def voice_mode_state(self) -> VoiceModeChanged:
+        """Authoritative immutable snapshot, also used to reject queued UI events."""
         with self._voice_lock:
-            self._commands_active = active
-            if not active:
+            return self._voice_state
+
+    def set_commands_active(
+        self,
+        active: bool,
+        *,
+        source: str = "gui",
+        reason: str = "explicit_control",
+    ) -> None:
+        self._change_voice_mode(
+            VoiceMode.ACTIVE if active else VoiceMode.STANDBY,
+            source=source,
+            reason=reason,
+        )
+
+    def _change_voice_mode(
+        self,
+        mode: VoiceMode,
+        *,
+        source: str,
+        reason: str,
+        expected: VoiceModeChanged | None = None,
+        segment_id: int | None = None,
+    ) -> VoiceModeChanged | None:
+        with self._voice_lock:
+            previous = self._voice_state
+            if self._stop_requested.is_set() or (
+                expected is not None and expected is not previous
+            ):
+                return None
+            state = VoiceModeChanged(
+                mode,
+                previous.mode,
+                source,
+                reason,
+                previous.session_id,
+                self._history_stream_id,
+                previous.revision + 1,
+                segment_id,
+            )
+            self._voice_state = state
+            if source != "voice":
+                self._last_mode_request_ns = self._clock_ns()
+            self.listening_diagnostics.state(
+                "mode",
+                mode.value,
+                reason=reason,
+                source=source,
+                generation=self._history_stream_id,
+            )
+            if mode is not VoiceMode.ACTIVE:
                 self._reset_dialogue = True
-                if self._worker is not None:
-                    self._worker.invalidate_pending()
-                if self._understanding is not None:
-                    self._understanding.invalidate()
+        # Do not nest the mode lock with worker delivery/invalidation locks.
+        if mode is not VoiceMode.ACTIVE:
+            if self._worker is not None:
+                self._worker.invalidate_pending()
+            if self._understanding is not None:
+                self._understanding.invalidate()
+        return state
 
     def _clear_dialogue_if_requested(self) -> None:
         with self._voice_lock:
@@ -318,25 +417,37 @@ class LiveCommandRuntime:
             self._system_power.cancel()
 
     def _control_speech(self, event: TranscriptUpdate) -> bool:
-        with self._voice_lock:
-            active = self._commands_active
+        state = self.voice_mode_state()
+        active = state.mode is VoiceMode.ACTIVE
+        if state.mode is VoiceMode.OFF:
+            return True
         if event.status is not TranscriptStatus.FINAL:
             return not active
         mode = control_phrase(event.text, active=active)
         if mode is None:
             return not active
-        if (mode is VoiceMode.ACTIVE and active) or (
-            mode is VoiceMode.STANDBY and not active
-        ):
+        with self._voice_lock:
+            if (
+                event.emitted_ns is not None
+                and event.emitted_ns < self._last_mode_request_ns
+            ):
+                self.listening_diagnostics.pulse("stale_voice_control")
+                return True
+        if mode is state.mode:
             return True
-        if mode is not VoiceMode.OFF:
-            self.set_commands_active(mode is VoiceMode.ACTIVE)
-        else:
-            self.set_commands_active(False)
+        changed = self._change_voice_mode(
+            mode,
+            source="voice",
+            reason="exact_final_control",
+            expected=state,
+            segment_id=event.segment_id,
+        )
+        if changed is None:
+            return True
         self._clear_dialogue_if_requested()
         self._on_live_event(event)
         if self._on_voice_mode is not None:
-            self._on_voice_mode(VoiceModeChanged(mode))
+            self._on_voice_mode(changed)
         return True
 
     def respond_to_system_action(self, request_id: int, answer: str) -> bool:
@@ -355,6 +466,12 @@ class LiveCommandRuntime:
         worker = self._worker
         understanding = self._understanding
         exhausted = False
+        self.listening_diagnostics.state(
+            "runtime",
+            "running",
+            reason="run_started",
+            source="controller",
+        )
         try:
             if worker is not None:
                 worker.start()
@@ -370,20 +487,57 @@ class LiveCommandRuntime:
                     )
                     self._clear_dialogue_if_requested()
                     if isinstance(event, SpeechSessionEnded):
+                        if isinstance(event.error, AudioQueueOverflowError):
+                            overflow = event.error
+                            self.listening_diagnostics.state(
+                                "overflow",
+                                f"{overflow.buffer} pending={overflow.pending} "
+                                f"limit={overflow.limit} unit={overflow.unit}",
+                                reason="bounded_audio_queue_full",
+                                source="audio",
+                                generation=self._history_stream_id,
+                            )
+                        self.listening_diagnostics.state(
+                            "stt",
+                            "retrying"
+                            if event.retry_delay_s is not None
+                            else "failed"
+                            if event.error is not None
+                            else "ended",
+                            reason=type(event.error).__name__
+                            if event.error is not None
+                            else "end_of_input",
+                            source="error" if event.error else "stt",
+                            generation=self._history_stream_id,
+                        )
+                        self.listening_diagnostics.state(
+                            "capture",
+                            "end_reported",
+                            reason="speech_session_ended",
+                            source="stt",
+                            generation=self._history_stream_id,
+                        )
                         if not (
                             self._finite_source
                             and event.error is None
                             and event.retry_delay_s is None
                         ):
                             self._end_stream()
-                        self._on_session_end(event)
+                        self._on_session_end(
+                            replace(
+                                event,
+                                session_id=self.listening_diagnostics.session_id,
+                            )
+                        )
                         continue
+                    self.listening_diagnostics.pulse("speech_event")
                     if isinstance(event, TranscriptUpdate):
+                        self.listening_diagnostics.pulse(event.status.value)
                         if self._control_speech(event):
                             continue
                     else:
                         with self._voice_lock:
-                            if not self._commands_active:
+                            if self._voice_state.mode is not VoiceMode.ACTIVE:
                                 continue
                     timing = (
                         self._transcript_timing(event)
@@ -394,7 +548,10 @@ class LiveCommandRuntime:
                     if understanding is None or not isinstance(event, TranscriptUpdate):
                         continue
                     with self._voice_lock:
-                        if not self._commands_active or self._stop_requested.is_set():
+                        if (
+                            self._voice_state.mode is not VoiceMode.ACTIVE
+                            or self._stop_requested.is_set()
+                        ):
                             continue
                     accepted = understanding.submit(
                         CommandWork(
@@ -416,6 +573,12 @@ class LiveCommandRuntime:
                         )
             exhausted = True
         finally:
+            self.listening_diagnostics.state(
+                "runtime",
+                "draining",
+                reason="input_ended" if exhausted else "processing_error",
+                source="stt" if exhausted else "error",
+            )
             drain = exhausted and not self._stop_requested.is_set()
             understanding_done = False
             try:
@@ -447,10 +610,17 @@ class LiveCommandRuntime:
                     finally:
                         self._end_stream()
             finally:
+                self.listening_diagnostics.state(
+                    "runtime",
+                    "exiting",
+                    reason="run_finally",
+                    source="controller",
+                )
                 if self._telegram_selection is not None:
                     self._telegram_selection.cancel()
 
     def _understanding_overload(self, event: TranscriptUpdate) -> None:
+        self.listening_diagnostics.pulse("understanding_overload")
         _LOGGER.warning("Command understanding queue is full")
         self._on_command_event(
             ResponseRequest(
@@ -463,6 +633,31 @@ class LiveCommandRuntime:
         )
 
     def _understand(
+        self,
+        coordinator: CommandCoordinator,
+        event: TranscriptUpdate,
+        generation: int,
+    ) -> tuple[str | None, tuple[CommandEvent, ...]]:
+        self.listening_diagnostics.state(
+            "understanding",
+            "busy",
+            reason="work_started",
+            source="worker",
+            generation=generation,
+        )
+        try:
+            return self._understand_command(coordinator, event, generation)
+        finally:
+            self.listening_diagnostics.state(
+                "understanding",
+                "idle",
+                reason="work_returned",
+                source="worker",
+                generation=generation,
+            )
+            self.listening_diagnostics.pulse("understanding_returned")
+
+    def _understand_command(
         self,
         coordinator: CommandCoordinator,
         event: TranscriptUpdate,
@@ -550,7 +745,7 @@ class LiveCommandRuntime:
                 new_stream=True, clear_dialogue=False
             ):
                 self._on_command_event(decision)
-            self._history_stream_id += 1
+        self._history_stream_id += 1
 
     def _remember(
         self, event: TranscriptUpdate, *, stream_id: int | None = None

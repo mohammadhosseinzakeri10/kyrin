@@ -63,11 +63,45 @@ tests alone cannot establish live visual behavior.
 
 <div dir="rtl">
 
-**قرارداد فعلی بستن پنجره، F11:** نام برنامه، مجوز close و پاسخ گفتاری به پیشنهاد نام/عمل، رضایت بستن یک پنجرهٔ نامعلوم محسوب نمی‌شوند. بستن مستقیم و شماره‌ای از همان رابط `QtControlConfirmation` و تصمیم یک‌بارمصرف `ControlApproval` استفاده می‌کنند. هشدار احتمال ازدست‌رفتن کار ذخیره‌نشده یا فرایند در حال اجرا، عمل بستن و شناسهٔ برنامه/پنجره را نمایش می‌دهد. Terminal و برنامهٔ معمولی تابع همین قراردادند؛ مسیر مستقل دو تأیید power تغییر نکرده است.
+**قرارداد جاری بستن پنجره، ۲۰۲۶/۱۰/۲۵:** طبق تصمیم جدید مالک، رضایت بستن از
+مجوز ذخیره‌شده یا اعتماد کلی در `PermissionPolicy` می‌آید. در ترکیب اصلی هیچ
+دکمهٔ Approve یا تأیید گفتاریِ جداگانهٔ عمل لازم نیست. رفع ابهام نام یا انتخاب
+میان پنجره‌ها همچنان مستقل و لازم است. [قرارداد مشترک](../actions/PERSISTENT_PERMISSIONS_FA.md).
 
-`PrepareWindowClose` فقط یک هدف را مشاهده می‌کند؛ برای انتخاب شماره‌ای، snapshot موجود ملاک است و گرفتن ورودی انحصاری picker پیش از نمایش دکمه‌های Qt آزاد می‌شود. مشاهده شامل برنامه/PID/token/نسل و مهلت ثابت ده‌ثانیه‌ای است. پس از تأیید، `CloseConfirmedWindow` همان نسل را یک‌بار مصرف و در همان نوبت حلقهٔ GNOME، هویت و قابلیت بستن را دوباره بررسی می‌کند. تعویض پنجره یا PID، تغییر تمرکز حتی با بازگشت، تغییر snapshot، نسل نامنطبق و انقضا مانع بستن هستند. روش‌های قدیمیِ close بدون این اتصال، درخواست را رد می‌کنند؛ نبود رابط تأیید نیز اجرا نمی‌شود.
+`PrepareWindowClose` یک مقصد را با برنامه/PID/token/نسل و مهلت ثابت ده‌ثانیه‌ای
+مشاهده می‌کند؛ picker ورودی انحصاری را آزاد می‌کند. `CloseAuthorizedWindow`
+همان نسل را یک‌بار مصرف و در همان نوبت حلقهٔ Shell، هویت، قابلیت بستن، تمرکز
+و snapshot را دوباره بررسی می‌کند. تعویض پنجره یا PID، تغییر تمرکز حتی با
+بازگشت، تغییر انتخاب، نسل نامنطبق و انقضا مانع اجرا هستند. لغو Python نیز پیش
+از ارسال بررسی می‌شود. روش‌های قدیمی `ConfirmWindowClose` و
+`CloseConfirmedWindow` برای سازگاری باقی‌اند و در مسیر اصلی فراخوانی نمی‌شوند.
 
-فقط درخواست معمول [`Meta.Window.delete`](https://mutter.gnome.org/meta/method.Window.delete.html) ارسال می‌شود؛ هیچ kill، پاسخ به dialog ذخیره‌سازی یا تکرار خودکار close وجود ندارد. باقی‌ماندن پنجره، از جمله هنگام پرسش ذخیره‌سازی، موفقیت گزارش نمی‌شود. زمان افزونه از ساعت یکنواخت [`GLib.get_monotonic_time`](https://docs.gtk.org/glib/func.get_monotonic_time.html) می‌آید. افزونهٔ به‌روز باید نصب و بارگذاری شود؛ افزونهٔ قدیمی مسیر جایگزین بدون تأیید ایجاد نمی‌کند. آزمون‌های قطعی Python/Qt/GJS جای آزمون زندهٔ GNOME/Wayland را نمی‌گیرند؛ آزمون زندهٔ Terminal، ویرایشگر با کار ذخیره‌نشده و رفتار تمرکز dialog هنوز انجام نشده است.
+فقط close معمولی ارسال می‌شود؛ kill، پاسخ به dialog ذخیره‌سازی و تکرار خودکار
+وجود ندارد. نتیجه پس از بازخوانی همان پنجره گزارش می‌شود. backend باید قابلیت
+`CloseAuthorizedWindow` و ساخت
+`active-app@kyrin.local-2026-10-25-persistent-permissions` را گزارش کند.
+پیش از آماده‌سازی، این قابلیت و `GetAppWindowState` بررسی می‌شوند؛ افزونهٔ قدیمی
+با خطای قابلیت متوقف می‌شود و دیالوگ جایگزین ندارد. روش نصب و نتایج آزمون در
+[گزارش مستقل](../development/PERSISTENT_PERMISSIONS_2026-10-25_FA.md) آمده‌اند.
+مالک موفقیت بستن Chrome با تأیید بومی نسخهٔ قبلی را تأیید کرده است؛ این شاهد
+به معنی آزمودن نسخهٔ تازهٔ بدون دیالوگ روی Chrome نیست.
+
+**سابقهٔ تشخیص مرحلهٔ شکست پیش از مجوز ماندگار، ۲۰۲۶/۱۰/۲۵:** در پیگیری گزارش زندهٔ مالک، نتیجهٔ
+عمومی `window_unverified` برای بستن GNOME کافی نبود. اکنون adapter علت‌های
+ثابتِ `window_close_rejected:<reason>`، `window_close_commit_unknown:<reason>`
+و `window_close_unverified:<reason>` را از هم جدا می‌کند. اولی ردشدن صریح
+backend مانند `stale` است؛ دومی پاسخ مفقود/نامعتبر یا خطای انتقال هنگام
+فراخوانی بستن؛ سومی دریافت `requested` بدون تأیید ناپدیدشدن پنجره است.
+`window_present` یعنی در آخرین بازخوانی همان پنجره دیده شد؛ به معنی تشخیص
+پرسش ذخیره‌سازی نیست. متن خطا، عنوان و محتوای پنجره کپی نمی‌شوند. رابط پیام
+هر مرحله را توضیح می‌دهد. بررسی تمرکز و یک‌بارمصرف‌بودن تأیید حفظ شده‌اند. در پیگیری بعدی،
+`stale` از مالک رسید و گرفتن تمرکز توسط خودِ dialog قدیمی Qt در نشست
+جداگانه بازتولید شد. تأیید بومی Shell یک `Meta.Window` جدید نمی‌سازد؛
+بنابراین به استثناکردن تغییر تمرکز از اعتبارسنجی نیازی نیست. افزونهٔ بارشده
+در قرارداد پیشین باید قابلیت `ConfirmWindowClose` و ساخت
+`active-app@kyrin.local-2026-10-25-close-confirmation` را گزارش کند.
+مشاهدهٔ مهلت در Python نیز با جمع مستقیم مقایسه می‌شود تا خطای گردکردن
+تفاضل دو عدد اعشاری، مهلت دقیق ده‌ثانیه‌ای را نامعتبر نکند.
 
 </div>
 
@@ -108,9 +142,13 @@ Use `scripts/desktop/check_active_app.py` to discover the desktop ID on the targ
 Build the test package with GNOME's own tool, then install and enable it for the current user:
 
 ```bash
-gnome-extensions pack --extra-source windowPicker.js --out-dir /tmp \
+mkdir -p local-data/permissions-checks/extension-build
+gnome-extensions pack --force --extra-source windowPicker.js \
+  --extra-source closeConfirmation.js \
+  --out-dir local-data/permissions-checks/extension-build \
   integrations/gnome-shell/active-app@kyrin.local
-gnome-extensions install /tmp/active-app@kyrin.local.shell-extension.zip
+gnome-extensions install --force \
+  local-data/permissions-checks/extension-build/active-app@kyrin.local.shell-extension.zip
 gnome-extensions enable active-app@kyrin.local
 ```
 

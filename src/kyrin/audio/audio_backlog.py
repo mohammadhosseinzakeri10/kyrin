@@ -75,7 +75,12 @@ class AudioBacklog:
             pending = self._pending_frames + frames
             if pending * 1000 > self.maximum_ms * self.audio_format.sample_rate:
                 raise AudioQueueOverflowError(
-                    "STT audio backlog exceeded its duration limit"
+                    "STT audio backlog exceeded its duration limit",
+                    buffer="stt_backlog",
+                    pending=(pending * 1000 + self.audio_format.sample_rate - 1)
+                    // self.audio_format.sample_rate,
+                    limit=self.maximum_ms,
+                    unit="ms",
                 )
             self._chunks.append(chunk)
             self._pending_frames = pending

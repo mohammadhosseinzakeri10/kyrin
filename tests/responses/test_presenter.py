@@ -37,6 +37,31 @@ KEY = ActionKey(2, 7)
 TELEGRAM = CommandIntent(CommandKind.OPEN_APP, "telegram")
 
 
+@pytest.mark.parametrize("language", ["fa", "en"])
+@pytest.mark.parametrize(
+    ("code", "fragment"),
+    [
+        ("window_close_rejected:stale", ("رد شد", "rejected")),
+        ("window_close_commit_unknown:timeout", ("پاسخ", "reply")),
+        ("window_close_unverified:window_present", ("ارسال شد", "sent")),
+    ],
+)
+def test_close_stage_is_explained_without_raw_diagnostics(
+    language: str, code: str, fragment: tuple[str, str]
+) -> None:
+    feedback = ActionFeedback(
+        KEY,
+        CommandIntent(CommandKind.CLOSE_APP_WINDOW, "google-chrome"),
+        ActionOutcome.UNKNOWN,
+        ResponseChannel.TEXT_ONLY,
+        code,
+        language,
+    )
+    text = ResponsePresenter(language).present(feedback).text
+    assert fragment[language == "en"] in text
+    assert code not in text and "google-chrome" not in text
+
+
 def test_chat_failure_explains_unsupported_name_and_missing_screen_access() -> None:
     intent = CommandIntent(CommandKind.OPEN_CHAT, "save message", "telegram")
     unsupported = ActionFeedback(

@@ -5,6 +5,7 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {WindowPicker} from './windowPicker.js';
+import {WindowCloseConfirmation} from './closeConfirmation.js';
 
 const INTERFACE_XML = `<node>
   <interface name="org.kyrin.ActiveApp">
@@ -89,6 +90,15 @@ const INTERFACE_XML = `<node>
       <arg name="number" type="u" direction="in"/>
       <arg name="observation" type="s" direction="out"/>
     </method>
+    <method name="CloseAuthorizedWindow">
+      <arg type="s" direction="in" name="generation"/>
+      <arg type="s" direction="out" name="result"/>
+    </method>
+    <method name="ConfirmWindowClose">
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="language" type="s" direction="in"/>
+      <arg name="decision" type="s" direction="out"/>
+    </method>
     <method name="CloseConfirmedWindow">
       <arg name="generation" type="s" direction="in"/>
       <arg name="status" type="s" direction="out"/>
@@ -110,16 +120,18 @@ const INTERFACE_XML = `<node>
 export default class KyrinActiveAppExtension extends Extension {
     // This literal belongs to the loaded module; metadata on disk may be newer.
     GetCapabilities() {
-        return JSON.stringify({"protocol_version": 1, "build_id": "active-app@kyrin.local-2026-10-24-f20", "capabilities": ["GetActiveApp", "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer", "HasAppWindow", "CountAppWindows", "ShowAllWindows", "ShowOpenWindows", "ActivateShownOpenWindow", "CloseShownOpenWindow", "ActivateShownOpenApp", "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow", "CloseShownAppWindow", "HideAppWindows", "ActivateExistingApp", "PrepareWindowClose", "CloseConfirmedWindow", "ControlAppWindow", "GetAppWindowState"]});
+        return JSON.stringify({"protocol_version": 1, "build_id": "active-app@kyrin.local-2026-10-25-persistent-permissions", "capabilities": ["GetActiveApp", "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer", "HasAppWindow", "CountAppWindows", "ShowAllWindows", "ShowOpenWindows", "ActivateShownOpenWindow", "CloseShownOpenWindow", "ActivateShownOpenApp", "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow", "CloseShownAppWindow", "HideAppWindows", "ActivateExistingApp", "PrepareWindowClose", "ConfirmWindowClose", "CloseConfirmedWindow", "CloseAuthorizedWindow", "ControlAppWindow", "GetAppWindowState"]});
     }
 
     enable() {
         this._pendingClose = null;
+        this._closeDialog = null;
         this._picker = null;
         this._shownWindows = null;
         this._shownOpen = null;
         this._closeFocusSignal = global.display.connect('notify::focus-window', () => {
             this._pendingClose = null;
+            this._closeDialog?.cancel();
         });
         this._dbusObject = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this);
         this._dbusObject.export(Gio.DBus.session, '/org/kyrin/ActiveApp');
@@ -191,6 +203,7 @@ export default class KyrinActiveAppExtension extends Extension {
 
     _clearPicker() {
         this._pendingClose = null;
+        this._closeDialog?.cancel();
         this._picker?.destroy();
         this._picker = null;
         this._shownWindows = null;
@@ -385,14 +398,15 @@ export default class KyrinActiveAppExtension extends Extension {
     }
 
     PrepareWindowClose(appId, number) {
+        this._closeDialog?.cancel();
         this._pendingClose = null;
         if (!Number.isInteger(number) || number < 0 || number > 99)
             return '';
         const candidate = this._closeCandidate(appId, number);
         if (!candidate || !candidate.window.can_close() || candidate.window.get_pid() <= 0)
             return '';
-        // Release the Shell modal grab so the shared Qt consent buttons can
-        // be clicked. Retain only the numbered identity snapshot, never input.
+        // Release the picker before showing the per-window confirmation.
+        // Retain only the numbered identity snapshot, never picker input.
         this._picker?.destroy();
         this._picker = null;
         const observed = GLib.get_monotonic_time() / 1000000;
@@ -412,15 +426,59 @@ export default class KyrinActiveAppExtension extends Extension {
         return JSON.stringify(observation);
     }
 
+    ConfirmWindowCloseAsync([generation, language], invocation) {
+        const pending = this._pendingClose;
+        const reply = value => invocation.return_value(new GLib.Variant('(s)', [value]));
+        if (!pending || pending.approved || this._closeDialog ||
+            pending.observation.generation !== generation ||
+            GLib.get_monotonic_time() / 1000000 >= pending.observation.deadline ||
+            global.display.get_focus_window() !== pending.focus) {
+            reply('declined');
+            return;
+        }
+        let watch = null;
+        const dialog = new WindowCloseConfirmation(approved => {
+            if (watch !== null)
+                Gio.bus_unwatch_name(watch);
+            if (this._closeDialog === dialog)
+                this._closeDialog = null;
+            const accepted = approved && this._pendingClose === pending &&
+                GLib.get_monotonic_time() / 1000000 < pending.observation.deadline &&
+                global.display.get_focus_window() === pending.focus;
+            pending.approved = accepted;
+            if (!accepted && this._pendingClose === pending)
+                this._pendingClose = null;
+            reply(accepted ? 'approved' : 'declined');
+        });
+        this._closeDialog = dialog;
+        // Cancellation/timeout kills the busctl caller; dismiss its dialog too.
+        watch = Gio.bus_watch_name_on_connection(invocation.get_connection(),
+            invocation.get_sender(), Gio.BusNameWatcherFlags.NONE,
+            null, () => dialog.cancel());
+        dialog.show(pending.observation, language);
+    }
+
+    CloseAuthorizedWindow(generation) {
+        // KYRIN owns persistent consent. Shell owns atomic target validation.
+        return this._commitWindowClose(generation, false);
+    }
+
     CloseConfirmedWindow(generation) {
+        return this._commitWindowClose(generation, true);
+    }
+
+    _commitWindowClose(generation, requireConfirmation) {
         const pending = this._pendingClose;
         this._pendingClose = null; // Invalid, expired and repeated commits burn it.
+        this._closeDialog?.cancel();
         if (!pending || generation !== pending.observation.generation ||
             GLib.get_monotonic_time() / 1000000 >= pending.observation.deadline ||
             global.display.get_focus_window() !== pending.focus ||
             (pending.number > 0 && pending.snapshot !==
                 (pending.appId === '' ? this._shownOpen : this._shownWindows)))
             return 'stale';
+        if (requireConfirmation && !pending.approved)
+            return 'confirmation_required';
         const fresh = this._closeCandidate(pending.appId, pending.number);
         const wanted = pending.observation;
         if (!fresh || fresh.window !== pending.window || fresh.appId !== wanted.app_id ||

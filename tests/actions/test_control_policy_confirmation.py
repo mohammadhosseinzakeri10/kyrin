@@ -110,6 +110,51 @@ def test_confirmed_unknown_control_resolves_again_before_input(
     assert events == ["resolve", "dialog", "resolve", "input"]
 
 
+@pytest.mark.parametrize("change", ["none", "target", "cancelled", "denied"])
+def test_saved_control_consent_replaces_only_the_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from kyrin.app.permissions import PermissionPolicy
+    from kyrin.app.settings import AppSettings
+
+    events: list[str] = []
+    context = ActionExecutionContext(1)
+    target = evidence("Mode")
+
+    def resolve(*args: object) -> ControlEvidence:
+        events.append("resolve")
+        if change == "cancelled":
+            context.cancel()
+        return (
+            replace(target, anchor=(1, 2))
+            if change == "target" and len(events) > 1
+            else target
+        )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        events.append("input")
+        return subprocess.CompletedProcess(args, 0, "ACTION_DISPATCHED", "")
+
+    monkeypatch.setattr(desktop_control, "run_process", run)
+    executor = desktop_control.DesktopControlExecutor(
+        Delegate(),
+        identity_reader=lambda: ("example.desktop", 42),
+        token_reader=lambda: "window-7",
+        control_resolver=resolve,
+        permissions=PermissionPolicy(
+            AppSettings(
+                action_execution_enabled=True, allow_desktop_control=change != "denied"
+            )
+        ),
+        confirmation=lambda _: pytest.fail("saved control opened confirmation"),
+    )
+    executor.execute(replace(request("Mode"), context=context))
+    assert ("input" in events) == (change == "none")
+    if change == "none":
+        assert events == ["resolve", "resolve", "input"]
+
+
 def evidence(label: str = "Mode", checked: bool | None = None) -> ControlEvidence:
     return ControlEvidence(
         label,

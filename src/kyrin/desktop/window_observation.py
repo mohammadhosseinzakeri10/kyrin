@@ -31,7 +31,9 @@ class WindowObservation:
             or not self.generation
             or not isfinite(self.observed_at)
             or not isfinite(self.deadline)
-            or not 0 < self.deadline - self.observed_at <= MAX_CAPTURE_AGE_S
+            or not self.observed_at
+            < self.deadline
+            <= self.observed_at + MAX_CAPTURE_AGE_S
         ):
             raise ValueError("incomplete or unbounded window observation")
 

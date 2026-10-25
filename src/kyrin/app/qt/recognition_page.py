@@ -75,6 +75,20 @@ class RecognitionPage(QWidget):
         self.diagnostics_output.setMaximumBlockCount(40)
         self.diagnostics_output.setAccessibleName("Speech command diagnostics")
         layout.addWidget(self.diagnostics_output)
+        layout.addWidget(label("listening_diagnostics"))
+        self.listening_diagnostics_output = QPlainTextEdit()
+        self.listening_diagnostics_output.setReadOnly(True)
+        self.listening_diagnostics_output.setMaximumBlockCount(140)
+        self.listening_diagnostics_output.setMinimumHeight(180)
+        self.listening_diagnostics_output.setLayoutDirection(
+            Qt.LayoutDirection.LeftToRight
+        )
+        self.listening_diagnostics_output.setAccessibleName(
+            "Listening state diagnostics"
+        )
+        layout.addWidget(self.listening_diagnostics_output)
+        self.copy_listening_diagnostics_button = QPushButton()
+        layout.addWidget(self.copy_listening_diagnostics_button)
         self.clear_diagnostics_button = QPushButton()
         self.clear_diagnostics_button.clicked.connect(self.diagnostics_output.clear)
         layout.addWidget(self.clear_diagnostics_button)

@@ -26,7 +26,7 @@ class ControlConsequence(StrEnum):
 
 
 # Reviewed aliases identify navigation only, never authorize a toggle or a
-# consequential action. Unknown labels still need explicit per-operation consent.
+# consequential action. Unknown labels need independently bound evidence and consent.
 _NAVIGATION = {
     "settings": ("settings", "تنظیمات", "einstellungen", "paramètres", "ajustes"),
     "search": ("search", "جست‌وجو", "جستجو", "suchen", "rechercher", "buscar"),
@@ -97,7 +97,10 @@ ControlConfirmer = Callable[[ControlConfirmation], bool]
 
 @dataclass(slots=True)
 class ControlApproval:
-    """One decision for exactly one binding, expiring at the original deadline.
+    """One request binding, expiring at the original observation deadline.
+
+    Persistent consent comes from PermissionPolicy in the application path;
+    legacy callers may obtain consent from a button. Neither renews evidence.
 
     Even a failed consumption burns the decision. It is local to the executor,
     never a field accepted from an interpreter or a model.

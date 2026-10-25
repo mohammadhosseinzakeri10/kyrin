@@ -22,7 +22,7 @@ from kyrin.memory.history import HistoryRetention
 from kyrin.stt.device import DevicePreference
 from kyrin.vision.ocr.contracts import OcrDevicePreference
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 class SettingsError(ValueError):
@@ -148,7 +148,12 @@ def _parse_settings(document: object) -> AppSettings:
         fields.add("allow_desktop_control")
     if version >= 16:
         fields.update({"history_enabled", "history_retention"})
+    if version >= 17:
+        fields.update({"trust_all_capabilities", "capability_grants"})
     root = _object(document, fields, "settings")
+    grants = root["capability_grants"] if version >= 17 else []
+    if not isinstance(grants, list):
+        raise SettingsError("capability_grants must be a list")
     retention = HistoryRetention()
     if version >= 16:
         raw_retention = _object(
@@ -321,6 +326,14 @@ def _parse_settings(document: object) -> AppSettings:
         )
     try:
         return AppSettings(
+            trust_all_capabilities=(
+                _boolean(root["trust_all_capabilities"], "trust_all_capabilities")
+                if version >= 17
+                else False
+            ),
+            capability_grants=tuple(
+                _string(item, "capability_grants") for item in grants
+            ),
             history_enabled=(
                 _boolean(root["history_enabled"], "history_enabled")
                 if version >= 16
@@ -377,6 +390,8 @@ def _document(settings: AppSettings) -> dict[str, object]:
     stt = settings.stt
     return {
         "schema_version": SCHEMA_VERSION,
+        "trust_all_capabilities": settings.trust_all_capabilities,
+        "capability_grants": list(settings.capability_grants),
         "history_enabled": settings.history_enabled,
         "history_retention": asdict(settings.history_retention),
         "listening_enabled": settings.listening_enabled,

@@ -4,7 +4,7 @@ Only search mode edits a bound accessible field in cancellable batches; it
 never presses Enter or sends a message. Menu activation uses a live semantic
 control. Pointer mode clicks one OCR-approved search result after
 fresh focus, geometry, and pointer-position checks. Run with system Python
-for Ubuntu's Gio bindings. Every remote-desktop session is closed on exit.
+for Ubuntu's Gio bindings. The application owner retains the live session.
 """
 
 import json
@@ -31,14 +31,16 @@ from kyrin.actions.platforms.desktop_accessibility import (  # noqa: E402
     ControlUnavailable,
     action_index,
 )
-from kyrin.actions.platforms.helper_lifecycle import HelperLifetime  # noqa: E402
+from kyrin.actions.platforms.helper_lifecycle import (  # noqa: E402
+    HelperLifetime,
+    shared_session,
+)
 from kyrin.actions.platforms.telegram_accessibility import (  # noqa: E402
     TelegramControl,
     locate_control,
 )
 from kyrin.app.permission_token import (  # noqa: E402
     permission_token_path,
-    read_opaque_token,
 )
 from kyrin.backend_protocol import BackendUnavailable, probe_gnome  # noqa: E402
 from kyrin.desktop.platforms.gnome import read_active_window_token  # noqa: E402
@@ -656,75 +658,18 @@ def main() -> int:
         if _focused_identity() != expected:
             print("FOCUS_CHANGED", flush=True)
             return 2
-    device = 3  # One remembered RemoteDesktop grant covers keyboard and pointer.
-    remembered = read_opaque_token(CONTROL_TOKEN_PATH)
-    if mode != "grant-control" and remembered is None:
-        print("CONTROL_SETUP_REQUIRED", flush=True)
-        return 3
     bound_mode = mode in {"menu", "search", "focus-search"}
     initial_window_token = _focused_window_token() if bound_mode else None
+    acquired = shared_session(3)
+    if acquired is None:
+        print("CONTROL_SETUP_REQUIRED", flush=True)
+        return 3
+    connection, session = acquired
     if bound_mode and initial_window_token is None:
+        connection.close()
         print("TARGET_CHANGED", flush=True)
         return 2
-    connection = HelperLifetime(
-        Gio.bus_get_sync(Gio.BusType.SESSION, None), CONTROL_TOKEN_PATH, remembered
-    )
-    session: str | None = None
     try:
-        created = _request(
-            connection,
-            "CreateSession",
-            ({"session_handle_token": GLib.Variant("s", "kyrin_" + uuid4().hex)},),
-            8000,
-        )
-        if created is None:
-            print("CONTROL_SESSION_UNAVAILABLE:create", flush=True)
-            return 1
-        session = created["session_handle"]
-        options = {
-            "types": GLib.Variant("u", device),
-            "persist_mode": GLib.Variant("u", 2),
-        }
-        if remembered is not None:
-            options["restore_token"] = GLib.Variant("s", remembered)
-        selected = _request(
-            connection,
-            "SelectDevices",
-            (session, options),
-            8000,
-        )
-        if selected is None:
-            print("CONTROL_SESSION_UNAVAILABLE:devices", flush=True)
-            return 1
-        started = _request(connection, "Start", (session, "", {}), 30000)
-        if started is None or started.get("devices", 0) & device != device:
-            print("CONTROL_SESSION_UNAVAILABLE:start", flush=True)
-            return 1
-        replacement = started.get("restore_token")
-        stored = False
-        if isinstance(replacement, str):
-            try:
-                connection.rotate(replacement)
-                stored = True
-            except (OSError, ValueError) as exc:
-                print(
-                    f"Could not remember Telegram input permission: {exc}",
-                    file=sys.stderr,
-                )
-        elif remembered is not None:
-            # An old restore token may have been consumed. Never reuse it.
-            try:
-                CONTROL_TOKEN_PATH.unlink(missing_ok=True)
-            except OSError as exc:
-                print(
-                    f"Could not clear old Telegram input permission: {exc}",
-                    file=sys.stderr,
-                )
-        if mode == "grant-control":
-            if not stored:
-                return 1
-            print("CONTROL_GRANT_READY", flush=True)
-            return 0
         print("INPUT_GRANTED focus_telegram_within=10s", flush=True)
         assert expected is not None
         if not _wait_for_expected_focus(expected):
@@ -808,21 +753,6 @@ def main() -> int:
         print("TARGET_CHANGED", flush=True)
         return 2
     finally:
-        if session is not None:
-            try:
-                connection.call_sync(
-                    BUS,
-                    session,
-                    SESSION,
-                    "Close",
-                    None,
-                    None,
-                    Gio.DBusCallFlags.NONE,
-                    3000,
-                    None,
-                )
-            except GLib.Error:
-                pass
         connection.close()
 
 

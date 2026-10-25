@@ -4,9 +4,10 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,9 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from kyrin.actions.models import ActionFeedback, ActionNotice
-from kyrin.actions.platforms.desktop_control import CONTROL_HELPER
-from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
-from kyrin.actions.platforms.telegram import TELEGRAM_PORTAL_HELPER
+from kyrin.actions.platforms.input_session import INPUT_SESSIONS
 from kyrin.app.app_permissions import AppPickerCatalog
 from kyrin.app.controller import ApplicationController, ApplicationState
 from kyrin.app.events import (
@@ -34,7 +33,8 @@ from kyrin.app.events import (
     SttDeviceReady,
 )
 from kyrin.app.model_library import InstalledModel, ModelLibrary
-from kyrin.app.permission_token import permission_token_path, read_opaque_token
+from kyrin.app.permission_token import permission_token_path
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.app.platforms.xdg_startup import DesktopRegistrationError
 from kyrin.app.qt.actions_page import DesktopActionsPage
 from kyrin.app.qt.archived_memory_dialog import ArchivedMemoryDialog
@@ -45,6 +45,7 @@ from kyrin.app.qt.branding import LOGO_PATH
 from kyrin.app.qt.command_model_page import CommandModelPage
 from kyrin.app.qt.dashboard_page import DashboardPage
 from kyrin.app.qt.document_text_reader import DocumentTextReader
+from kyrin.app.qt.input_access import InputSetupJob
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.ocr_setup import selected_ocr_engine
 from kyrin.app.qt.power_dialog import PowerConfirmationDialog
@@ -168,6 +169,9 @@ class ControlWindow(QWidget):
     ) -> None:
         super().__init__()
         self._settings = settings
+        self._input_sessions = INPUT_SESSIONS
+        if settings is not None:
+            self._input_sessions.configure(PermissionPolicy(settings))
         self._store = store
         self._controller = controller
         self._microphones = microphones
@@ -176,11 +180,13 @@ class ControlWindow(QWidget):
         self._omnilingual_python = omnilingual_python
         self._active_stt_device: ComputeDevice | None = None
         self._audio_ready = False
+        self._last_listening_diagnostics_refresh = 0.0
         self._echo_cancelled = False
         self._pending_settings: AppSettings | None = None
-        self._pointer_grant_process: QProcess | None = None
-        self._scroll_grant_process: QProcess | None = None
-        self._control_grant_process: QProcess | None = None
+        self._pending_commands_active: bool | None = None
+        self._pointer_grant_process: InputSetupJob | None = None
+        self._scroll_grant_process: InputSetupJob | None = None
+        self._control_grant_process: InputSetupJob | None = None
         self._quitting = False
         self._microphone_off_pending = False
         self._last_status_error: Exception | None = None
@@ -327,6 +333,9 @@ class ControlWindow(QWidget):
         self.action_label = self.recognition_page.action_label
         self.diagnostics_heading = self.recognition_page.diagnostics_heading
         self.diagnostics_output = self.recognition_page.diagnostics_output
+        self.recognition_page.copy_listening_diagnostics_button.clicked.connect(
+            self._copy_listening_diagnostics
+        )
         self.clear_diagnostics_button = self.recognition_page.clear_diagnostics_button
         self.pages.addWidget(self.recognition_page)
 
@@ -368,6 +377,15 @@ class ControlWindow(QWidget):
         self.actions_page.desktop_control_grant_button.clicked.connect(
             self._grant_desktop_control
         )
+        self.actions_page.input_disconnect_button.clicked.connect(
+            self._disconnect_input_session
+        )
+        self._input_status_timer = QTimer(self)
+        self._input_status_timer.setInterval(2000)
+        self._input_status_timer.timeout.connect(self._refresh_input_session)
+        self._input_status_timer.start()
+        self._refresh_input_session()
+
         for action, button in self.actions_page.power_buttons.items():
             button.clicked.connect(
                 lambda checked=False, selected=action: self._start_power(selected)
@@ -550,6 +568,9 @@ class ControlWindow(QWidget):
         self._update_active_device_label()
         self.diagnostics_heading.setText(t("diagnostics_heading"))
         self.clear_diagnostics_button.setText(t("diagnostics_clear"))
+        self.recognition_page.copy_listening_diagnostics_button.setText(
+            t("copy_listening_diagnostics")
+        )
 
     def _update_active_device_label(self) -> None:
         t = self._translations.text
@@ -570,7 +591,12 @@ class ControlWindow(QWidget):
             else t("actions_off")
         )
         self.action_label.setText(
-            f"{action_state} · {len(self._settings.allowed_apps)} {t('allowed_apps')}"
+            f"{action_state} · {t('trust_all_capabilities')}"
+            if self._settings.trust_all_capabilities
+            else (
+                f"{action_state} · {len(self._settings.allowed_apps)} "
+                f"{t('allowed_apps')}"
+            )
         )
 
     def _import_language(self) -> None:
@@ -860,6 +886,8 @@ class ControlWindow(QWidget):
         if (
             actions_enabled
             and not selected_apps
+            and not self.actions_page.trust_all_checkbox.isChecked()
+            and not self.actions_page.selected_capability_grants()
             and not self.actions_page.system_power_checkbox.isChecked()
             and not self.actions_page.desktop_scroll_checkbox.isChecked()
             and not self.actions_page.desktop_control_checkbox.isChecked()
@@ -878,6 +906,8 @@ class ControlWindow(QWidget):
             tts_languages=self.tts_page.language_routes(),
             tts_enabled=self.tts_page.voice_enabled(),
             action_execution_enabled=actions_enabled,
+            trust_all_capabilities=self.actions_page.trust_all_checkbox.isChecked(),
+            capability_grants=self.actions_page.selected_capability_grants(),
             system_power_enabled=self.actions_page.system_power_checkbox.isChecked(),
             allowed_apps=selected_apps,
             allowed_chat_apps=self.actions_page.selected_chat_apps(),
@@ -931,155 +961,94 @@ class ControlWindow(QWidget):
             )
         )
 
+    def _refresh_input_session(self) -> None:
+        self.actions_page.set_input_session_status(self._input_sessions.status())
+
     def _grant_telegram_pointer(self) -> None:
         if self._pointer_grant_process is not None:
             return
         if (
             self._settings is None
-            or "telegram" not in self._settings.allowed_chat_apps
-            or not self._settings.remember_telegram_pointer
+            or not PermissionPolicy(self._settings).has_grant(
+                "telegram_chat", "telegram"
+            )
+            or not (
+                self._settings.remember_telegram_pointer
+                or self._settings.trust_all_capabilities
+            )
             or self.actions_page.has_unsaved_changes(self._settings)
         ):
             self.actions_page.telegram_pointer_grant_status.setText(
                 self._translations.text("telegram_pointer_save_first")
             )
             return
-        process = QProcess(self)
-        process.setProgram("/usr/bin/python3")
-        process.setArguments([str(TELEGRAM_PORTAL_HELPER), "grant-control"])
-        process.finished.connect(
-            lambda code, _status: self._finish_telegram_pointer_grant(process, code)
-        )
-        process.errorOccurred.connect(
-            lambda _error: self._finish_telegram_pointer_grant(process, -1)
-        )
-        self._pointer_grant_process = process
-        self.actions_page.telegram_pointer_grant_button.setEnabled(False)
-        self.actions_page.telegram_pointer_grant_status.setText(
-            self._translations.text("telegram_pointer_grant_running")
-        )
-        process.start()
+        self._start_input_setup("telegram_chat", "_pointer_grant_process")
 
-    def _finish_telegram_pointer_grant(self, process: QProcess, code: int) -> None:
-        if self._pointer_grant_process is not process:
+    def _start_input_setup(self, capability: str, attribute: str) -> None:
+        # A single app owner handles setup and commands. No setup-time input
+        # is emitted; actual input remains under DesktopInputBroker.
+        if any(job is not None for job in (
+            self._pointer_grant_process, self._scroll_grant_process,
+            self._control_grant_process,
+        )):
             return
-        ready = (
-            code == 0
-            and b"CONTROL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
-            and read_opaque_token(permission_token_path("telegram-control")) is not None
+        job = InputSetupJob(self._input_sessions, capability, self)
+        setattr(self, attribute, job)
+        job.finished.connect(
+            lambda result: self._finish_input_setup(job, attribute, result)
         )
-        if ready:
-            for legacy_name in ("telegram-keyboard", "telegram-pointer"):
-                try:
-                    permission_token_path(legacy_name).unlink(missing_ok=True)
-                except OSError:
-                    pass
-        self._pointer_grant_process = None
-        process.deleteLater()
-        self.actions_page.telegram_pointer_grant_button.setEnabled(
-            self.actions_page.telegram_pointer_checkbox.isChecked()
-        )
-        self.actions_page.telegram_pointer_grant_status.setText(
-            self._translations.text(
-                "telegram_pointer_grant_done"
-                if ready
-                else "telegram_pointer_grant_failed"
+        self.actions_page.set_input_session_status({"state": "preparing", "devices": 0})
+        job.start()
+
+    def _finish_input_setup(
+        self, job: InputSetupJob, attribute: str, result: object
+    ) -> None:
+        if getattr(self, attribute) is not job:
+            return
+        setattr(self, attribute, None)
+        if self._quitting or not self._input_grant_selected(job.capability):
+            self._input_sessions.disconnect(forget=True)
+        else:
+            self.actions_page.set_input_session_status(self._input_sessions.status())
+        job.deleteLater()
+
+    def _disconnect_input_session(self) -> None:
+        for job in (self._pointer_grant_process, self._scroll_grant_process,
+                    self._control_grant_process):
+            if job is not None:
+                job.kill()
+        self._input_sessions.disconnect()
+        self.actions_page.set_input_session_status(self._input_sessions.status())
+
+    def _input_grant_selected(self, capability: str) -> bool:
+        if self._settings is None:
+            return False
+        policy = PermissionPolicy(self._settings)
+        if capability == "telegram_chat":
+            return policy.has_grant(capability, "telegram") and (
+                self._settings.remember_telegram_pointer
+                or self._settings.trust_all_capabilities
             )
-        )
+        return policy.has_grant(capability)
 
     def _grant_desktop_scroll(self) -> None:
-        if self._scroll_grant_process is not None:
-            return
-        if (
-            self._settings is None
-            or not self._settings.allow_desktop_scroll
-            or self.actions_page.has_unsaved_changes(self._settings)
-        ):
-            self.actions_page.desktop_scroll_grant_status.setText(
-                self._translations.text("desktop_scroll_save_first")
-            )
-            return
-        process = QProcess(self)
-        process.setProgram("/usr/bin/python3")
-        process.setArguments([str(SCROLL_HELPER), "grant"])
-        process.finished.connect(
-            lambda code, _status: self._finish_desktop_scroll_grant(process, code)
-        )
-        process.errorOccurred.connect(
-            lambda _error: self._finish_desktop_scroll_grant(process, -1)
-        )
-        self._scroll_grant_process = process
-        self.actions_page.desktop_scroll_grant_button.setEnabled(False)
-        self.actions_page.desktop_scroll_grant_status.setText(
-            self._translations.text("desktop_scroll_running")
-        )
-        process.start()
-
-    def _finish_desktop_scroll_grant(self, process: QProcess, code: int) -> None:
-        if self._scroll_grant_process is not process:
-            return
-        ready = (
-            code == 0
-            and b"SCROLL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
-            and read_opaque_token(permission_token_path("desktop-scroll")) is not None
-        )
-        self._scroll_grant_process = None
-        process.deleteLater()
-        self.actions_page.desktop_scroll_grant_button.setEnabled(
-            self.actions_page.desktop_scroll_checkbox.isChecked()
-        )
-        self.actions_page.desktop_scroll_grant_status.setText(
-            self._translations.text(
-                "desktop_scroll_done" if ready else "desktop_scroll_failed"
-            )
-        )
+        self._grant_input_capability("desktop_scroll", "_scroll_grant_process")
 
     def _grant_desktop_control(self) -> None:
-        if self._control_grant_process is not None:
-            return
+        self._grant_input_capability("desktop_control", "_control_grant_process")
+
+    def _grant_input_capability(self, capability: str, attribute: str) -> None:
         if (
             self._settings is None
-            or not self._settings.allow_desktop_control
+            or not self._input_grant_selected(capability)
             or self.actions_page.has_unsaved_changes(self._settings)
         ):
-            self.actions_page.desktop_control_grant_status.setText(
-                self._translations.text("desktop_control_save_first")
-            )
+            label = (self.actions_page.desktop_scroll_grant_status
+                     if capability == "desktop_scroll"
+                     else self.actions_page.desktop_control_grant_status)
+            label.setText(self._translations.text(capability + "_save_first"))
             return
-        process = QProcess(self)
-        process.setProgram("/usr/bin/python3")
-        process.setArguments([str(CONTROL_HELPER), "grant"])
-        process.finished.connect(
-            lambda code, _status: self._finish_desktop_control_grant(process, code)
-        )
-        process.errorOccurred.connect(
-            lambda _error: self._finish_desktop_control_grant(process, -1)
-        )
-        self._control_grant_process = process
-        self.actions_page.desktop_control_grant_button.setEnabled(False)
-        self.actions_page.desktop_control_grant_status.setText(
-            self._translations.text("desktop_control_running")
-        )
-        process.start()
-
-    def _finish_desktop_control_grant(self, process: QProcess, code: int) -> None:
-        if self._control_grant_process is not process:
-            return
-        ready = (
-            code == 0
-            and b"CONTROL_GRANT_READY" in bytes(process.readAllStandardOutput())  # type: ignore[call-overload]
-            and read_opaque_token(permission_token_path("desktop-control")) is not None
-        )
-        self._control_grant_process = None
-        process.deleteLater()
-        self.actions_page.desktop_control_grant_button.setEnabled(
-            self.actions_page.desktop_control_checkbox.isChecked()
-        )
-        self.actions_page.desktop_control_grant_status.setText(
-            self._translations.text(
-                "desktop_control_done" if ready else "desktop_control_failed"
-            )
-        )
+        self._start_input_setup(capability, attribute)
 
     def _apply(self) -> None:
         try:
@@ -1108,7 +1077,8 @@ class ControlWindow(QWidget):
         status = self._controller.status()
         if status.state in (ApplicationState.STARTING, ApplicationState.RUNNING):
             self._pending_settings = candidate
-            self._controller.request_stop()
+            self._pending_commands_active = self._controller.commands_active()
+            self._controller.request_stop(source="restart", reason="settings_changed")
             self.feedback_label.setText(self._translations.text("stopping_old"))
             return
         if status.state is ApplicationState.STOPPING:
@@ -1123,8 +1093,8 @@ class ControlWindow(QWidget):
             self._show_error(error)
             return
         if self._settings is not None and (
-            "telegram" in self._settings.allowed_chat_apps
-            and "telegram" not in candidate.allowed_chat_apps
+            PermissionPolicy(self._settings).has_grant("telegram_chat", "telegram")
+            and not PermissionPolicy(candidate).has_grant("telegram_chat", "telegram")
         ):
             try:
                 permission_token_path("telegram-keyboard").unlink(missing_ok=True)
@@ -1132,8 +1102,13 @@ class ControlWindow(QWidget):
             except OSError as error:
                 self._show_error(error)
         if self._settings is not None and (
-            self._settings.remember_telegram_pointer
-            and not candidate.remember_telegram_pointer
+            (
+                self._settings.remember_telegram_pointer
+                or self._settings.trust_all_capabilities
+            )
+            and not (
+                candidate.remember_telegram_pointer or candidate.trust_all_capabilities
+            )
         ):
             try:
                 permission_token_path("telegram-pointer").unlink(missing_ok=True)
@@ -1141,14 +1116,16 @@ class ControlWindow(QWidget):
             except OSError as error:
                 self._show_error(error)
         if self._settings is not None and (
-            self._settings.allow_desktop_scroll and not candidate.allow_desktop_scroll
+            PermissionPolicy(self._settings).has_grant("desktop_scroll")
+            and not PermissionPolicy(candidate).has_grant("desktop_scroll")
         ):
             try:
                 permission_token_path("desktop-scroll").unlink(missing_ok=True)
             except OSError as error:
                 self._show_error(error)
         if self._settings is not None and (
-            self._settings.allow_desktop_control and not candidate.allow_desktop_control
+            PermissionPolicy(self._settings).has_grant("desktop_control")
+            and not PermissionPolicy(candidate).has_grant("desktop_control")
         ):
             try:
                 permission_token_path("desktop-control").unlink(missing_ok=True)
@@ -1159,16 +1136,16 @@ class ControlWindow(QWidget):
             or self._settings.history_retention != candidate.history_retention
         ):
             self._clear_memory_views()
+        self._input_sessions.configure(PermissionPolicy(candidate))
         self._settings = candidate
-        self.actions_page.set_pointer_grant_ready(
-            read_opaque_token(permission_token_path("telegram-control")) is not None
-        )
-        self.actions_page.set_scroll_grant_ready(
-            read_opaque_token(permission_token_path("desktop-scroll")) is not None
-        )
-        self.actions_page.set_control_grant_ready(
-            read_opaque_token(permission_token_path("desktop-control")) is not None
-        )
+        for process, capability in (
+            (self._pointer_grant_process, "telegram_chat"),
+            (self._scroll_grant_process, "desktop_scroll"),
+            (self._control_grant_process, "desktop_control"),
+        ):
+            if process is not None and not self._input_grant_selected(capability):
+                process.kill()
+        self.actions_page.set_input_session_status(self._input_sessions.status())
         if self._screen_reader is not None and self._ocr_default_root is not None:
             self._screen_reader.set_engine(
                 selected_ocr_engine(
@@ -1187,15 +1164,17 @@ class ControlWindow(QWidget):
         self.models_page.set_current_selection(candidate.stt)
         self._update_action_label()
         self.feedback_label.setText(self._translations.text("saved"))
-        self._start_current()
+        active = self._pending_commands_active
+        self._pending_commands_active = None
+        self._start_current(commands_active=active)
 
-    def _start_current(self) -> None:
+    def _start_current(self, *, commands_active: bool | None = None) -> None:
         assert self._settings is not None
         self._active_stt_device = None
         self._audio_ready = False
         self._update_active_device_label()
         try:
-            self._controller.start(self._settings)
+            self._controller.start(self._settings, commands_active=commands_active)
         except RuntimeError as error:
             self._show_error(error)
         self._refresh()
@@ -1207,7 +1186,10 @@ class ControlWindow(QWidget):
             return
         status = self._controller.status().state
         if status is ApplicationState.RUNNING:
-            self._controller.set_commands_active(not self._controller.commands_active())
+            self._controller.set_commands_active(
+                not self._controller.commands_active(),
+                source="gui",
+            )
         elif status not in (ApplicationState.STOPPING,):
             if self._has_unsaved_changes():
                 self.feedback_label.setText(self._translations.text("save_first"))
@@ -1223,15 +1205,15 @@ class ControlWindow(QWidget):
                 return
             self._settings = candidate
             self._start_current()
-            self._controller.set_commands_active(True)
+            self._controller.set_commands_active(True, source="gui")
         self._refresh()
 
-    def _turn_microphone_off(self) -> None:
+    def _turn_microphone_off(self, *, source: str = "gui") -> None:
         if self._settings is None:
             return
         # Stop capture even if saving the preference fails.
         self._microphone_off_pending = True
-        self._controller.request_stop()
+        self._controller.request_stop(source=source, reason="microphone_off")
         candidate = replace(self._settings, listening_enabled=False)
         try:
             self._store.save(candidate)
@@ -1247,9 +1229,26 @@ class ControlWindow(QWidget):
             )
         )
 
+    def _copy_listening_diagnostics(self) -> None:
+        report = self._controller.listening_diagnostics()
+        QApplication.clipboard().setText(
+            "\n".join(
+                (
+                    *report,
+                    f"ui capture_ready={self._audio_ready} aec={self._echo_cancelled}",
+                )
+            )
+        )
+
     def _refresh(self) -> None:
         self._controller.expire_system_action()
         status = self._controller.status()
+        now = monotonic()
+        if now - self._last_listening_diagnostics_refresh >= 1:
+            self._last_listening_diagnostics_refresh = now
+            self.recognition_page.listening_diagnostics_output.setPlainText(
+                "\n".join(self._controller.listening_diagnostics())
+            )
         if self._microphone_off_pending and status.state is ApplicationState.STOPPED:
             self._microphone_off_pending = False
             self.feedback_label.setText(self._translations.text("voice_off"))
@@ -1316,11 +1315,17 @@ class ControlWindow(QWidget):
 
     def _on_event(self, event: ApplicationEvent) -> None:
         t = self._translations.text
-        if isinstance(event, VoiceModeChanged):
-            if event.mode is VoiceMode.OFF:
-                self._turn_microphone_off()
+        if isinstance(event, (AudioCaptureReady, SpeechSessionEnded)):
+            if event.session_id and not self._controller.event_belongs_to_session(
+                event.session_id
+            ):
                 return
-            self._controller.set_commands_active(event.mode is VoiceMode.ACTIVE)
+        if isinstance(event, VoiceModeChanged):
+            if not self._controller.voice_event_is_current(event):
+                return
+            if event.mode is VoiceMode.OFF:
+                self._turn_microphone_off(source="voice")
+                return
             self._refresh()
             self.feedback_label.setText(
                 t(
@@ -1480,7 +1485,8 @@ class ControlWindow(QWidget):
         if self._control_grant_process is not None:
             self._control_grant_process.kill()
         self.power_dialog.dismiss()
-        self._controller.request_stop()
+        self._input_sessions.disconnect()
+        self._controller.request_stop(source="gui", reason="application_exit")
         self._refresh()
 
     def closeEvent(self, event: QCloseEvent) -> None:

@@ -425,7 +425,7 @@ def test_executor_keeps_shared_broker_across_all_search_batches(
 
 
 @pytest.mark.parametrize("args", [["menu"], ["search", "Alice"], ["focus-search"]])
-def test_portal_consent_cannot_rebind_the_initial_window(
+def test_shared_session_acquisition_cannot_rebind_the_initial_window(
     ui: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -444,22 +444,12 @@ def test_portal_consent_cannot_rebind_the_initial_window(
         def call_sync(self, *values: Any) -> None:
             calls.append(values[3])
 
-    helper.Gio.bus_get_sync = lambda *_a: Bus()
-    helper.Gio.BusType = SimpleNamespace(SESSION=0)
-    helper.Gio.DBusCallFlags = SimpleNamespace(NONE=0)
-    helper.GLib.Variant = lambda _signature, value: value
-    helper.GLib.Error = RuntimeError
-
-    def request(_connection: Any, method: str, *_args: Any) -> dict[str, Any]:
-        if method == "CreateSession":
-            return {"session_handle": "/session"}
-        if method == "SelectDevices":
-            return {}
+    def acquire(_devices: int):
         ui.token = "other-window-same-process"
-        return {"devices": 3, "restore_token": "next"}
+        return SimpleNamespace(check=lambda **kwargs: None, close=lambda: None), "/live"
 
-    monkeypatch.setattr(helper, "_request", request)
+    monkeypatch.setattr(helper, "shared_session", acquire)
     assert helper.main() == 2
-    assert calls == ["Close"]
+    assert calls == []
     assert ui.search.text == "old query"
     assert ui.search.edits == ui.menu.clicks == ui.keys == []

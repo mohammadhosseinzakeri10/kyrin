@@ -12,7 +12,7 @@ from kyrin.commands.models import CommandIntent, CommandKind
 
 class Delegate:
     def execute(self, request: ActionRequest) -> ActionResult:
-        return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
+        return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
 
 
 def test_scroll_dispatch_uses_focused_allowed_app(
@@ -34,7 +34,7 @@ def test_scroll_dispatch_uses_focused_allowed_app(
         ActionKey(0, 1), CommandIntent(CommandKind.SCROLL_DOWN, "telegram")
     )
     assert executor.execute(request) == ActionResult(
-        request.key, ActionOutcome.LAUNCH_ACCEPTED
+        request.key, ActionOutcome.DISPATCHED_UNVERIFIED
     )
     assert commands[0][-5:] == ["42", "down", "3", "left", "desktop-scroll"]
 
@@ -75,7 +75,7 @@ def test_other_app_scroll_still_targets_window_center(
     request = ActionRequest(
         ActionKey(0, 1), CommandIntent(CommandKind.SCROLL_DOWN, "firefox")
     )
-    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert executor.execute(request).outcome is ActionOutcome.DISPATCHED_UNVERIFIED
     assert commands[0][-2:] == ["center", "desktop-scroll"]
 
 
@@ -97,7 +97,7 @@ def test_scroll_amount_reaches_bounded_helper(
         ActionKey(0, 1),
         CommandIntent(CommandKind.SCROLL_DOWN, "telegram", scroll_steps=2),
     )
-    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert executor.execute(request).outcome is ActionOutcome.DISPATCHED_UNVERIFIED
     assert commands[0][-3:] == ["2", "left", "desktop-scroll"]
 
 
@@ -121,7 +121,7 @@ def test_telegram_open_chat_scroll_targets_right_pane(
             CommandKind.SCROLL_DOWN, "telegram", scroll_area="chat"
         ),
     )
-    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert executor.execute(request).outcome is ActionOutcome.DISPATCHED_UNVERIFIED
     assert commands[0][-2:] == ["right", "desktop-scroll"]
 
 
@@ -163,7 +163,7 @@ def test_global_scroll_dispatches_for_unselected_focused_app(
         ActionKey(0, 1),
         CommandIntent(CommandKind.SCROLL_DOWN, "unselected.desktop"),
     )
-    assert executor.execute(request).outcome is ActionOutcome.LAUNCH_ACCEPTED
+    assert executor.execute(request).outcome is ActionOutcome.DISPATCHED_UNVERIFIED
     assert commands[0][-6:] == [
         "unselected.desktop", "42", "down", "3", "center", "desktop-scroll"
     ]

@@ -12,10 +12,13 @@ from kyrin.actions.control_policy import (
 )
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.app.permissions import PermissionPolicy
 from kyrin.backend_protocol import backend_error
 from kyrin.commands.models import CommandKind
 from kyrin.desktop.window_control import (
     AppWindowController,
+    AuthorizedWindowCloser,
+    NativeWindowCloseConfirmer,
     WindowControlStatus,
     WindowOperation,
 )
@@ -38,12 +41,14 @@ class WindowControlExecutor:
         controller: AppWindowController,
         *,
         confirmation: ControlConfirmer | None = None,
+        permissions: PermissionPolicy | None = None,
         allowed_close_apps: frozenset[str] = frozenset(),
         allowed_window_apps: frozenset[str] = frozenset(),
     ) -> None:
         self._fallback = fallback
         self._controller = controller
         self._confirmation = confirmation
+        self._permissions = permissions
         self._allowed_close_apps = allowed_close_apps
         self._allowed_window_apps = allowed_window_apps
 
@@ -79,7 +84,16 @@ class WindowControlExecutor:
         def failed(code: str) -> ActionResult:
             return ActionResult(request.key, ActionOutcome.FAILED, error_code=code)
 
-        if self._confirmation is None:
+        native = (
+            self._controller
+            if isinstance(self._controller, NativeWindowCloseConfirmer)
+            else None
+        )
+        if self._permissions is not None and not self._permissions.allows_intent(
+            request.intent
+        ):
+            return failed("action_not_allowed")
+        if self._permissions is None and self._confirmation is None and native is None:
             return failed("window_close_confirmation_required")
         window = self._controller.prepare_close(
             request.intent.target, request.intent.window_index
@@ -107,7 +121,14 @@ class WindowControlExecutor:
             request.language,
         )
         check_operation()
-        if self._confirmation(prompt) is not True:
+        if self._permissions is not None:
+            approved = self._permissions.allows("close_window", window.app_id)
+        elif native is not None:
+            approved = native.confirm_close(window, request.language)
+        else:
+            assert self._confirmation is not None
+            approved = self._confirmation(prompt)
+        if approved is not True:
             return failed("window_close_confirmation_declined")
         approval = ControlApproval(prompt)
         check_operation()
@@ -115,11 +136,20 @@ class WindowControlExecutor:
             return failed("window_state_changed")
         # The platform re-resolves and consumes the exact prepared target in
         # the same event-loop turn as normal close, eliminating the D-Bus race.
-        status = self._controller.close_confirmed(window)
+        if self._permissions is not None:
+            if not self._permissions.allows("close_window", window.app_id):
+                return failed("action_not_allowed")
+            if not isinstance(self._controller, AuthorizedWindowCloser):
+                return failed("backend:missing_capabilities:CloseAuthorizedWindow")
+            status = self._controller.close_authorized(window)
+        else:
+            status = self._controller.close_confirmed(window)
         if status is WindowControlStatus.CONFIRMED:
             return ActionResult(request.key, ActionOutcome.CONFIRMED)
+        close_error = getattr(self._controller, "close_error_code", None)
         return ActionResult(
             request.key,
             ActionOutcome.UNKNOWN,
-            error_code=backend_error(self._controller) or "window_unverified",
+            error_code=backend_error(self._controller)
+            or (close_error if isinstance(close_error, str) else "window_unverified"),
         )
