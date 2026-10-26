@@ -12,7 +12,7 @@ from time import monotonic, sleep
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -114,16 +114,24 @@ class FakeSession:
 
 
 @pytest.fixture
-def application(monkeypatch: pytest.MonkeyPatch) -> QApplication:
+def application(monkeypatch: pytest.MonkeyPatch) -> Iterator[QApplication]:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication([])
     app.setQuitOnLastWindowClosed(False)
-    return app
+    previous = set(app.topLevelWidgets())
+    yield app
+    # ControlWindow.close() minimizes; it does not destroy its child timers.
+    for widget in app.topLevelWidgets():
+        if widget not in previous:
+            widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 def _pump_until(application: QApplication, predicate: Callable[[], bool]) -> None:
-    deadline = monotonic() + 2
+    # Test readiness, not rendering speed on a shared headless CI host.
+    deadline = monotonic() + 10
     while monotonic() < deadline:
         application.processEvents()
         if predicate():

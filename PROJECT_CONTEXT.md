@@ -1,5 +1,18 @@
 # KYRIN — Project Context
 
+**Publication Qt test isolation and hosted-runner readiness — 2026-10-26:**
+The next remote run passed the revocation/private-bus scenarios but failed five
+Qt model-import/session-restart predicates at the shared two-second readiness
+deadline (2571 passed). That helper now permits ten seconds for readiness,
+without changing its predicates or any production timeout. Inspection also
+found that ControlWindow.close minimizes rather than deletes the window;
+tests could leave child timers alive. The fixture now destroys only top-level
+widgets created by the current test and drains deferred deletion. The complete
+local gate then passed syntax, Ruff, strict mypy on 429 files and all 2576 tests
+in 77.64 seconds, compared with 148.76 seconds before the cleanup correction.
+No test scope, action guard or runtime behavior changed. Remote checks and
+publication remain pending at this historical entry.
+
 **Final publication test synchronization — 2026-10-26:** The full local gate
 passed syntax, Ruff, strict mypy on 429 files and all 2576 tests in 152.93
 seconds. The previous remote run had 2575 passing tests and one Qt failure:

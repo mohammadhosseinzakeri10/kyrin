@@ -9,13 +9,14 @@ model, GPU, compositor or application.
 The publication review uses CPython 3.14.4 and the existing pinned check
 environment on Ubuntu 26.04. The shared gate checks all source, scripts and
 tests with no scope reduction. The full local gate passed again after the
-test-session lifetime and asynchronous signal synchronization corrections.
+test-session lifetime, asynchronous signal synchronization and Qt cleanup
+corrections.
 
 | Check | Publication result |
 | --- | --- |
 | Pinned environment `pip check` | Passed |
 | Syntax, Ruff and strict mypy | Passed; strict mypy checked 429 files |
-| Deterministic pytest suite | 2,576 passed in 152.93 seconds; no failures or skips |
+| Deterministic pytest suite | 2,576 passed in 77.64 seconds; no failures or skips |
 | Source and wheel build | Passed with the pinned setuptools/wheel environment |
 | Wheel installation without dependencies | Passed in a separate environment; imports, version and bundled resources checked |
 | Source contents | Model weights, recordings and local settings excluded; bundled Silero VAD retained; only template STT CSV manifests included |
@@ -81,6 +82,16 @@ finishes and the next step is cancelled. A local private-bus run also exposed
 an asynchronous `Closed` signal arriving after the method reply; that fixture
 now waits up to two seconds for the disconnected state and still fails if it
 is not observed. Neither correction changes production timeouts or permissions.
+
+The following remote run passed those scenarios but exceeded the Qt test
+helper's two-second readiness budget in five model-import/session-restart
+checks. The shared test helper now allows ten seconds for asynchronous UI
+readiness on a hosted runner. It still checks the same exact predicates and
+fails at the deadline; this is not an application latency benchmark. Production
+timeouts, assertions and the full suite remain unchanged.
+The Qt fixture also explicitly destroys each test's new top-level widgets and
+drains deferred deletion; normal window close minimizes KYRIN and otherwise
+leaves child timers alive across test cases.
 
 ## Live evidence inherited from development
 
