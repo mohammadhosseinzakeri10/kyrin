@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Thread
+from time import monotonic, sleep
 
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
 
@@ -89,7 +90,13 @@ def client() -> None:
     assert ready["sender"] == prepared["sender"]
     assert ready["owner_pid"] == prepared["owner_pid"]
     shell("Disconnect")
-    assert INPUT_SESSIONS.status()["state"] == "disconnected"
+    # The method reply and the owner's asynchronous Closed signal race.
+    deadline = monotonic() + 2
+    status = INPUT_SESSIONS.status()
+    while status["state"] != "disconnected" and monotonic() < deadline:
+        sleep(0.01)
+        status = INPUT_SESSIONS.status()
+    assert status["state"] == "disconnected", status
     missing = INPUT_SESSIONS.run(
         [
             "python",

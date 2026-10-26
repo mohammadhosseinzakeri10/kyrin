@@ -1970,7 +1970,8 @@ def test_permission_revocation_cancels_next_step_of_active_plan(
             yield TranscriptUpdate(
                 0, "Open Telegram and open Telegram", TranscriptStatus.FINAL, "en"
             )
-            assert stopped.wait(3)
+            # The test owns shutdown; UI rendering must not end the source.
+            stopped.wait()
 
         def stop(self) -> None:
             stopped.set()
@@ -1980,7 +1981,8 @@ def test_permission_revocation_cancels_next_step_of_active_plan(
             calls.append(request.key.step_index)
             if request.key.step_index == 0:
                 started.set()
-                assert release.wait(3)
+                # Hold the in-flight step until revocation has reached Source.stop.
+                release.wait()
             return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
 
     @contextmanager
@@ -2008,6 +2010,7 @@ def test_permission_revocation_cancels_next_step_of_active_plan(
         window.actions_page.enabled_checkbox.setChecked(False)
         window.apply_button.click()
         _pump_until(application, stopped.is_set)
+        assert outputs == []
         release.set()
         _pump_until(application, lambda: len(outputs) == 2)
         _pump_until(application, lambda: not store.load().action_execution_enabled)
@@ -2018,6 +2021,7 @@ def test_permission_revocation_cancels_next_step_of_active_plan(
         assert outputs[1].reason is ActionNoticeReason.CANCELLED
         assert outputs[1].key.step_index == 1
     finally:
+        stopped.set()
         release.set()
         controller.request_stop()
         controller.wait_until_stopped(3)

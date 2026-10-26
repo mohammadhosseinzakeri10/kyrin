@@ -8,13 +8,14 @@ model, GPU, compositor or application.
 
 The publication review uses CPython 3.14.4 and the existing pinned check
 environment on Ubuntu 26.04. The shared gate checks all source, scripts and
-tests with no scope reduction. The full local gate passed again after the test-session lifetime correction.
+tests with no scope reduction. The full local gate passed again after the
+test-session lifetime and asynchronous signal synchronization corrections.
 
 | Check | Publication result |
 | --- | --- |
 | Pinned environment `pip check` | Passed |
 | Syntax, Ruff and strict mypy | Passed; strict mypy checked 429 files |
-| Deterministic pytest suite | 2,576 passed in 151.29 seconds; no failures or skips |
+| Deterministic pytest suite | 2,576 passed in 152.93 seconds; no failures or skips |
 | Source and wheel build | Passed with the pinned setuptools/wheel environment |
 | Wheel installation without dependencies | Passed in a separate environment; imports, version and bundled resources checked |
 | Source contents | Model weights, recordings and local settings excluded; bundled Silero VAD retained; only template STT CSV manifests included |
@@ -70,6 +71,16 @@ until explicit controller stop, as the scenario requires; the test fails
 immediately if a live producer opens the confirmation dialog. This changes
 no production timeout or permission check. GJS image tests also explicitly
 require the GdkPixbuf GI typelib, now installed and checked during CI setup.
+
+The subsequent complete CI run passed 2,575 tests and exposed one remaining
+test-only scheduling assumption: a synthetic executor stopped waiting after
+three seconds while the UI was still applying permission revocation. The
+fixture now holds that in-flight action until the test explicitly releases it,
+with unconditional cleanup. The assertion still verifies that the first action
+finishes and the next step is cancelled. A local private-bus run also exposed
+an asynchronous `Closed` signal arriving after the method reply; that fixture
+now waits up to two seconds for the disconnected state and still fails if it
+is not observed. Neither correction changes production timeouts or permissions.
 
 ## Live evidence inherited from development
 

@@ -1,5 +1,16 @@
 # KYRIN — Project Context
 
+**Final publication test synchronization — 2026-10-26:** The full local gate
+passed syntax, Ruff, strict mypy on 429 files and all 2576 tests in 152.93
+seconds. The previous remote run had 2575 passing tests and one Qt failure:
+a synthetic in-flight executor expired after three seconds before the UI
+completed permission revocation. Its lifetime is now explicitly test-controlled,
+with unconditional cleanup and the original cancellation assertions retained.
+A local private-D-Bus fixture also assumed its Closed signal was processed
+before a method reply; it now uses a bounded wait for the disconnected state.
+Neither fix changes runtime behavior, production timeouts or permission guards.
+Remote validation, merge and release are still pending at this entry.
+
 **Publication local revalidation after CI test fix — 2026-10-26:** The complete
 shared gate passed again: syntax, Ruff, strict mypy on 429 files, and all 2576
 tests in 151.29 seconds without failures or skips. The changed Qt tests now
