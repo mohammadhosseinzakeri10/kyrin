@@ -10,7 +10,9 @@ project's system-Python/GI target, and explicitly installs GI bindings, Speech
 Dispatcher and Bubblewrap. Preflight checks system Python >=3.14, Gio imports
 and executable presence. No tests/guards were removed, skipped or relaxed.
 Public setup/validation notes state the system-Python requirement separately
-from the application venv; remote revalidation remains necessary.
+from the application venv. The Ubuntu 26.04 setup-python catalog has no exact
+3.14.4 build, so CI selects the available 3.14 patch and records both interpreter
+versions; Python package pins are unchanged. Remote revalidation is necessary.
 
 **Initial public portfolio release preparation — 2026-10-26:** The owner
 requested publishing the current implementation as the initial open-source

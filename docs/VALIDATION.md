@@ -49,7 +49,11 @@ executables are checked while validating voice settings and protected OCR
 commands, including tests using inert workers.
 
 CI now targets Ubuntu 26.04, aligned with the supported system-Python/GI
-environment, and explicitly installs/checks those tools and GI bindings. No
+environment, and explicitly installs/checks those tools and GI bindings.
+`setup-python` uses the available Python 3.14 patch for this runner: its catalog
+does not provide the older exact 3.14.4 build for Ubuntu 26.04. Python dependency
+pins are unchanged; both application and system interpreter versions are
+retained in the run artifacts. No
 test was removed or skipped and no authorization/sandbox boundary was relaxed.
 The available runner label was verified against the official
 [runner image catalog](https://github.com/actions/runner-images#available-images).

@@ -118,7 +118,8 @@ local-data/quality-venv/bin/python scripts/development/check.py
 `local-data/quality/` قرار می‌گیرد؛ هر کد خروج غیرصفر، کل بررسی را ناموفق می‌کند.
 
 گردش‌کار `.github/workflows/quality.yml` روی push، pull request یا اجرای دستی،
-در Ubuntu 26.04 و Python 3.14.4 همین فرمان را اجرا می‌کند. پایتون سیستمی
+در Ubuntu 26.04 و آخرین patch موجود از Python 3.14 همین فرمان را اجرا می‌کند.
+نسخهٔ دقیق پایتون برنامه و پایتون سیستمی هر اجرا در artifact ثبت می‌شود. پایتون سیستمی
 مورد استفادهٔ helperهای GI نیز باید دست‌کم ۳٫۱۴ باشد. بسته‌های `python3-gi`،
 `gir1.2-glib-2.0`، `speech-dispatcher` و `bubblewrap` علاوه بر ابزارهای فهرست‌شده
 برای محیط کامل بررسی لازم‌اند؛ `spd-say` و `bwrap` پیش از آزمون بررسی می‌شوند. نسخه‌های واقعاً
