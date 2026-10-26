@@ -30,8 +30,9 @@ jobs:
           python-version: '3.14'
       - name: Install system test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libportaudio2 libegl1 libopengl0 ffmpeg gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 speech-dispatcher bubblewrap
+          printf '%s\n' 'http://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends libportaudio2 libegl1 libopengl0 ffmpeg gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 speech-dispatcher bubblewrap
       - name: Verify system helper prerequisites
         run: |
           /usr/bin/python3 -c "import sys; assert sys.version_info >= (3, 14), 'Portal helpers require system Python 3.14+'; from gi.repository import Gio, GLib"

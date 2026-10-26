@@ -8,13 +8,13 @@ model, GPU, compositor or application.
 
 The publication review uses CPython 3.14.4 and the existing pinned check
 environment on Ubuntu 26.04. The shared gate checks all source, scripts and
-tests with no scope reduction. The full local gate passed on the publication branch.
+tests with no scope reduction. The full local gate passed again after the test-session lifetime correction.
 
 | Check | Publication result |
 | --- | --- |
 | Pinned environment `pip check` | Passed |
 | Syntax, Ruff and strict mypy | Passed; strict mypy checked 429 files |
-| Deterministic pytest suite | 2,576 passed in 150.76 seconds; no failures or skips |
+| Deterministic pytest suite | 2,576 passed in 151.29 seconds; no failures or skips |
 | Source and wheel build | Passed with the pinned setuptools/wheel environment |
 | Wheel installation without dependencies | Passed in a separate environment; imports, version and bundled resources checked |
 | Source contents | Model weights, recordings and local settings excluded; bundled Silero VAD retained; only template STT CSV manifests included |

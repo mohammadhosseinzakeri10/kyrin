@@ -1,5 +1,15 @@
 # KYRIN — Project Context
 
+**Publication local revalidation after CI test fix — 2026-10-26:** The complete
+shared gate passed again: syntax, Ruff, strict mypy on 429 files, and all 2576
+tests in 151.29 seconds without failures or skips. The changed Qt tests now
+keep their fake session open until explicit stop and reject an unexpected
+history modal. A restricted-sandbox focused GJS run failed image validations;
+the required full isolated run with subprocess permissions passed. Remote CI
+also encountered slow Azure Ubuntu mirror downloads; the ephemeral runner
+uses the primary signed Ubuntu archive with bounded network retries. No local
+OS package/source configuration or application runtime guard was changed.
+
 **Publication CI diagnostics and test-session lifetime — 2026-10-26:** A
 streamed verbose run with a 60-second faulthandler dump located the stall in
 test_history_mutation_waits_for_producer_shutdown at the real history modal.
