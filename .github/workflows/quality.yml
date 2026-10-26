@@ -2,6 +2,7 @@ name: Python quality
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -18,6 +19,8 @@ jobs:
     timeout-minutes: 20
     env:
       PIP_CACHE_DIR: ${{ github.workspace }}/local-data/pip-cache
+      PYTHONUNBUFFERED: '1'
+      PYTEST_ADDOPTS: '-vv -o faulthandler_timeout=60'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -47,7 +50,14 @@ jobs:
           /usr/bin/python3 --version > local-data/quality/system-python.txt
           python -m pip freeze --all > local-data/quality/installed.txt
       - name: Syntax, lint, strict types and deterministic tests
-        run: python scripts/development/check.py
+        run: |
+          touch local-data/quality/tests.log
+          python scripts/development/check.py &
+          kyrin_check_pid=$!
+          tail --pid="$kyrin_check_pid" -n +1 -F local-data/quality/tests.log &
+          kyrin_log_pid=$!
+          trap 'kill "$kyrin_log_pid" 2>/dev/null || true' EXIT
+          wait "$kyrin_check_pid"
       - name: Build source and wheel distributions
         run: |
           python -c "from setuptools.build_meta import build_sdist, build_wheel; build_sdist('dist'); build_wheel('dist')"

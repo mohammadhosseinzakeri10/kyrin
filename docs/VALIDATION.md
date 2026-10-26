@@ -57,7 +57,11 @@ retained in the run artifacts. No
 test was removed or skipped and no authorization/sandbox boundary was relaxed.
 The available runner label was verified against the official
 [runner image catalog](https://github.com/actions/runner-images#available-images).
-The live workflow link above identifies subsequent results.
+The live workflow link above identifies subsequent results. CI also streams
+verbose pytest logs and requests a thread dump when an individual test takes
+more than 60 seconds; this is diagnostic output, not a relaxed timeout or a
+passing exception. Branch pushes use PR validation; pushes to main validate
+the published merge.
 
 ## Live evidence inherited from development
 
