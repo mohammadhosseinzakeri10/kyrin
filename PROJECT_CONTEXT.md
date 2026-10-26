@@ -1,5 +1,342 @@
 # KYRIN — Project Context
 
+**L04 local visible-control acceptance — 2026-10-26, owner confirmed:** After
+the directional-action fix, the owner explicitly reports that the requested
+commands were tested and all worked correctly. Together with the preceding
+button-click confirmation, this accepts the local Chrome fixture's button
+click and repeated Enable/Disable Test Option sequence: on, on, off, off.
+The reported visible-control blocker is resolved for this tested scenario.
+Evidence is the owner's written live-test confirmation, not an agent desktop
+run; no new per-turn transcripts, action names, timings or machine-readable
+postconditions were provided. Other applications, explicit checkbox-click
+testing and the broader L04 acceptance matrix remain unverified. L04 as a whole
+remains open; L03 stays closed. Updated the live guide and control reports.
+Documentation/evidence only; no runtime change or repeated test run. The last
+full runtime check remains 2576 passing tests with syntax, Ruff and strict mypy.
+Earlier pending/failed entries below are historical stages before this result.
+
+**L04 directional control actions — 2026-10-26, checkbox retest pending:** The
+owner now explicitly confirms the button click worked, correcting the preceding
+unknown-effect report. New correct Enable Test Option fails at
+visible_control_observation:action_unavailable (721 ms after final text).
+Listening report 22ad1e7c498e496883cd8438e68085f8 shows ready capture/STT,
+returning workers and explicit GUI standby. The common action selector omitted
+check/uncheck names supported by Chromium's default-action naming. The exact
+live name/ambiguity is not in the owner report, so this is a confirmed code gap
+and source-supported candidate for this failure, not proven live repair.
+Seven pre-change failures reproduced missing transitions/clicks and newly
+recognized ambiguity. Added directional selection with readable checked state,
+matching desired transition (or observed opposite for explicit clicks), keeping
+unique-action and fresh boundary/postcondition checks. Repeated desired states
+remain no-ops; no application-name exception or coordinate retry. Read-only
+owner diagnostics now show only a fixed action vocabulary/indices and unknown
+counts for explicitly requested labels, with bounded reads and sanitized errors.
+241 focused tests pass. The original full checker passed syntax, Ruff, strict
+mypy on 429 files and all 2576 tests in 146.38 seconds without scope reduction.
+Logs: local-data/l04-visible-control/directional-actions-check/. Evidence under
+local-data/l04-visible-control/owner-option-action-2026-10-26/; see
+docs/development/L04_ACTION_NAMES_2026-10-26_FA.md. L04 remains open; L03 closed.
+
+**L04 owner dispatch retest — 2026-10-26, actual effect unknown:** The new
+listening report 4c4bbb55751a434dabf3d1ecf4d285e6 and terminal transcript show two
+Click Test Button commands returning dispatched_unverified (1200/1255 ms after
+final text), rather than the prior observation rejection. This proves dispatch
+was reported, not a successful page effect. The owner explicitly answered that
+the Button clicks counter was not checked. Two subsequent Enable Test Button
+commands correctly stop with visible_control_state_unavailable: the fixture's
+plain button has no boolean state; Test option is the checkbox. There is no
+Test option command in this report. Generic click confirmation currently checks
+exact dialog navigation, not arbitrary page counters, so a counter-changing
+button can legitimately remain unverified. Listening stayed ready, workers
+returned, and final standby was explicitly requested through the GUI. Saved
+evidence under local-data/l04-visible-control/owner-dispatch-2026-10-26/. No new
+runtime change is justified from these logs alone; the next owner check is one
+click with an observed counter delta, followed by repeated Enable/Disable Test
+option commands and observed checkbox state. No new tests were run for this
+evidence/documentation-only update; the preceding 2550-test full check remains
+the last runtime validation. L04 remains open; L03 stays closed.
+
+**L04 demand-built export preparation — 2026-10-26, owner retest pending:** The
+owner's child-transport-diagnostic.json confirms the provider itself returns a
+single null child: count=1, indexed=null, bulk=[null], owner PID matches. Library
+refresh gives the same result; this first failure is not a Python parent-proxy
+comparison. Saved provider-null-child.json beside the earlier owner reports.
+Installed Chrome is 156.0.8078.47-1; matching Chromium source creates application
+and top-level-frame objects while native APIs can remain off. Its standard
+attribute getter signals extended-properties use, which requests native/basic
+export through AXPlatform. The previous shared reader never requested these
+properties. Added generic get_attributes preparation when available, with at
+most three first-child readiness reads and two 50ms waits; attribute values are
+discarded. The active window is selected again, and all original full-tree,
+identity, geometry, state and action checks run on fresh evidence. Persistently
+null children still reject the scan. Negative/unreadable child counts now reject
+as incomplete instead of behaving as empty. No app-name exception, launch flag,
+session-global accessibility/permission/model change or owner-desktop action.
+264 focused tests pass; live mode state and successful control still require
+owner retesting. Source-backed activation is an implementation direction, not
+yet a proven live repair. The original full checker passed syntax, Ruff,
+strict mypy on 429 files and all 2550 tests in 146.32 seconds without scope
+reduction. Logs: local-data/l04-visible-control/demand-export-check/.
+L04 remains open; L03 stays closed.
+
+**L04 missing root child — 2026-10-26, wire evidence pending:** Read the owner's
+ancestry-diagnostic.json: one matching application/active window, one inspected
+node, failure at depth 1/index 0 with ancestry_child_missing=1. The rejection
+occurs before parent comparison. The report explicitly confirms the
+window_relative_semantic_only binding for the original (67,32) versus (0,0)
+equal-size geometry. Saved it as missing-root-child.json under the previous
+owner-ancestry directory. The API reports a child count sufficient for index 0
+but returns no first child; null provider reply, read/transport failure or a
+changed child list are still undetermined. Added diagnostic-only count/child
+refresh and fixed wire reads of ChildCount, GetChildAtIndex and GetChildren on
+the accessibility bus, with process-owner verification. No raw endpoints, text
+or stderr escape; each transport call is capped at 1s inside the original 8s
+owner-helper limit. A private Gio.TestDBus provider verified actual busctl JSON
+encoding and null-index/nonempty-bulk classification; fixture/result saved
+locally. 161 focused tests pass. The original full checker passed syntax, Ruff,
+strict mypy on 429 files and all 2541 tests in 145.99 seconds, without reducing
+scope. Logs: local-data/l04-visible-control/missing-child-wire-check/. No partial
+snapshot is accepted and no execution guard changed. Owner's direct wire
+evidence and a successful live action remain pending; L04 stays open.
+
+**L04 owner ancestry retest — 2026-10-26, edge evidence pending:** Correct
+Click Test Button / Click Test Option intents now fail with
+visible_control_observation:ancestry_inconsistent (206/190 ms after final text).
+Those scans passed the geometry guard; exact binding and target availability
+in those turns remain unrecorded. Listening stayed ready, workers returned and
+last standby was explicit GUI control. Saved reports under
+local-data/l04-visible-control/owner-ancestry-2026-10-26/. Added content-free
+diagnostics of the first rejected edge: missing child/parent, depth/index,
+remote-reference comparison flag and one cache-cleared parent probe. A matching
+fresh probe never rescues a rejected snapshot. No execution guard or identity
+comparison changed. Missing children, absent/different parents, stale data and
+proxy mismatch remain distinct possibilities; none is asserted as the owner's
+confirmed cause. 149 focused tests pass. Owner will run the read-only diagnostic
+with tee for visible and saved output; no logout or model change is indicated.
+The original full checker passed syntax, Ruff, strict mypy on 427 files and all
+2529 tests in 147.38 seconds without reduced scope. Logs:
+local-data/l04-visible-control/ancestry-diagnostic-check/. No personal desktop
+interaction, model/dependency/permission change, commit or push.
+L04 remains open; L03 remains closed. See
+docs/development/L04_ANCESTRY_2026-10-26_FA.md.
+
+**L04 zero-origin geometry — 2026-10-26, owner live retest pending:** The
+owner-run diagnostic file exists despite a silent terminal (stdout was
+redirected). GNOME reported (67,32,1853,1048); AT-SPI SCREEN reported
+(0,0,1853,1048). Saved the original as geometry-before-fix.json under
+local-data/l04-visible-control/owner-window-bounds-2026-10-26/. The pre-traversal
+guard rejects this exact origin mismatch. Added a shared semantic-only binding
+for zero-origin SCREEN extents: unique active same-PID window, exact positive
+GNOME size and a matching explicit WINDOW-relative root rectangle; each control
+must have a positive WINDOW rectangle wholly inside that root. No global point
+is synthesized; x/y remain absent and these readings cannot authorize a pointer
+fallback. Other geometry mismatches still fail closed. This conditional path
+uses no app-name exception or installed-extension change. Five pre-fix test
+failures reproduced the blocked semantic route; 236 focused tests pass including
+the owner's numeric case, negative-monitor origin, invalid evidence, no-action
+fallback rejection and idempotent states. The owner's WINDOW-relative provider
+data and successful live action are still unverified. The original full checker
+passed syntax, Ruff, strict mypy on 427 files and all 2522 tests in 149.04 seconds,
+without reducing scope; logs: local-data/l04-visible-control/relative-window-action-check/.
+No personal desktop interaction, new model, dependency, permission change,
+commit or push. L04 remains open; L03 remains closed.
+
+**L04 owner bounds retest — 2026-10-26, geometry evidence pending:** Correct
+Click Test Button / Click Test Option intents now report
+visible_control_observation:window_bounds_mismatch (211/184 ms final-text to
+completion). This identifies the pre-traversal AT-SPI SCREEN-versus-GNOME frame
+guard, not missing labels or a speech/model failure. Numeric extents are not
+yet available; offset, scale, decoration and stale/different geometry remain
+hypotheses. Saved the original listening report and owner-provided terminal
+text under local-data/l04-visible-control/owner-window-bounds-2026-10-26/.
+Listening remained ready, workers returned, and final standby was explicit GUI
+control. Added an owner-opted-in --geometry diagnostic: exact rectangles and
+edge deltas from the existing guard, including rejection; no coordinates in
+default output. No new desktop interaction, input, capture, model/permission
+change, installed extension change or relaxation of execution guards. 128
+focused tests passed. The original full checker also passed syntax, Ruff,
+strict mypy on 427 files and all 2507 tests in 150.48 seconds with no reduced
+scope; logs: local-data/l04-visible-control/window-bounds-diagnostic-check/.
+Owner will run the prepared diagnostic without logging out. L04 remains open.
+See docs/development/L04_WINDOW_BOUNDS_2026-10-26_FA.md.
+
+**L04 shared control observation — 2026-10-26, live cause still open:** The owner
+clarified that failures occur across applications; Chrome is only the original
+test fixture. Added one versioned inventory result shared by model-context
+inventory and independent execution resolution. Failed/incomplete scans no
+longer masquerade as successful empty lists or trigger OCR fallback. Rejected
+ambiguous/invalid names remain internal evidence and cannot be revived by OCR.
+Identity, frame, tree, transport and target failures have fixed content-free
+codes; execution and semantic-helper rejection reach localized responses as
+visible_control_observation:<reason>. Model inventory currently logs the fixed
+scan code and returns no options; it does not yet expose a separate UI status.
+Strict protocol validation rejects malformed or incompatible helper replies.
+Twelve pre-fix cases reproduced the shared error-swallowing/fallback defect;
+262 focused tests pass after the change. The original full checker passed
+syntax, Ruff, strict mypy on 427 files and all 2496 tests in 145.09 seconds;
+logs: local-data/l04-visible-control/shared-observation-check/. No test scope
+was reduced. This establishes a common diagnostic
+and fallback defect, not the root cause of the owner's live scan failure.
+No app-name-specific exception, relaxed tree/window guard, new dependency,
+desktop interaction or claim of universal application support. Owner retesting
+and evidence-based repair of the failing observation stage remain required;
+L04 stays open and L03 stays closed. See the control report for full validation.
+
+**L04 visible-control blocker — 2026-10-26, owner retest pending:** Owner's
+correct Chrome transcripts failed to locate Test button/Test option; L04 remains
+open. On the next owner retest, two `Click Test Button.` transcripts retained the
+full `Test Button` intent but still failed with `visible_control_uncertain`
+(final-text-to-completion 816/853 ms). The new listening report confirms capture
+readiness, explicit voice activation and returning workers; its final standby
+was explicitly requested in the GUI. It contains no control-inventory rejection
+details. The owner diagnostic JSON is not yet present, so Chrome export versus
+window/tree/state rejection is still undetermined; no speculative execution
+change was made from this report alone.
+Rules reproducibly stripped terminal role words from names; model validation
+also accepted a different shorter observed name. Both now preserve full targets
+and reject shortened substitutions. Independent executor resolution now accepts
+an AT-SPI structural target without coordinates, matching the inventory/Action
+contract. Six focused pre-fix failures reproduced these code defects; they do not
+establish the cause of all live Chrome failures. 333 focused deterministic tests
+passed, including repeated boolean requests with one mutation and privacy-safe
+diagnostics. Added an owner-run read-only inspect_visible_controls.py command with
+bounded helper transport, aggregate scan diagnostics and explicit-label-only
+reports. No desktop interaction, new audio/model/download/dependency/permission,
+commit or push. Preserved existing checkout changes and input/observation guards.
+Initial full checker exposed one lint line (fixed) and sandbox-denied private
+socketpair sends; logs retained. The full isolated checker rerun passed syntax,
+lint, strict mypy on 425 files and all 2454 tests in 144.83 s, with no scope
+reduction. Logs: local-data/l04-visible-control/full-check-verified/. See
+docs/development/L04_VISIBLE_CONTROL_2026-10-26_FA.md and the updated live acceptance
+guide. Actual Chrome accessibility export/window/process/state evidence still
+requires the owner's diagnostic and successful live retest; L03 stays closed.
+
+**L04 follow-up — 2026-10-26, owner-run live acceptance selected:** Added
+independent verb/direction phonetic slots; fresh visible-control state recovery;
+bounded two/three-step explicit app recovery plans with every step reviewed;
+non-action prefix handling that avoids needless model/retry work; producer-time
+queue-inclusive recovery deadlines; and worker Operation cancellation on session
+invalidation. Preserved permissions, target/window guards and strict validation.
+Prompt shape guidance now prevents the previously observed nested null-operation
+reply on the fixed probe. Eight fresh Qwen9b calls on the same public 16 cases
+produced zero contract failures, 10/10 final command targets and 12/12 command
+turns; no action proposal on six non-actions, no unexpected questions per the
+explicit reference policy. Two permitted repeats and two wrong raw meanings
+remain. A separate three-case designed extension gave 2/3 correct: direction-down
+and an ordered app plan succeeded; direction-up "screwl ap" abstained with target
+uncertainty despite a candidate. This miss is preserved, not relabeled or executed.
+Original rules replay remains 28/59 and zero proposals on 92 non-action references.
+The original full checker passed syntax, lint, strict mypy on 422 files and all
+2419 tests in 151.07 s, including preserved concurrent checkout changes. Earlier
+failed logs remain; no quality scope was reduced. Added atomic whole-case evaluation
+checkpoints guarded by source/reference/settings/model-manifest fingerprints.
+No new audio, download, dependency, saved-model selection, permission, desktop
+interaction, commit or push. Full-corpus native model/real accent/calibration/live
+RAM/latency remain unverified. Multi-step visible-control/picker recovery remains
+out of scope of the new bounded app-plan implementation. Owner will perform live
+tests and send results; L04 stays open for that acceptance, L03 remains closed.
+See docs/development/L04_FOLLOWUP_2026-10-26_FA.md,
+docs/development/L04_LIVE_ACCEPTANCE_FA.md and
+datasets/commands/l04_followup_summary.json. Initial implementation below is history.
+
+
+**Input access startup restoration — 2026-10-26, owner-requested:** The earlier
+L03 requirement for explicit setup after every app restart is superseded.
+The Qt shell schedules one asynchronous restoration attempt when action
+execution is enabled, a saved input capability is selected and a readable,
+private shared desktop-input restore token exists. Legacy shared tokens work;
+separate old per-capability tokens are not migrated. Each explicit setup now
+requests the union of currently selected input device needs, so one setup
+covers Telegram keyboard/pointer and scroll/click pointer access when all are
+granted. Startup restore rechecks policy/token under the service state lock;
+disconnect generations, cancellation, revocation, token consumption/rotation
+and command-time permission/target checks remain authoritative. Status polling
+and actions never start or retry restoration. Pending startup restoration is
+suppressed by manual disconnect, missing settings or exit. A rejected token may
+still trigger OS consent; absent persistence cannot guarantee restart access.
+45 focused deterministic/private-owner/offscreen-Qt tests passed, including
+two successive fresh-service restorations and all three synthetic helpers.
+The original full checker initially passed syntax/lint/strict types (422 files)
+and reported 2411 tests passed, two failures in command-interpreter negation
+tests outside this change (145.42 s). Unrelated command files also changed
+during validation, so this is not an immutable checkout or an all-green gate.
+No personal desktop/Telegram interaction or live restart validation, dependency,
+permission-setting changes, commit or push. Details and remaining owner checks:
+docs/development/INPUT_STARTUP_RESTORE_2026-10-26_FA.md.
+
+**L04 bounded recovery implementation — 2026-10-26:** Added explicit per-turn
+references and traces for 178 turns while preserving the frozen 158-case corpus,
+final-turn references and the 28/59 rules baseline. Model syntax/contract/resource
+failures and raw-meaning disagreement are separate. Route-aware output schemas
+and a Qwen3.5 raw-generation path reuse the exact rendered/count-verified prompt;
+validation remains strict and one contract failure persists. On the fixed public
+16-case subset, final proposals improved from 6/10 to 10/10 command targets, with
+no action proposals on six non-action references. All 12 command turns in its
+18-turn trace matched; two unnecessary repeat requests and three wrong raw
+meanings remain. Four exact-request completed responses were reused after an
+interruption and six model responses were newly generated; replay timings are
+not model latency. The intermediate raw-only experiment exposed a wrong window
+overview proposal on a corrupted power request; positive source checks and
+quote/payload guards were added before the final evaluation. It was never executed.
+A shared English role-aware IPA candidate path now combines model agreement,
+exact target identity or targeted clarification, and the existing action review.
+All 25 command kinds have explicit contracts, with limited initial phrase coverage.
+Real Vosk alternatives and named Whisper scores reach command context. Optional
+Whisper retry uses the same complete PCM without original vocabulary hints;
+owned audio is bounded, expired/cancelled, admitted through shared STT resources,
+and released before semantic inference. Other backends gain no invented evidence
+or retry support. Limits/phonetic costs are experimental, not accent-calibrated.
+The original full checker passed syntax/lint/strict mypy (422 files) and all
+2390 tests (142.36 seconds) using this checkout and an isolated temporary home;
+earlier runs failed from stale editable imports and restricted local IPC, not
+hidden or relaxed checks. Eight existing consented clips passed the updated
+Whisper metadata/ownership API path; one explicit retry validated API plumbing.
+No new recording, download, dependency, model selection, permission, personal
+app interaction, commit or push. L03 remains closed. L04 live acceptance, diverse
+accent data, full-corpus model evaluation, live latency/memory and calibration
+remain open. See docs/development/L04_IMPLEMENTATION_2026-10-26_FA.md and
+docs/commands/L04_RECOVERY_POLICY_FA.md. Earlier prerequisite notes below are
+historical and describe the state before these product changes.
+
+**L04 prerequisite review — 2026-10-26:** Independent rules replay reproduced
+the frozen baseline. Corrected two transcription errors in the Persian report:
+clean commands are 25/27 and positive context cases 1/5; total remains 28/59.
+The raw JSON and tracked summary already contained the correct breakdown.
+The evaluator scores and retains only the last turn's final proposal/responses;
+its zero wrong-proposal count is not an all-turn conversation audit. Per-turn
+traces/references should precede evaluation of the new recovery path. Product
+code and models remain unchanged. The model-output contract failures and missing
+ASR evidence plumbing remain next-step investigation priorities.
+
+**L04 prerequisites 2 and 3 — 2026-10-26 Tehran:** The owner prioritized English
+and existing models, without making Persian a model-selection requirement.
+A public 158-scenario English corpus and a non-executing coordinator replay
+now establish an initial baseline: 28/59 exact target command proposals and
+0/92 action proposals on designated non-action cases. All 25 current CommandKind
+values occur in references, with sparse, uneven coverage. Designed corruptions
+are not verified speech or authorization to guess. Related groups stay in one
+of two public development/audit splits; neither is a blind final test.
+On a fixed 16-case subset, the production qwen3.5:9b CPU adapter gave the same
+6/10 correct final command proposals as rules alone. Ten actual model calls
+yielded four contract-valid meanings and six contract-invalid outputs; raw
+mistaken meanings were not executed. No comprehensive model ranking is claimed.
+Eight existing consented English clips from two pseudonymous speakers (18.23 s)
+were inventoried and replayed through installed Whisper small on CPU with fixed
+English: 0/20 word edits; downstream rules proposed all six positives correctly
+and no actions on two negatives. This is a tiny curated offline subset, not
+microphone, accent, general accuracy or improvement evidence. Native Vosk returned
+three real hypotheses for one clip. Whisper verbose metadata and a repeated
+same-PCM request worked; the live transcript still does not carry this evidence,
+and finalized audio is cleared. Existing libespeak-ng produced text-only phonemes;
+no dependency was installed. Omnilingual feasibility was inspected in code/assets,
+not benchmarked across its six models. Added evaluation-only scripts/data/tests;
+no product source, settings, models, permissions or desktop session changed.
+419 focused tests, scoped lint/types and syntax passed. No full-project or live
+checks were run. Prerequisites 1-3 are complete within the documented scope;
+step 4 thresholds/resource budgets and product implementation remain open.
+Report: docs/development/L04_PREREQUISITES_2026-10-26_FA.md. The earlier L04
+step-1-only note below is historical and superseded by this entry.
+
 **Strict type-check cleanup — 2026-10-25:** The owner requested fixing the
 524 reported mypy errors, starting with the seven production-code errors.
 The dashboard loader now keeps image-sample names separate and declares shared

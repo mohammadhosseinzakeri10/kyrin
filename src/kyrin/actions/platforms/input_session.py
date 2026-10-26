@@ -20,7 +20,7 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from kyrin.app.permission_token import permission_token_path
+from kyrin.app.permission_token import permission_token_path, read_opaque_token
 from kyrin.app.permissions import PermissionPolicy
 from kyrin.operations import OperationStopped, budget, run_process
 
@@ -106,6 +106,28 @@ class InputSessionService:
             and (setup or policy.settings.action_execution_enabled)
         )
 
+    def startup_capability(self) -> str | None:
+        """Choose a saved grant for one startup restoration attempt."""
+        with self._state_lock:
+            policy = self._policy
+            if (
+                policy is None
+                or not policy.settings.action_execution_enabled
+                or self._wire is not None
+                or read_opaque_token(permission_token_path("desktop-input")) is None
+            ):
+                return None
+            return next(
+                (
+                    capability
+                    for capability, _devices in sorted(
+                        HELPERS.values(), key=lambda item: item[1], reverse=True
+                    )
+                    if self._selected(policy, capability)
+                ),
+                None,
+            )
+
     def disconnect(self, *, forget: bool = False) -> None:
         with self._state_lock:
             self._generation += 1
@@ -157,6 +179,7 @@ class InputSessionService:
         *,
         capability: str = "",
         timeout: float = 2,
+        restore: bool = False,
         **payload: Any,
     ) -> dict[str, Any]:
         with self._state_lock:
@@ -170,12 +193,28 @@ class InputSessionService:
                 with self._state_lock:
                     if admitted_generation != self._generation:
                         raise OperationStopped("input request predates disconnect")
-                    if capability and not self._allowed(capability, setup=setup):
+                    if capability and not self._allowed(
+                        capability, setup=setup and not restore
+                    ):
                         return {
                             "state": "unprepared",
                             "stdout": "CONTROL_SETUP_REQUIRED\n",
                             "code": 3,
                         }
+                    if setup:
+                        if restore and read_opaque_token(
+                            permission_token_path("desktop-input")
+                        ) is None:
+                            return {"state": self._state, "devices": 0}
+                        # One consent covers all currently selected input needs.
+                        # Scroll/click share pointer; Telegram also needs keyboard.
+                        policy = self._policy
+                        assert policy is not None
+                        requested_devices = 0
+                        for selected, required in HELPERS.values():
+                            if self._selected(policy, selected):
+                                requested_devices |= required
+                        payload["devices"] = requested_devices
                     if self._wire is None:
                         if not setup:
                             return {
@@ -206,7 +245,9 @@ class InputSessionService:
                     with self._state_lock:
                         if generation != self._generation:
                             raise OperationStopped("input session revoked")
-                        if capability and not self._allowed(capability, setup=setup):
+                        if capability and not self._allowed(
+                            capability, setup=setup and not restore
+                        ):
                             raise OperationStopped("input permission revoked")
                     response = wire.receive(min(0.02, operation.remaining()))
                     if response is None:
@@ -220,7 +261,9 @@ class InputSessionService:
                             operation.remaining()
                             if generation != self._generation or (
                                 capability
-                                and not self._allowed(capability, setup=setup)
+                                and not self._allowed(
+                                    capability, setup=setup and not restore
+                                )
                             ):
                                 raise OperationStopped("input authorization revoked")
                             wire.send({"id": request_id, "authorized": True})
@@ -270,10 +313,11 @@ class InputSessionService:
             finally:
                 self._wire_lock.release()
 
-    def prepare(self, capability: str) -> dict[str, Any]:
-        devices = next(d for c, d in HELPERS.values() if c == capability)
+    def prepare(self, capability: str, *, restore: bool = False) -> dict[str, Any]:
+        if capability not in {c for c, _devices in HELPERS.values()}:
+            raise ValueError("unknown input capability")
         return self._exchange(
-            "prepare", capability=capability, devices=devices, timeout=45
+            "prepare", capability=capability, restore=restore, timeout=45
         )
 
     def status(self) -> dict[str, Any]:

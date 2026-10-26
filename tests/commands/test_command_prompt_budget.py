@@ -179,3 +179,91 @@ def test_failed_unload_does_not_admit_a_competing_model(
     with pytest.raises(ResourceUnavailable, match="cleanup"):
         with engine._resources.use(Workload.STT):
             pytest.fail("unknown resident model must not be ignored")
+
+
+@pytest.mark.parametrize(
+    ("content", "category"),
+    [
+        ('{"route":', "json_syntax"),
+        ('{"route":"execute","steps":[{"operation":"no_action"}]}', "contract"),
+        (
+            '{"route":"execute","steps":[{"operation":"scroll_down","state":true}]}',
+            "contract",
+        ),
+    ],
+)
+def test_model_errors_distinguish_syntax_from_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+    category: str,
+) -> None:
+    engine, _ = _engine(monkeypatch)
+    original = engine._transport
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        result = original(url, payload, timeout)
+        if url.endswith("/api/chat"):
+            assert isinstance(result, dict)
+            result["message"] = {"content": content}
+        return result
+
+    monkeypatch.setattr(engine, "_transport", transport)
+    with pytest.raises(CommandModelError) as failure:
+        engine.understand(
+            UnderstandingInput("scroll down", "en"), context=CommandContext()
+        )
+    assert failure.value.category == category
+
+
+def test_real_asr_alternatives_reach_the_model_without_reference_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, sent = _engine(monkeypatch)
+    engine.understand(
+        UnderstandingInput("school down", "en", ("scroll down",)),
+        context=CommandContext(),
+    )
+    payload = next(item for item in sent if "messages" in item)
+    body = json.loads(payload["messages"][1]["content"])
+    assert body["text"] == "school down"
+    assert body["asr_alternatives"] == ["scroll down"]
+    assert "expected" not in body
+
+
+def test_qwen_uses_exact_counted_template_without_chat_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kyrin.commands.token_budget import OllamaTokenCounter
+
+    class Counter(OllamaTokenCounter):
+        def __init__(self) -> None:
+            self.rendered_prompt = "exact rendered template including current text"
+
+        def __call__(self, payload: dict[str, object]) -> int:
+            return 10
+
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        requests.append((url, payload))
+        if payload.get("keep_alive") == 0:
+            return {"done": True, "done_reason": "unload"}
+        return {"prompt_eval_count": 10, "response": '{"route":"no_action","steps":[]}'}
+
+    engine = OllamaCommandEngine(
+        "http://127.0.0.1:11435",
+        "qwen3.5:9b",
+        DevicePreference.AUTO,
+        transport=transport,
+        token_counter=Counter(),
+        resources=ModelResources(memory=lambda: MemorySnapshot()),
+    )
+    engine.understand(
+        UnderstandingInput("current text", "en"), context=CommandContext()
+    )
+    url, request = requests[0]
+    assert url.endswith("/api/generate")
+    assert request["raw"] is True
+    assert request["prompt"] == Counter().rendered_prompt
+    assert "messages" not in request and "think" not in request
+    assert request["format"] and request["truncate"] is False

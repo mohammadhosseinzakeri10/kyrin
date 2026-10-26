@@ -173,3 +173,25 @@ def test_empty_final_retracts_a_partial(
     )
     session.close()
     engine.close()
+
+
+def test_native_alternatives_keep_scores_and_engine_provenance() -> None:
+    from kyrin.stt.backends.vosk import _final_result
+
+    text, evidence = _final_result(
+        json.dumps(
+            {
+                "alternatives": [
+                    {"text": "open telegram", "confidence": 134.25},
+                    {"text": "close telegram", "confidence": 133.4},
+                ]
+            }
+        )
+    )
+    assert text == "open telegram" and evidence is not None
+    assert evidence.engine == "vosk"
+    assert evidence.scores[0].name == "utterance_score"
+    assert evidence.scores[0].value == 134.25
+    assert evidence.alternatives[0].text == "close telegram"
+    assert evidence.alternatives[0].engine == "vosk"
+    assert evidence.alternatives[0].origin == "decoder_alternative"

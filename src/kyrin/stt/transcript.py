@@ -3,6 +3,9 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from kyrin.stt.audio_recovery import RetainedAudio
+from kyrin.stt.evidence import SpeechEvidence
+
 
 class TranscriptStatus(StrEnum):
     """A partial segment can change; a final segment cannot."""
@@ -35,6 +38,11 @@ class TranscriptUpdate:
     language: str | None = None
     emitted_ns: int | None = field(default=None, compare=False)
     timing: TranscriptTiming | None = field(default=None, compare=False)
+
+    evidence: SpeechEvidence | None = field(default=None, compare=False)
+    retained_audio: RetainedAudio | None = field(
+        default=None, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.segment_id < 0:

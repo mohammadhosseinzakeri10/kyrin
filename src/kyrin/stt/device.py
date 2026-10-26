@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from kyrin.stt.audio_recovery import AudioRecoveryPolicy
+
 
 class DevicePreference(StrEnum):
     """Where the user would like STT inference to run."""
@@ -27,8 +29,13 @@ class SpeechToTextOptions:
     language_hint: str | None = None
     vocabulary_hints: tuple[str, ...] = ()
     emit_partials: bool = True
+    include_evidence: bool = False
+    maximum_alternatives: int = 3
+    audio_recovery: AudioRecoveryPolicy | None = None
 
     def __post_init__(self) -> None:
+        if not 1 <= self.maximum_alternatives <= 4:
+            raise ValueError("maximum_alternatives must be between one and four")
         if self.language_hint is not None and not self.language_hint.strip():
             raise ValueError("language_hint must not be empty")
         if (

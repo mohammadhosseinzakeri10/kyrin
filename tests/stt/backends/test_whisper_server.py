@@ -128,3 +128,32 @@ def test_whisper_request_includes_hints_only_when_supplied(
     server.transcribe(bytes(320), "fa", hints=("مرورگر", "تلگرام"))
     assert b'name="prompt"' not in requests[0]
     assert "مرورگر، تلگرام.".encode() in requests[1]
+
+
+def test_detailed_response_keeps_named_native_scores_without_fake_alternatives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def infer(
+        self: whisper_server.WhisperCppServer,
+        pcm: bytes,
+        language: str,
+        response_format: str,
+        hints: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        assert pcm == b"same PCM" and response_format == "verbose_json"
+        return {
+            "text": " Open Telegram ",
+            "segments": [
+                {"avg_logprob": -0.3, "no_speech_prob": 0.01, "temperature": 0.0}
+            ],
+        }
+
+    monkeypatch.setattr(whisper_server.WhisperCppServer, "_request_inference", infer)
+    server = object.__new__(whisper_server.WhisperCppServer)
+    result = server.transcribe_detailed(b"same PCM", "en")
+    assert result.text == "Open Telegram" and result.evidence is not None
+    assert result.evidence.alternatives == ()
+    assert [(s.name, s.value) for s in result.evidence.scores] == [
+        ("segment_0.avg_logprob", -0.3),
+        ("segment_0.no_speech_prob", 0.01),
+    ]

@@ -352,6 +352,13 @@ def test_confirmed_boolean_control_uses_desired_state_and_real_read_only_resolve
     desired: bool,
 ) -> None:
     target = evidence("Notifications", checked=not desired)
+    target = replace(
+        target,
+        role="CHECK_BOX",
+        accessibility=AccessibilityTarget(
+            ((0, "FRAME", "Example"), (1, "CHECK_BOX", "Notifications"))
+        ),
+    )
     assert target.accessibility is not None
     structural_json = target.accessibility.to_json()
     calls: list[list[str]] = []
@@ -365,16 +372,21 @@ def test_confirmed_boolean_control_uses_desired_state_and_real_read_only_resolve
                 args,
                 0,
                 json.dumps(
-                    [
-                        {
-                            "label": target.label,
-                            "role": "CHECK_BOX",
-                            "checked": not desired,
-                            "x": 85,
-                            "y": 90,
-                            "accessibility": structural_json,
-                        }
-                    ]
+                    {
+                        "version": 1,
+                        "status": "ok",
+                        "rejected": [],
+                        "controls": [
+                            {
+                                "label": target.label,
+                                "role": "CHECK_BOX",
+                                "checked": not desired,
+                                "x": 85,
+                                "y": 90,
+                                "accessibility": structural_json,
+                            }
+                        ],
+                    }
                 ),
                 "",
             )

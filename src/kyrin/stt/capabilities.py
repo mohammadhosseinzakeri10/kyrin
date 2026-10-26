@@ -19,6 +19,9 @@ class SpeechToTextCapabilities:
     supports_partial_updates: bool
     supports_language_detection: bool
     supports_vocabulary_hints: bool = False
+    supports_alternatives: bool = False
+    supports_native_scores: bool = False
+    supports_same_audio_reprocessing: bool = False
 
     def __post_init__(self) -> None:
         if not self.supported_devices:

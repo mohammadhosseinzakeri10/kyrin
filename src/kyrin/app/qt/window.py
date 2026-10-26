@@ -187,6 +187,7 @@ class ControlWindow(QWidget):
         self._pointer_grant_process: InputSetupJob | None = None
         self._scroll_grant_process: InputSetupJob | None = None
         self._control_grant_process: InputSetupJob | None = None
+        self._input_startup_restore_pending = True
         self._quitting = False
         self._microphone_off_pending = False
         self._last_status_error: Exception | None = None
@@ -482,6 +483,7 @@ class ControlWindow(QWidget):
         self._timer.timeout.connect(self._refresh)
         self._timer.start()
         self._refresh()
+        QTimer.singleShot(0, self._restore_input_session)
 
     def _label(self, key: str) -> QLabel:
         label = QLabel()
@@ -964,6 +966,23 @@ class ControlWindow(QWidget):
     def _refresh_input_session(self) -> None:
         self.actions_page.set_input_session_status(self._input_sessions.status())
 
+    def _restore_input_session(self) -> None:
+        if (
+            self._quitting
+            or self._settings is None
+            or not self._input_startup_restore_pending
+        ):
+            return
+        self._input_startup_restore_pending = False
+        capability = self._input_sessions.startup_capability()
+        if capability is not None:
+            attribute = {
+                "telegram_chat": "_pointer_grant_process",
+                "desktop_scroll": "_scroll_grant_process",
+                "desktop_control": "_control_grant_process",
+            }[capability]
+            self._start_input_setup(capability, attribute, restore=True)
+
     def _grant_telegram_pointer(self) -> None:
         if self._pointer_grant_process is not None:
             return
@@ -984,7 +1003,9 @@ class ControlWindow(QWidget):
             return
         self._start_input_setup("telegram_chat", "_pointer_grant_process")
 
-    def _start_input_setup(self, capability: str, attribute: str) -> None:
+    def _start_input_setup(
+        self, capability: str, attribute: str, *, restore: bool = False
+    ) -> None:
         # A single app owner handles setup and commands. No setup-time input
         # is emitted; actual input remains under DesktopInputBroker.
         if any(job is not None for job in (
@@ -992,7 +1013,8 @@ class ControlWindow(QWidget):
             self._control_grant_process,
         )):
             return
-        job = InputSetupJob(self._input_sessions, capability, self)
+        self._input_startup_restore_pending = False
+        job = InputSetupJob(self._input_sessions, capability, self, restore=restore)
         setattr(self, attribute, job)
         job.finished.connect(
             lambda result: self._finish_input_setup(job, attribute, result)
@@ -1013,6 +1035,7 @@ class ControlWindow(QWidget):
         job.deleteLater()
 
     def _disconnect_input_session(self) -> None:
+        self._input_startup_restore_pending = False
         for job in (self._pointer_grant_process, self._scroll_grant_process,
                     self._control_grant_process):
             if job is not None:

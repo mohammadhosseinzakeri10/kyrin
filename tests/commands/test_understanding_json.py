@@ -141,6 +141,11 @@ def test_conversation_has_no_steps_or_action_authority() -> None:
     assert nested_by_model == result
     for payload in (
         {"route": "respond", "steps": [], "reply": ""},
+        {
+            "route": "respond",
+            "steps": [{"operation": None, "reply": "Hello!"}],
+            "reply": "Hello!",
+        },
         {"route": "execute", "steps": [template]},
         {
             "route": "respond",

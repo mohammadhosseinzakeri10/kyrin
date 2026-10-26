@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from kyrin.commands.models import CommandContext
+from kyrin.stt.evidence import SpeechEvidence
 
 
 class RequestedOperation(StrEnum):
@@ -26,6 +27,18 @@ class RequestedOperation(StrEnum):
     UNMAXIMIZE_APP = "unmaximize_app"
     FULLSCREEN_APP = "fullscreen_app"
     UNFULLSCREEN_APP = "unfullscreen_app"
+    TELEGRAM_VIEW = "telegram_view"
+    TELEGRAM_SETTINGS = "telegram_settings"
+    TELEGRAM_SEARCH_FOCUS = "telegram_search_focus"
+    TELEGRAM_SEARCH = "telegram_search"
+    NEW_APP_WINDOW = "new_app_window"
+    NEW_APP_TAB = "new_app_tab"
+    APP_PREFERENCES = "app_preferences"
+    SHOW_APP_WINDOWS = "show_app_windows"
+    SELECT_APP_WINDOW = "select_app_window"
+    CLOSE_SHOWN_WINDOW = "close_shown_window"
+    HIDE_APP_WINDOWS = "hide_app_windows"
+    SELECT_OPEN_APP_WINDOW = "select_open_app_window"
     POWER_OFF_SYSTEM = "power_off_system"
     RESTART_SYSTEM = "restart_system"
     LOG_OUT_SYSTEM = "log_out_system"
@@ -70,6 +83,7 @@ class UnderstandingInput:
     text: str
     language: str | None = None
     alternatives: tuple[str, ...] = ()
+    evidence: SpeechEvidence | None = None
 
     def __post_init__(self) -> None:
         if self.language is not None and not self.language.strip():

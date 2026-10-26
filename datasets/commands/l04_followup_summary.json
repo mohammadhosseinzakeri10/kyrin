@@ -1,0 +1,557 @@
+{
+  "schema": 1,
+  "status": "implementation_followup_verified; owner_live_acceptance_pending",
+  "report": "docs/development/L04_FOLLOWUP_2026-10-26_FA.md",
+  "live_guide": "docs/development/L04_LIVE_ACCEPTANCE_FA.md",
+  "model": "qwen3.5:9b",
+  "device": "cpu",
+  "frozen_corpus_sha256": "7bd8c31aeb5c4081870887fc4b4c1cb00c44cb81b94d917b11853681b07a46f1",
+  "turn_reference_sha256": "0db7c6937b62492569e9651751d04dd2d332e753f81ab82afd13ea230aaea2af",
+  "frozen_rules_replay": {
+    "summary": {
+      "total": {
+        "cases": 158,
+        "command_cases": 59,
+        "noncommand_cases": 92,
+        "asked_or_repeat": 18,
+        "correct": 127,
+        "correct_command": 28,
+        "missed_command": 31,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "by_category": {
+        "ambiguous": {
+          "cases": 6,
+          "command_cases": 0,
+          "noncommand_cases": 6,
+          "asked_or_repeat": 3,
+          "correct": 6,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "clean_command": {
+          "cases": 27,
+          "command_cases": 27,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 3,
+          "correct": 25,
+          "correct_command": 25,
+          "missed_command": 2,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "context": {
+          "cases": 8,
+          "command_cases": 5,
+          "noncommand_cases": 3,
+          "asked_or_repeat": 4,
+          "correct": 4,
+          "correct_command": 1,
+          "missed_command": 4,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "control_ambiguity": {
+          "cases": 3,
+          "command_cases": 0,
+          "noncommand_cases": 3,
+          "asked_or_repeat": 1,
+          "correct": 3,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "explicit_control": {
+          "cases": 3,
+          "command_cases": 0,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 0,
+          "correct": 3,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "explicit_power": {
+          "cases": 4,
+          "command_cases": 0,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 0,
+          "correct": 4,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "late_event": {
+          "cases": 2,
+          "command_cases": 0,
+          "noncommand_cases": 2,
+          "asked_or_repeat": 0,
+          "correct": 2,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "negation": {
+          "cases": 28,
+          "command_cases": 0,
+          "noncommand_cases": 28,
+          "asked_or_repeat": 3,
+          "correct": 28,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "ordinary": {
+          "cases": 10,
+          "command_cases": 0,
+          "noncommand_cases": 10,
+          "asked_or_repeat": 0,
+          "correct": 10,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "payload": {
+          "cases": 14,
+          "command_cases": 0,
+          "noncommand_cases": 14,
+          "asked_or_repeat": 0,
+          "correct": 14,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "provisional": {
+          "cases": 2,
+          "command_cases": 0,
+          "noncommand_cases": 2,
+          "asked_or_repeat": 0,
+          "correct": 2,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "quotation": {
+          "cases": 13,
+          "command_cases": 0,
+          "noncommand_cases": 13,
+          "asked_or_repeat": 0,
+          "correct": 13,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "sensitive_ambiguity": {
+          "cases": 4,
+          "command_cases": 0,
+          "noncommand_cases": 4,
+          "asked_or_repeat": 0,
+          "correct": 4,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "synthetic_error": {
+          "cases": 27,
+          "command_cases": 27,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 4,
+          "correct": 2,
+          "correct_command": 2,
+          "missed_command": 25,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "ungrounded_visible": {
+          "cases": 2,
+          "command_cases": 0,
+          "noncommand_cases": 2,
+          "asked_or_repeat": 0,
+          "correct": 2,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "unsupported_or_noise": {
+          "cases": 5,
+          "command_cases": 0,
+          "noncommand_cases": 5,
+          "asked_or_repeat": 0,
+          "correct": 5,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      },
+      "by_split": {
+        "audit": {
+          "cases": 54,
+          "command_cases": 22,
+          "noncommand_cases": 32,
+          "asked_or_repeat": 10,
+          "correct": 43,
+          "correct_command": 11,
+          "missed_command": 11,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "development": {
+          "cases": 104,
+          "command_cases": 37,
+          "noncommand_cases": 60,
+          "asked_or_repeat": 8,
+          "correct": 84,
+          "correct_command": 17,
+          "missed_command": 20,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      }
+    },
+    "all_turns": {
+      "turns": 178,
+      "command_turns": 67,
+      "model_calls": 0,
+      "model_errors": 0,
+      "correct": 143,
+      "correct_command": 32,
+      "missed_command": 35,
+      "wrong_action_proposal": 0,
+      "false_action_on_noncommand": 0,
+      "wrong_destination": 0,
+      "no_proposal": 139,
+      "clarification": 32,
+      "conversational_reply": 0,
+      "repeat_request": 13,
+      "unexpected_clarification": 6,
+      "missing_clarification": 0,
+      "model_error": 0,
+      "model_proposal_disagrees": 0,
+      "wrong_clarification": 1
+    },
+    "artifact": "local-data/l04-implementation/rules-followup.json"
+  },
+  "fixed_16_case_native": {
+    "summary": {
+      "total": {
+        "cases": 16,
+        "command_cases": 10,
+        "noncommand_cases": 6,
+        "asked_or_repeat": 3,
+        "correct": 16,
+        "correct_command": 10,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "by_category": {
+        "clean_command": {
+          "cases": 5,
+          "command_cases": 5,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 0,
+          "correct": 5,
+          "correct_command": 5,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "context": {
+          "cases": 2,
+          "command_cases": 1,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 1,
+          "correct": 2,
+          "correct_command": 1,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "negation": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "ordinary": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "payload": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "quotation": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 1,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "sensitive_ambiguity": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 1,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "synthetic_error": {
+          "cases": 4,
+          "command_cases": 4,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 0,
+          "correct": 4,
+          "correct_command": 4,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      },
+      "by_split": {
+        "audit": {
+          "cases": 7,
+          "command_cases": 5,
+          "noncommand_cases": 2,
+          "asked_or_repeat": 0,
+          "correct": 7,
+          "correct_command": 5,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "development": {
+          "cases": 9,
+          "command_cases": 5,
+          "noncommand_cases": 4,
+          "asked_or_repeat": 3,
+          "correct": 9,
+          "correct_command": 5,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      }
+    },
+    "all_turns": {
+      "turns": 18,
+      "command_turns": 12,
+      "model_calls": 8,
+      "model_errors": 0,
+      "correct": 18,
+      "correct_command": 12,
+      "missed_command": 0,
+      "wrong_action_proposal": 0,
+      "false_action_on_noncommand": 0,
+      "wrong_destination": 0,
+      "no_proposal": 6,
+      "clarification": 2,
+      "conversational_reply": 1,
+      "repeat_request": 2,
+      "unexpected_clarification": 0,
+      "missing_clarification": 0,
+      "model_error": 0,
+      "model_proposal_disagrees": 2,
+      "wrong_clarification": 0
+    },
+    "fresh_model_calls": 8,
+    "reused_model_responses": 0,
+    "native_inference_seconds": [
+      53.247,
+      53.594,
+      52.371,
+      49.712,
+      49.331,
+      46.489,
+      50.639,
+      47.235
+    ],
+    "artifact": "local-data/l04-implementation/qwen-followup-native.json",
+    "scope": "fresh calls on original fixed subset; no PCM, visible-option or producer-time inputs; later independent lifetime/timestamp refinements covered by full gate, not this native run"
+  },
+  "new_family_native": {
+    "cases_file": "datasets/commands/l04_followup_cases.jsonl",
+    "summary": {
+      "total": {
+        "cases": 3,
+        "command_cases": 3,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 1,
+        "correct": 2,
+        "correct_command": 2,
+        "missed_command": 1,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "by_category": {
+        "synthetic_error": {
+          "cases": 3,
+          "command_cases": 3,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 1,
+          "correct": 2,
+          "correct_command": 2,
+          "missed_command": 1,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      },
+      "by_split": {
+        "development": {
+          "cases": 3,
+          "command_cases": 3,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 1,
+          "correct": 2,
+          "correct_command": 2,
+          "missed_command": 1,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      }
+    },
+    "all_turns": {
+      "turns": 3,
+      "command_turns": 3,
+      "model_calls": 3,
+      "model_errors": 0,
+      "correct": 2,
+      "correct_command": 2,
+      "missed_command": 1,
+      "wrong_action_proposal": 0,
+      "false_action_on_noncommand": 0,
+      "wrong_destination": 0,
+      "no_proposal": 1,
+      "clarification": 1,
+      "conversational_reply": 0,
+      "repeat_request": 1,
+      "unexpected_clarification": 0,
+      "missing_clarification": 0,
+      "model_error": 0,
+      "model_proposal_disagrees": 0,
+      "wrong_clarification": 0
+    },
+    "records": [
+      {
+        "case_id": "followup-direction-up",
+        "actual": {
+          "route": "no_command"
+        },
+        "responses": [
+          "repeat_command"
+        ],
+        "model_errors": 0
+      },
+      {
+        "case_id": "followup-direction-down",
+        "actual": {
+          "route": "command",
+          "intents": [
+            {
+              "kind": "scroll_down",
+              "target": "telegram"
+            }
+          ]
+        },
+        "responses": [],
+        "model_errors": 0
+      },
+      {
+        "case_id": "followup-plan-two-apps",
+        "actual": {
+          "route": "command",
+          "intents": [
+            {
+              "kind": "open_app",
+              "target": "telegram"
+            },
+            {
+              "kind": "minimize_app",
+              "target": "browser"
+            }
+          ]
+        },
+        "responses": [],
+        "model_errors": 0
+      }
+    ],
+    "artifact": "local-data/l04-implementation/qwen-followup-new-families.json"
+  },
+  "full_quality_gate": {
+    "syntax": 0,
+    "lint": 0,
+    "type": 0,
+    "tests": 0,
+    "passed_tests": 2419,
+    "strict_type_checked_files": 422,
+    "test_seconds": 151.07,
+    "artifact": "local-data/l04-implementation/full-check-followup-verified/",
+    "scope": "whole checkout including preserved concurrent changes"
+  },
+  "source_sha256_at_report": {
+    "src/kyrin/commands/coordinator.py": "b4b9f3104c4b69e1417d007cb5293c33b1017c980478cdd2391e1e807797479c",
+    "src/kyrin/commands/models.py": "c455b9f2481375c16e0e446a94fb3562ce85d04169b45ed9b7b9e74fe35aa93e",
+    "src/kyrin/commands/recovery_candidates.py": "a680d201952f84a5fe15f7e671ce4a7406811e1a2c9fb1240a073e790d1d6753",
+    "src/kyrin/commands/speech_recovery.py": "579a6dec570bbc5184e34a43babcf0dbde65f7d91b87250891abdb464b27f44e",
+    "src/kyrin/commands/model_interpreter.py": "80dc20cbc3de26b63d54e8ad9109528e1ae70541fb95cc6f88d377ae06d53ffb",
+    "src/kyrin/commands/ollama_engine.py": "9fef6098ccd15acd07f5f4a84152c6980299653d75a72510c898b5b253b30670",
+    "src/kyrin/runtime/command_worker.py": "fcbbe8deefcb41a5cbc4d3a30858143260946784fb865f225b84e090495e56b3",
+    "scripts/commands/evaluate_l04_baseline.py": "6c2ce0548c9c4e8b82066a6f3c551ac8649ae03b498e7eb322ec52d21c829690",
+    "tests/commands/test_speech_recovery.py": "b688bd448b386881a6301da24e2f15326022df106b05dd73f8d51484601c071e",
+    "tests/runtime/test_command_worker.py": "ad0c4901bf0c4089596ad9c9f54b4ed91d139240a712e17102ee40b912ec6ac4",
+    "tests/commands/test_l04_baseline.py": "5d12d0e4eb10f0ad3b4e51f1722d1241f6f401726223ad8fc77f8a20dc9f683d",
+    "tests/commands/test_model_interpreter.py": "5fd7f150eb6a66e12dbaed785d8ee1a023e0d03a27bca46f39713e195bfb6214",
+    "tests/commands/test_understanding_json.py": "aff7768d7732d0ed0042c05c56022de6a875eb073cb3a2a1076e8d4ecd7767b3"
+  },
+  "limitations": [
+    "public designed text; no blind accent validation",
+    "one of three new synthetic cases abstained despite phonetic candidate",
+    "model full 158-case corpus not evaluated",
+    "no new audio or desktop interaction; owner live test pending",
+    "experimental thresholds; no calibrated intent probability",
+    "initial capture/STT excluded from recovery deadline; missing producer time starts at interpreter entry",
+    "multi-step recovery limited to explicit app clauses; no visible-control/picker recovery plans",
+    "live RAM/VRAM and latency unmeasured; no GUI policy configuration added"
+  ]
+}

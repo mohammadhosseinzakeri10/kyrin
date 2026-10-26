@@ -43,6 +43,47 @@ def _process(
     return None, coordinator.observe(update)
 
 
+def test_invalidation_cancels_active_operation_without_poisoning_next_work() -> None:
+    from kyrin.operations import check_operation, current_operation
+
+    entered = Event()
+    release = Event()
+    delivered: list[UnderstoodCommand] = []
+    errors: list[bool] = []
+
+    def process(
+        coordinator: CommandCoordinator, update: TranscriptUpdate, generation: int
+    ) -> tuple[str | None, Sequence[CommandEvent]]:
+        operation = current_operation()
+        assert operation is not None
+        if update.text == "old":
+            entered.set()
+            assert release.wait(2)
+            assert operation.stopped
+            check_operation()
+            pytest.fail("cancelled operation continued")
+        assert not operation.stopped
+        return _process(coordinator, update, generation)
+
+    worker = CommandUnderstandingWorker(
+        CommandCoordinator(DemoCommandInterpreter()),
+        process,
+        delivered.append,
+        lambda: errors.append(True),
+    )
+    worker.start()
+    try:
+        assert worker.submit(_work(0, "old"))
+        assert entered.wait(1)
+        worker.invalidate()
+        assert worker.submit(_work(1, "Open Telegram"))
+    finally:
+        release.set()
+        worker.close(drain=True, timeout_s=3)
+    assert not errors
+    assert [item.work.update.text for item in delivered] == ["Open Telegram"]
+
+
 def test_stream_invalidation_discards_late_state_and_queued_finals() -> None:
     entered = Event()
     release = Event()
@@ -330,3 +371,48 @@ def test_stop_shortens_existing_or_future_eof_drain(stop_phase: str) -> None:
         worker.close(drain=False, timeout_s=2)
     assert not worker._thread.is_alive()
     assert results == []
+
+
+def test_invalidation_and_rejected_queue_release_retained_audio() -> None:
+    from dataclasses import replace
+
+    from kyrin.stt.audio_recovery import AudioRecoveryPolicy, RetainedAudio
+
+    entered, release = Event(), Event()
+
+    def process(
+        coordinator: CommandCoordinator, update: TranscriptUpdate, generation: int
+    ) -> tuple[str | None, Sequence[CommandEvent]]:
+        entered.set()
+        assert release.wait(2)
+        return None, ()
+
+    worker = CommandUnderstandingWorker(
+        CommandCoordinator(DemoCommandInterpreter()),
+        process,
+        lambda result: None,
+        lambda: None,
+        max_queued=1,
+    )
+    owners = [
+        RetainedAudio(b"\x00\x00", lambda pcm: None, AudioRecoveryPolicy())
+        for _ in range(3)
+    ]
+    work = [
+        replace(
+            _work(i, str(i)),
+            update=replace(_work(i, str(i)).update, retained_audio=owner),
+        )
+        for i, owner in enumerate(owners)
+    ]
+    worker.start()
+    try:
+        assert worker.submit(work[0]) and entered.wait(1)
+        assert worker.submit(work[1])
+        assert not worker.submit(work[2])
+        assert owners[2].retained_bytes == 0
+        worker.invalidate(new_stream=True)
+        assert all(owner.retained_bytes == 0 for owner in owners)
+    finally:
+        release.set()
+        worker.close(drain=False, timeout_s=2)

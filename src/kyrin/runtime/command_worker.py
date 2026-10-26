@@ -8,6 +8,7 @@ from threading import Condition, RLock, Thread
 
 from kyrin.commands.coordinator import CommandCoordinator
 from kyrin.commands.models import CommandEvent
+from kyrin.operations import Operation, OperationStopped, activate
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 from kyrin.timing import TimingScope, timing_scope
 
@@ -65,6 +66,8 @@ class CommandUnderstandingWorker:
         self._thread: Thread | None = None
         self._finished = False
         self._stop_requested = False
+        self._active_work: CommandWork | None = None
+        self._active_operation: Operation | None = None
 
     def start(self) -> None:
         with self._condition:
@@ -91,6 +94,7 @@ class CommandUnderstandingWorker:
             if generation is None:
                 generation = self._generation
             if generation != self._generation or self._stop_requested:
+                self._release_audio(work)
                 return False
             if work.update.status is TranscriptStatus.FINAL:
                 self._queue = deque(
@@ -100,13 +104,16 @@ class CommandUnderstandingWorker:
                 )
             while len(self._queue) >= self._max_queued:
                 if not wait_for_capacity:
+                    self._release_audio(work)
                     return False
                 self._condition.wait()
                 if generation != self._generation or self._closed:
+                    self._release_audio(work)
                     return False
                 self._raise_if_failed()
             self._raise_if_failed()
             if self._closed or self._thread is None:
+                self._release_audio(work)
                 return False
             if work.timing is not None:
                 work.timing.mark("understanding_queued")
@@ -127,6 +134,12 @@ class CommandUnderstandingWorker:
     ) -> Sequence[CommandEvent]:
         with self._condition:
             self._generation += 1
+            for _, work in self._queue:
+                self._release_audio(work)
+            if self._active_work is not None:
+                self._release_audio(self._active_work)
+            if self._active_operation is not None:
+                self._active_operation.cancel()
             self._queue.clear()
             # In-flight interpretation only mutates its private snapshot.
             if clear_dialogue:
@@ -177,6 +190,11 @@ class CommandUnderstandingWorker:
             thread.join()
         self._raise_if_failed()
 
+    @staticmethod
+    def _release_audio(work: CommandWork) -> None:
+        if work.update.retained_audio is not None:
+            work.update.retained_audio.close()
+
     def _raise_if_failed(self) -> None:
         if self._error is not None:
             raise RuntimeError("command understanding worker failed") from self._error
@@ -195,18 +213,32 @@ class CommandUnderstandingWorker:
                     if self._closed and (not self._drain or not self._queue):
                         return
                     generation, work = self._queue.popleft()
+                    self._active_work = work
+                    operation = Operation(float("inf"))
+                    self._active_operation = operation
                     coordinator = self._coordinator.fork()
                     self._condition.notify_all()
-                with timing_scope(work.timing) if work.timing else nullcontext():
-                    if work.timing is not None:
-                        work.timing.mark("understanding_started")
-                    active_app, decisions = self._process(
-                        coordinator, work.update, generation
-                    )
-                    if work.timing is not None:
-                        work.timing.mark("understanding_finished")
+                try:
+                    with (
+                        activate(operation),
+                        timing_scope(work.timing) if work.timing else nullcontext(),
+                    ):
+                        if work.timing is not None:
+                            work.timing.mark("understanding_started")
+                        active_app, decisions = self._process(
+                            coordinator, work.update, generation
+                        )
+                        if work.timing is not None:
+                            work.timing.mark("understanding_finished")
+                except OperationStopped:
+                    continue
+                finally:
+                    self._release_audio(work)
+                    with self._condition:
+                        self._active_work = None
+                        self._active_operation = None
                 with self._condition:
-                    if generation != self._generation:
+                    if generation != self._generation or operation.stopped:
                         continue
                     self._coordinator = coordinator
                 self._on_result(
@@ -220,5 +252,8 @@ class CommandUnderstandingWorker:
             self._on_error()
         finally:
             with self._condition:
+                if self._active_work is not None:
+                    self._release_audio(self._active_work)
+                    self._active_work = None
                 self._finished = True
                 self._condition.notify_all()

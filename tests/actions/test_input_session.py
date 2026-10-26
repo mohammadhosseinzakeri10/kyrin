@@ -170,6 +170,17 @@ from kyrin.actions.platforms.helper_lifecycle import INPUT_CHECK
 backend = FakePortal()
 backend.GLib = types.SimpleNamespace(Error=RuntimeError)
 backend.started = {"devices": 2}
+if os.environ.get("KYRIN_TEST_PERSISTENT"):
+    original_persistent_request = backend.request
+    previous_token = "initial"
+    def persistent_request(method, args):
+        global previous_token
+        if method == "SelectDevices":
+            previous_token = args[1].get("restore_token", "initial")
+        if method == "Start":
+            return {"devices": 3, "restore_token": previous_token + "-next"}
+        return original_persistent_request(method, args)
+    backend.request = persistent_request
 if os.environ.get("KYRIN_TEST_BLOCK_START"):
     original_request = backend.request
     def blocked_request(method, args):
@@ -190,6 +201,8 @@ def action():
     return 0
 module.main = action
 sys.modules[module.__name__] = module
+for name in ("desktop_control_helper", "telegram_portal_helper"):
+    sys.modules["kyrin.actions.platforms." + name] = module
 serve(Wire(socket.socket(fileno=int(sys.argv[1]))), backend)
 """
     )
@@ -259,6 +272,80 @@ def service_token_path() -> Path:
     from kyrin.app.permission_token import permission_token_path
 
     return permission_token_path("desktop-input")
+
+
+def test_one_setup_and_restart_restore_all_selected_input_capabilities(
+    service: InputSessionService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KYRIN_TEST_PERSISTENT", "1")
+    policy = PermissionPolicy(
+        AppSettings(action_execution_enabled=True, trust_all_capabilities=True)
+    )
+    service.configure(policy)
+    assert service.startup_capability() is None  # First run needs explicit setup.
+    assert service.prepare("desktop_scroll")["devices"] == 3
+    assert read_opaque_token(service_token_path()) == "initial-next"
+    for index in range(2):
+        service.disconnect()  # Same transition as actual application exit.
+        # A new application service has no live owner or in-memory grants.
+        restarted = InputSessionService()
+        restarted.configure(policy)
+        # Reuse only the fixture's synthetic process launcher, with the new owner.
+        def launch(restarted: InputSessionService = restarted) -> None:
+            service._start()
+            restarted._process, service._process = service._process, None
+            restarted._wire, service._wire = service._wire, None
+
+        monkeypatch.setattr(restarted, "_start", launch)
+        try:
+            assert restarted.startup_capability() == "telegram_chat"
+            restored = restarted.prepare("telegram_chat", restore=True)
+            assert restored["state"] == "ready" and restored["devices"] == 3
+            assert restored["starts"] == 1
+            for name in (
+                "desktop_scroll_helper.py", "desktop_control_helper.py",
+                "telegram_portal_helper.py",
+            ):
+                result = restarted.run(["python", name, "target"], timeout=2)
+                assert result.returncode == 0
+            assert restarted.status()["starts"] == 1
+            expected = "initial" + "-next" * (index + 2)
+            assert read_opaque_token(service_token_path()) == expected
+            assert restarted.startup_capability() is None
+        finally:
+            restarted.disconnect()
+
+
+@pytest.mark.parametrize(
+    "case", ["missing", "corrupt", "insecure", "disabled", "unselected"]
+)
+def test_startup_never_requests_fresh_access_without_saved_enabled_grant(
+    service: InputSessionService, case: str
+) -> None:
+    path = service_token_path()
+    if case != "missing":
+        save_opaque_token(path, "saved")
+    if case == "corrupt":
+        path.write_bytes(b"\x00")
+    elif case == "insecure":
+        path.chmod(0o644)
+    elif case == "disabled":
+        service.configure(PermissionPolicy(AppSettings(allow_desktop_scroll=True)))
+    elif case == "unselected":
+        service.configure(PermissionPolicy(AppSettings(action_execution_enabled=True)))
+    assert service.startup_capability() is None
+    assert service.prepare("desktop_scroll", restore=True)["state"] != "ready"
+    assert service._process is None
+
+
+def test_token_removed_after_startup_selection_does_not_open_portal(
+    service: InputSessionService,
+) -> None:
+    save_opaque_token(service_token_path(), "saved")
+    assert service.startup_capability() == "desktop_scroll"
+    service_token_path().unlink()
+    assert service.prepare("desktop_scroll", restore=True)["state"] != "ready"
+    assert service._process is None
 
 
 def test_shared_grant_does_not_authorize_other_capability(
@@ -417,12 +504,14 @@ def test_unmatched_late_response_drops_owner_without_replay(
     assert execute(service, "next").returncode == 3
 
 
+@pytest.mark.parametrize("restore", [False, True])
 def test_prepare_waiting_before_disconnect_cannot_restart_owner(
-    service: InputSessionService, monkeypatch: pytest.MonkeyPatch
+    service: InputSessionService, monkeypatch: pytest.MonkeyPatch, restore: bool
 ) -> None:
     from threading import Lock
 
     attempted = Event()
+    save_opaque_token(service_token_path(), "saved")
     lock = Lock()
     lock.acquire()
 
@@ -439,7 +528,7 @@ def test_prepare_waiting_before_disconnect_cannot_restart_owner(
 
     def prepare() -> None:
         try:
-            service.prepare("desktop_scroll")
+            service.prepare("desktop_scroll", restore=restore)
         except OperationStopped as error:
             errors.append(error)
 

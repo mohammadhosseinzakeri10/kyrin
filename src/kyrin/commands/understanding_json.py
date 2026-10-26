@@ -99,6 +99,10 @@ def decode_model_response(payload: object) -> UnderstandingResult:
         }:
             if raw.get("target") not in (None, "") or raw.get("app") not in (None, ""):
                 raise ValueError("focused desktop operation cannot name an application")
+            if "state" in raw or "target_id" in raw:
+                raise ValueError(
+                    "focused desktop operation cannot carry control fields"
+                )
             steps.append(MeaningStep(operation, polarity=polarity))
             continue
         for field in ("target", "app"):

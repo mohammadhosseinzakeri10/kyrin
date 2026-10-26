@@ -134,8 +134,7 @@ _SCROLL_AREA_FA = re.compile(
 _SCROLL_SHORT_EN = re.compile(r"^(?:(?:come|go) )?(up|down)$")
 _SCROLL_SHORT_FA = re.compile(r"^(?:برو )?(بالا|پایین)$")
 _VISIBLE_CLICK_EN = re.compile(
-    r"^(?:please )?(?:click(?: on)?|select|press|go to) (?:the )?(.+?)"
-    r"(?: (?:button|icon|option|item))?$"
+    r"^(?:please )?(?:click(?: on)?|select|press|go to) (?:the )?(.+)$"
 )
 _VISIBLE_CLICK_FA = re.compile(r"^(?:روی |به )?(.+?) (?:کلیک کن|بزن|برو)$")
 _VISIBLE_STATE_EN = re.compile(

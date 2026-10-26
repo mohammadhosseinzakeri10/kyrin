@@ -1,6 +1,5 @@
 """Build a short-lived, identity-bound catalog for language understanding."""
 
-import json
 import logging
 import re
 import subprocess
@@ -11,6 +10,7 @@ from pathlib import Path
 from time import monotonic, perf_counter
 from typing import Literal, Protocol
 
+from kyrin.actions.platforms.control_inventory_protocol import ControlInventoryReply
 from kyrin.actions.visible_control import VisibleTextOption
 from kyrin.commands.visible_options import VisibleOption
 from kyrin.desktop.accessibility_target import AccessibilityTarget
@@ -94,17 +94,25 @@ class DesktopControlInventory:
                 timeout=6,
                 check=False,
             )
-            payload = json.loads(result.stdout) if result.returncode == 0 else []
-        except OSError, subprocess.TimeoutExpired, ValueError:
-            payload = []
+            reply = ControlInventoryReply.from_output(result.stdout, result.returncode)
+        except subprocess.TimeoutExpired:
+            reply = ControlInventoryReply("helper_timeout")
+        except OSError:
+            reply = ControlInventoryReply("helper_unavailable")
         accessibility_seconds = perf_counter() - accessibility_started
         if accessibility_seconds >= 1.0:
             _LOGGER.warning(
                 "Focused control accessibility scan took %.1fs",
                 accessibility_seconds,
             )
-        if isinstance(payload, list):
-            for item in payload[:300]:
+        if not reply.complete:
+            _LOGGER.warning("Visible control observation failed: %s", reply.status)
+            return ()
+        # Rejected names must not be reintroduced by OCR. Never expose the names
+        # themselves in diagnostics or logs.
+        rejected_names = {normalize_phrase(label) for label, _reason in reply.rejected}
+        if reply.controls:
+            for item in reply.controls:
                 if not isinstance(item, dict):
                     continue
                 label = item.get("label")
@@ -162,14 +170,20 @@ class DesktopControlInventory:
             and self._verifier.ready()
         ):
             ocr_started = perf_counter()
-            for item in self._verifier.list_visible_text(*identity):
-                if item.geometry is None or not 1 <= len(item.label.strip()) <= 80:
+            for ocr_item in self._verifier.list_visible_text(*identity):
+                if (
+                    ocr_item.geometry is None
+                    or not 1 <= len(ocr_item.label.strip()) <= 80
+                    or normalize_phrase(ocr_item.label) in rejected_names
+                ):
                     continue
-                evidence = WindowObservation.from_capture(*identity, item.geometry)
+                evidence = WindowObservation.from_capture(*identity, ocr_item.geometry)
                 if not evidence.current(observation.window_token, monotonic()):
                     return ()
-                ocr_observations[(item.label.strip(), item.anchor)] = evidence
-                observed.append((item.label.strip(), "ocr", None, None, item.anchor))
+                ocr_observations[(ocr_item.label.strip(), ocr_item.anchor)] = evidence
+                observed.append(
+                    (ocr_item.label.strip(), "ocr", None, None, ocr_item.anchor)
+                )
             ocr_seconds = perf_counter() - ocr_started
             if ocr_seconds >= 1.0:
                 _LOGGER.warning("Focused control OCR took %.1fs", ocr_seconds)

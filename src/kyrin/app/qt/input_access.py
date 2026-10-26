@@ -1,4 +1,4 @@
-"""Asynchronous explicit settings setup for the application input owner."""
+"""Asynchronous settings setup and startup restore of saved input access."""
 
 from threading import Event, Thread
 
@@ -12,11 +12,17 @@ class InputSetupJob(QObject):
     finished = Signal(object)
 
     def __init__(
-        self, service: InputSessionService, capability: str, parent: QObject
+        self,
+        service: InputSessionService,
+        capability: str,
+        parent: QObject,
+        *,
+        restore: bool = False,
     ) -> None:
         super().__init__(parent)
         self.service = service
         self.capability = capability
+        self.restore = restore
         self.cancelled = Event()
         self.destroyed.connect(self.cancelled.set)
         self._worker = Thread(target=self._run, name="kyrin-input-setup", daemon=True)
@@ -27,7 +33,11 @@ class InputSetupJob(QObject):
     def _run(self) -> None:
         try:
             with budget(45, cancelled=self.cancelled.is_set) as operation:
-                result = self.service.prepare(self.capability)
+                result = (
+                    self.service.prepare(self.capability, restore=True)
+                    if self.restore
+                    else self.service.prepare(self.capability)
+                )
                 operation.remaining()
         except OSError, ValueError, OperationStopped:
             result = {"state": "disconnected", "devices": 0}

@@ -15,15 +15,17 @@ from kyrin.app.qt.input_access import InputSetupJob  # noqa: E402
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_async_setup_result_and_cancellation(cancel: bool) -> None:
+@pytest.mark.parametrize("restore", [False, True])
+def test_async_setup_result_and_cancellation(cancel: bool, restore: bool) -> None:
     app = QApplication.instance() or QApplication([])
     entered, release = Event(), Event()
     result: list[dict[str, Any]] = []
     gui_thread = get_ident()
 
     class Service:
-        def prepare(self, capability: str) -> dict[str, Any]:
+        def prepare(self, capability: str, **kwargs: bool) -> dict[str, Any]:
             assert capability == "desktop_scroll"
+            assert kwargs == ({"restore": True} if restore else {})
             assert get_ident() != gui_thread
             entered.set()
             assert release.wait(2)
@@ -40,7 +42,8 @@ def test_async_setup_result_and_cancellation(cancel: bool) -> None:
 
     receiver = Receiver()
     job = InputSetupJob(
-        cast(InputSessionService, Service()), "desktop_scroll", receiver
+        cast(InputSessionService, Service()), "desktop_scroll", receiver,
+        restore=restore,
     )
     job.finished.connect(receiver.receive)
     job.start()

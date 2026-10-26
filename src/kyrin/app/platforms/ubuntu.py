@@ -72,6 +72,11 @@ from kyrin.commands.models import (
 from kyrin.commands.ollama_engine import OllamaCommandEngine
 from kyrin.commands.ollama_models import installed_ollama_models
 from kyrin.commands.ollama_server import LocalOllamaServer
+from kyrin.commands.recovery_candidates import PhoneticCandidateGenerator
+from kyrin.commands.speech_recovery import (
+    SpeechCommandRecovery,
+    SpeechRecoveryInterpreter,
+)
 from kyrin.commands.understanding import RequestedOperation
 from kyrin.desktop.active_app import ActiveAppObserver
 from kyrin.desktop.app_activation import ExistingAppActivator
@@ -94,6 +99,7 @@ from kyrin.responses.system_notices import notice_for_backlog, notice_for_error
 from kyrin.responses.visual_status import VisualPresentation, VisualStatusController
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import SpeechSessionController, SpeechSessionEnded
+from kyrin.stt.audio_recovery import AudioRecoveryPolicy
 from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
 from kyrin.stt.contracts import CancellableSpeechToTextEngine, SpeechToTextEngine
@@ -498,6 +504,14 @@ class UbuntuSessionFactory:
                     )
                 command_server = self._command_server_factory(command_selection)
                 endpoint = command_server.__enter__()
+                speech_recovery = SpeechCommandRecovery(
+                    PhoneticCandidateGenerator(
+                        spoken_names,
+                        allowed_apps=frozenset(installed),
+                        chat_apps=frozenset(settings.allowed_chat_apps),
+                    ),
+                    rules,
+                )
                 interpreter = ModelAssistedInterpreter(
                     rules,
                     OllamaCommandEngine(
@@ -522,12 +536,14 @@ class UbuntuSessionFactory:
                         else None
                     ),
                     action_review=rules.review_model_action,
+                    recovery_review=speech_recovery.review,
                     available_operations=tuple(
                         operation.value
                         for operation in RequestedOperation
                         if operation.value in {kind.value for kind in supported_kinds}
                     ),
                 )
+                interpreter = SpeechRecoveryInterpreter(interpreter, speech_recovery)
             if settings.history_enabled:
                 try:
                     history = SqliteConversationHistory(
@@ -652,6 +668,11 @@ class UbuntuSessionFactory:
                         else ()
                     ),
                     emit_partials=self._audio_file is None,
+                    include_evidence=True,
+                    audio_recovery=AudioRecoveryPolicy()
+                    if command_selection is not None
+                    and engine.capabilities.supports_same_audio_reprocessing
+                    else None,
                 )
                 pause_confirm_ms = 800 if selection.backend == "omnilingual" else 384
 

@@ -21,6 +21,9 @@ if __name__ == "__main__" and sys.argv[1:] == ["--capabilities"]:
 from gi.repository import Gio, GLib  # type: ignore[import-not-found]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from kyrin.actions.platforms.control_inventory_protocol import (  # noqa: E402
+    REJECTION_REASONS,
+)
 from kyrin.actions.platforms.desktop_accessibility import (  # noqa: E402
     Control,
     ControlUnavailable,
@@ -99,7 +102,10 @@ def _accessible_control(
     node, _target, _valid, checked, point = control
     if point is None or (state_required and checked is None):
         return None
-    if action_index(node, True if state_required else None) is not None:
+    if (
+        action_index(node, not checked if state_required else None, checked=checked)
+        is not None
+    ):
         raise ControlUnavailable("coordinate fallback cannot replace an action")
     x, y = point
     if near is not None and (
@@ -155,7 +161,7 @@ def _semantic_control(
         return "STATE_UNAVAILABLE"
     if desired is not None and checked == desired:
         return "STATE_ALREADY_SET" if evidence() else "TARGET_CHANGED:stale_or_window"
-    selected = action_index(node, desired)
+    selected = action_index(node, desired, checked=checked)
     if selected is None:
         return (
             "NO_ACCESSIBLE_ACTION" if evidence() else "TARGET_CHANGED:stale_or_window"
@@ -168,7 +174,7 @@ def _semantic_control(
     if (
         fresh is None
         or fresh[0] != node
-        or action_index(node, desired) != selected
+        or action_index(node, desired, checked=fresh[3]) != selected
         or not _matches_consent(fresh, frame[2:6], consent)
     ):
         return "TARGET_UNCERTAIN"
@@ -184,7 +190,7 @@ def _semantic_control(
     if (
         fresh is None
         or fresh[0] != node
-        or action_index(node, desired) != selected
+        or action_index(node, desired, checked=fresh[3]) != selected
         or not _matches_consent(fresh, frame[2:6], consent)
         or (desired is not None and fresh[3] != checked)
     ):
@@ -584,14 +590,18 @@ def main() -> int:
                     target,
                     consent,
                 )
+            except ControlUnavailable as error:
+                result = "OBSERVATION_FAILED:" + REJECTION_REASONS.get(
+                    str(error), "accessibility_error"
+                )
             except (
-                ControlUnavailable,
+                ImportError,
                 GLib.Error,
                 AttributeError,
                 TypeError,
                 ValueError,
             ):
-                result = "TARGET_UNCERTAIN"
+                result = "OBSERVATION_FAILED:accessibility_error"
             print(result, flush=True)
             return (
                 0

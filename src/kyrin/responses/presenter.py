@@ -11,6 +11,98 @@ from kyrin.commands.models import (
 )
 from kyrin.responses.models import SystemNotice
 
+_CONTROL_OBSERVATION_TEXT: dict[str, tuple[str, str]] = {
+    "action_unavailable": (
+        "کنترل، عملِ قابل‌اجرای یکتا برای این درخواست ارائه نمی‌کند.",
+        "The control does not expose one supported action for this request.",
+    ),
+    "window_identity_unavailable": (
+        "هویت پنجرهٔ فعال برای مشاهده در دسترس نیست.",
+        "The active window's identity is unavailable for observation.",
+    ),
+    "focus_changed": (
+        "پنجرهٔ فعال هنگام مشاهده تغییر کرد؛ فرمان متوقف شد.",
+        "The active window changed during observation; the command stopped.",
+    ),
+    "frame_unavailable": (
+        "محدودهٔ پنجرهٔ فعال خوانده نشد.",
+        "The active window's bounds could not be read.",
+    ),
+    "window_ambiguous_or_inactive": (
+        "یک پنجرهٔ فعالِ یکتا در دسترس‌پذیری برنامه پیدا نشد.",
+        "The app did not expose one unique active accessibility window.",
+    ),
+    "window_invalid": (
+        "وضعیت پنجره در دسترس‌پذیری برای کنترل معتبر نیست.",
+        "The accessibility window is not in a valid state for control.",
+    ),
+    "window_bounds_unavailable": (
+        "پنجرهٔ دسترس‌پذیری محدودهٔ قابل‌اعتماد ندارد.",
+        "The accessibility window has no usable bounds.",
+    ),
+    "window_bounds_mismatch": (
+        "محدودهٔ دسترس‌پذیری با پنجرهٔ فعال تطبیق ندارد.",
+        "The accessibility bounds do not match the active window.",
+    ),
+    "tree_incomplete": (
+        "خواندن فهرست کنترل‌ها کامل نشد؛ مقصد قابل تأیید نیست.",
+        "The control inventory is incomplete, so the target cannot be verified.",
+    ),
+    "ancestry_inconsistent": (
+        "ساختار کنترل‌ها هنگام خواندن ناسازگار بود؛ فرمان متوقف شد.",
+        "The control hierarchy was inconsistent during observation; "
+        "the command stopped.",
+    ),
+    "accessibility_error": (
+        "خواندن اطلاعات دسترس‌پذیری با خطا روبه‌رو شد.",
+        "Reading accessibility information failed.",
+    ),
+    "helper_error": (
+        "ابزار مشاهدهٔ کنترل‌ها با خطا متوقف شد.",
+        "The control observation helper failed.",
+    ),
+    "helper_timeout": (
+        "مهلت خواندن کنترل‌های پنجره به پایان رسید.",
+        "Reading the window's controls timed out.",
+    ),
+    "helper_unavailable": (
+        "ابزار مشاهدهٔ کنترل‌ها قابل اجرا نیست.",
+        "The control observation helper could not be started.",
+    ),
+    "invalid_reply": (
+        "پاسخ ابزار مشاهدهٔ کنترل‌ها معتبر نیست؛ فرمان متوقف شد.",
+        "The control observation helper returned an invalid reply; "
+        "the command stopped.",
+    ),
+    "application_not_exported": (
+        "اطلاعات دسترس‌پذیری این برنامه در دسترس نیست و مقصد تأیید نشد.",
+        "This app's accessibility information is unavailable "
+        "and the target was not verified.",
+    ),
+    "target_not_found": (
+        "کنترلی با نام کاملِ خواسته‌شده در مشاهده تأیید نشد.",
+        "No control with the requested full name was verified in the observation.",
+    ),
+    "target_ambiguous": (
+        "چند کنترل با این نام دیده شد؛ مقصد یکتا نیست.",
+        "Multiple controls have this name; the target is ambiguous.",
+    ),
+    "target_invalid": (
+        "کنترل پیدا شد، اما وضعیت، موقعیت یا ساختار آن برای اجرا معتبر نیست.",
+        "The control was found, but its state, location or hierarchy "
+        "is not valid for execution.",
+    ),
+    "ocr_unavailable": (
+        "نام در دسترس‌پذیری پیدا نشد و خواندن متن تصویر آماده نیست.",
+        "The name was not found in accessibility "
+        "and screen text reading is unavailable.",
+    ),
+    "ocr_geometry_mismatch": (
+        "مشاهدهٔ تصویری به پنجرهٔ فعلی قابل اتصال نیست.",
+        "The screen observation could not be bound to the current window.",
+    ),
+}
+
 _TEXT: dict[str, dict[str, str]] = {
     "fa": {
         "ready_for_command": "گوش می‌دهم؛ فرمانتان را بگویید.",
@@ -572,6 +664,17 @@ class ResponsePresenter:
                     if event.error_code
                     in {"chat_search_uncertain", "visible_chat_uncertain"}
                     else messages[event.error_code]
+                )
+            elif event.error_code is not None and event.error_code.startswith(
+                "visible_control_observation:"
+            ):
+                detail = _CONTROL_OBSERVATION_TEXT.get(
+                    event.error_code.partition(":")[2]
+                )
+                text = (
+                    detail[language == "en"]
+                    if detail is not None
+                    else messages["visible_control_unavailable"]
                 )
             elif event.error_code is not None and event.error_code.startswith(
                 (

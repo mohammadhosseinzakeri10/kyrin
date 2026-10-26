@@ -1,6 +1,6 @@
 """Small domain types shared by command interpreters and stream consumers."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
@@ -9,6 +9,8 @@ from kyrin.commands.telegram_settings import SETTING_SECTIONS
 from kyrin.commands.visible_options import VisibleOption
 from kyrin.desktop.accessibility_target import AccessibilityTarget
 from kyrin.desktop.window_observation import WindowObservation
+from kyrin.stt.audio_recovery import RetainedAudio
+from kyrin.stt.evidence import SpeechEvidence
 
 
 class CommandKind(StrEnum):
@@ -40,6 +42,16 @@ class CommandKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RecoveryTrace:
+    original_text: str
+    control_span: str
+    canonical_control: str
+    source: str
+    reason: str
+    similarity: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CommandIntent:
     kind: CommandKind
     target: str
@@ -55,6 +67,7 @@ class CommandIntent:
     control_observation: WindowObservation | None = None
 
     control_accessibility: AccessibilityTarget | None = None
+    recovery: RecoveryTrace | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not self.target.strip():
@@ -176,6 +189,22 @@ class VerifiedContext:
 
 
 @dataclass(frozen=True, slots=True)
+class RecoveryCandidate:
+    intent: CommandIntent
+    original_text: str
+    control_span: str
+    canonical_control: str
+    similarity: float
+    source: str = "text_phonetics"
+    target_requires_clarification: bool = False
+    following: tuple[CommandIntent, ...] = ()
+
+    @property
+    def steps(self) -> tuple[CommandIntent, ...]:
+        return (self.intent, *self.following)
+
+
+@dataclass(frozen=True, slots=True)
 class CommandContext:
     """Dialogue history and a fresh foreground observation are distinct facts."""
 
@@ -192,6 +221,12 @@ class CommandContext:
     visible_control_enabled: bool = False
     available_apps: tuple[ModelAppOption, ...] = ()
     available_operations: tuple[str, ...] | None = None
+    speech_evidence: SpeechEvidence | None = None
+    retained_audio: RetainedAudio | None = field(
+        default=None, compare=False, repr=False
+    )
+    recovery_candidates: tuple[RecoveryCandidate, ...] = ()
+    transcript_emitted_ns: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,6 +12,7 @@ from kyrin.commands.interpreter import (
     DeclinedClarification,
     Interpretation,
     NeedsClarification,
+    NotACommand,
     ReadyCommand,
     ReadyPlan,
     UnrecognizedCommand,
@@ -26,11 +27,13 @@ from kyrin.commands.models import (
     PendingCommandClarification,
 )
 from kyrin.commands.ollama_engine import CommandModelError
+from kyrin.commands.open_window_meaning import requests_open_window_overview
 from kyrin.commands.operation_verifier import (
     OperationVerificationStatus,
     RuleBasedOperationEvidence,
     SourceOperationVerifier,
 )
+from kyrin.commands.recovery_candidates import explicit_non_action_role
 from kyrin.commands.target_grounding import SourceTargetGrounder, TargetGroundingStatus
 from kyrin.commands.target_resolution import (
     SemanticTargetResolver,
@@ -177,6 +180,36 @@ def _source_scroll_operation(
     )
 
 
+def _overview_source_supported(text: str) -> bool:
+    normalized = fold_case(text).strip().rstrip(".!?")
+    if _SOURCE_QUOTES.search(text) or _SOURCE_NOT_INSTRUCTION.search(normalized):
+        return False
+    if requests_open_window_overview(text, "fa"):
+        return True
+    english = re.fullmatch(
+        r"(?:please |could you |can you |would you |let me )*"
+        r"(?:show|display|list|view|see) "
+        r"(?:(?:all|every|my|the|currently|open|active|running|desktop|"
+        r"application|applications|app|apps|program|programs|window|windows) ?)+",
+        normalized,
+    )
+    if english:
+        has_windows = bool(re.search(r"\bwindows?\b", normalized))
+        has_apps = bool(re.search(r"\b(?:apps?|applications?|programs?)\b", normalized))
+        has_running_scope = bool(
+            re.search(r"\b(?:open|active|running|desktop)\b", normalized)
+        )
+        if has_windows or has_apps and has_running_scope:
+            return True
+    return bool(
+        re.fullmatch(
+            r"(?:montre[z]?|affiche[z]?) (?:toutes?|tous) (?:les )?"
+            r"(?:fenêtres|applications|programmes) (?:ouvertes?|actives?|en cours)",
+            normalized,
+        )
+    )
+
+
 _CONFIRMABLE_APP_OPERATIONS = frozenset(
     {
         RequestedOperation.OPEN_APP,
@@ -235,6 +268,34 @@ def _visible_request_supported(
     )
 
 
+def _visible_name_preserved(
+    text: str, target: str, options: tuple[VisibleOption, ...]
+) -> bool:
+    """Role words are names unless the request explicitly describes a role.
+
+    A model ID must not turn 'Test Button' into the different control 'Test'.
+    For free wording, also reject a shortened name inside a longer observed name.
+    """
+    name = _words(target)
+    match = re.fullmatch(
+        _EN_REQUEST_PREFIX
+        + r"(?:click(?: on)?|tap|press|select|choose|open|show|go to|navigate to|"
+        r"turn on|turn off|switch on|switch off|enable|disable|check|uncheck) "
+        r"(?:the )?(.+?)"
+        r"(?: please)?[.!?]?",
+        fold_case(text).strip(),
+    )
+    if match is not None:
+        spoken = re.sub(r"^(?:button|icon|option|item) (?:named|called) ", "", match[1])
+        return _words(spoken) == name
+    return not any(
+        len(_words(option.label)) > len(name)
+        and _spoken_target_occurs(option.label, target)
+        and _spoken_target_occurs(text, option.label)
+        for option in options
+    )
+
+
 class ModelAssistedInterpreter:
     """Convert independently verified proposals to the existing command domain."""
 
@@ -251,6 +312,11 @@ class ModelAssistedInterpreter:
         action_review: Callable[[CommandIntent, CommandContext], Interpretation]
         | None = None,
         available_operations: tuple[str, ...] | None = None,
+        recovery_review: Callable[
+            [UnderstandingInput, UnderstandingResult, CommandContext],
+            Interpretation | None,
+        ]
+        | None = None,
     ) -> None:
         self._rules = rules
         self._model = model
@@ -269,6 +335,7 @@ class ModelAssistedInterpreter:
         )
         self._visible_options_reader = visible_options_reader
         self._available_operations = available_operations
+        self._recovery_review = recovery_review
 
     def interpret(
         self,
@@ -335,6 +402,27 @@ class ModelAssistedInterpreter:
                 if decision is ConfirmationDecision.NO:
                     return DeclinedClarification()
                 return NeedsClarification(pending)
+            if context.recovery_candidates and self._recovery_review is not None:
+                source = UnderstandingInput(
+                    text,
+                    language,
+                    tuple(h.text for h in context.speech_evidence.alternatives)
+                    if context.speech_evidence
+                    else (),
+                    context.speech_evidence,
+                )
+                model_context = replace(
+                    context,
+                    available_apps=self._app_names.model_options(),
+                    available_operations=self._available_operations,
+                )
+                try:
+                    proposal = self._model.understand(source, context=model_context)
+                except CommandModelError, ValueError:
+                    return direct
+                recovered = self._review_recovery(source, proposal, model_context)
+                if recovered is not None:
+                    return recovered
             return direct
         if isinstance(
             direct,
@@ -349,7 +437,19 @@ class ModelAssistedInterpreter:
             return direct
         if not text.strip():
             return direct
-        source = UnderstandingInput(text, language)
+        # An explicit negative request or an unsupported dictation payload is
+        # already a complete non-action. Do not ask the user to repeat it when
+        # a model hallucinates an action contained inside that payload.
+        if isinstance(direct, NotACommand) and explicit_non_action_role(text, language):
+            return direct
+        source = UnderstandingInput(
+            text,
+            language,
+            tuple(h.text for h in context.speech_evidence.alternatives)
+            if context.speech_evidence
+            else (),
+            context.speech_evidence,
+        )
         context = replace(
             context,
             available_apps=self._app_names.model_options(),
@@ -447,6 +547,9 @@ class ModelAssistedInterpreter:
             step.operation.value not in self._available_operations for step in steps
         ):
             return UnrecognizedCommand()
+        recovered = self._review_recovery(source, proposal, context)
+        if recovered is not None:
+            return recovered
         if len(steps) == 1 and steps[0].operation in {
             RequestedOperation.SCROLL_UP,
             RequestedOperation.SCROLL_DOWN,
@@ -485,6 +588,12 @@ class ModelAssistedInterpreter:
                 target is None
                 or option is None
                 or _words(option.label) != _words(target)
+                or sum(
+                    _words(item.label) == _words(target)
+                    for item in context.visible_options
+                )
+                != 1
+                or not _visible_name_preserved(text, target, context.visible_options)
                 or (visible_step.control_state is not None and option.checked is None)
                 or not _visible_request_supported(
                     text,
@@ -518,7 +627,8 @@ class ModelAssistedInterpreter:
             and steps[0].operation is RequestedOperation.SHOW_ALL_WINDOWS
         ):
             if (
-                _NEGATIVE_REPLY.search(text.casefold())
+                not _overview_source_supported(text)
+                or _NEGATIVE_REPLY.search(text.casefold())
                 or _OVERVIEW_NEGATION.search(text)
                 or _OTHER_WINDOW_COLLECTION.search(text.casefold())
                 or _OVERVIEW_EXTRA_ACTION.search(text.casefold())
@@ -581,6 +691,33 @@ class ModelAssistedInterpreter:
                 if not isinstance(self._action_review(intent, context), ReadyCommand):
                     return UnrecognizedCommand()
         return ReadyPlan(CommandPlan(tuple(intents)))
+
+    def _review_recovery(
+        self,
+        source: UnderstandingInput,
+        proposal: UnderstandingResult,
+        context: CommandContext,
+    ) -> Interpretation | None:
+        if self._recovery_review is None:
+            return None
+        if proposal.status is not UnderstandingStatus.READY:
+            return None
+        if self._available_operations is not None and any(
+            step.operation.value not in self._available_operations
+            for step in proposal.candidates[0].steps
+        ):
+            return UnrecognizedCommand()
+        recovered = self._recovery_review(source, proposal, context)
+        if isinstance(recovered, ReadyCommand) and self._action_review is not None:
+            return self._action_review(recovered.intent, context)
+        if isinstance(recovered, ReadyPlan) and self._action_review is not None:
+            for intent in recovered.plan.steps:
+                reviewed = self._action_review(intent, context)
+                # A question or follow-up cannot be embedded in an executable
+                # plan; retain the ordinary dialogue path for those commands.
+                if not isinstance(reviewed, ReadyCommand) or reviewed.follow_up:
+                    return UnrecognizedCommand()
+        return recovered
 
     def _uncovered_app_action(
         self,

@@ -857,3 +857,53 @@ def test_semantic_control_dispatches_with_ocr_off(
     assert executor.execute(request).outcome is ActionOutcome.DISPATCHED_UNVERIFIED
     assert len(calls) == 1
     assert calls[0][2] == "semantic"
+
+
+def test_independent_resolver_accepts_structural_action_without_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from kyrin.desktop.accessibility_target import AccessibilityTarget
+
+    structure = AccessibilityTarget(
+        ((0, "FRAME", "Main"), (1, "BUTTON", "Test button"))
+    )
+    payload = [
+        {
+            "label": "Test button",
+            "role": "BUTTON",
+            "checked": None,
+            "x": None,
+            "y": None,
+            "accessibility": structure.to_json(),
+        }
+    ]
+    monkeypatch.setattr(
+        desktop_control,
+        "run_process",
+        lambda args, **_kw: subprocess.CompletedProcess(
+            args,
+            0,
+            json.dumps(
+                {"version": 1, "status": "ok", "controls": payload, "rejected": []}
+            ),
+            "",
+        ),
+    )
+    executor = desktop_control.DesktopControlExecutor(
+        Delegate(),
+        identity_reader=lambda: ("example.desktop", 42),
+        token_reader=lambda: "window-7",
+    )
+    request = ActionRequest(
+        ActionKey(0, 1),
+        CommandIntent(
+            CommandKind.VISIBLE_CONTROL, "Test button", control_observation=_evidence()
+        ),
+    )
+    evidence = executor._resolve_control(
+        request, ("example.desktop", 42), "Test button"
+    )
+    assert evidence is not None
+    assert evidence.accessibility == structure and evidence.anchor is None

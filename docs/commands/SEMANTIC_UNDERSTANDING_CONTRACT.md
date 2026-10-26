@@ -11,6 +11,24 @@ adapter still requires source evidence, a permitted target, and the normal
 action gate. Named controls and focused scrolling have their own fresh-window
 checks; system-power proposals from the model cannot start a power action.
 
+L04 adds `SpeechRecoveryInterpreter` around the selected model path. It retains
+original text, carries named backend evidence, and retrieves role-aware English
+phonetic candidates. `SpeechCommandRecovery` requires semantic agreement with
+independent input evidence before producing a native intent; model-rewritten
+text is never treated as independent source evidence. Phonetic app names require
+target clarification. Existing action review, permissions and execution checks
+remain authoritative. All current command kinds have explicit recovery contracts;
+this registration does not promise coverage of all utterances or corruptions.
+
+Whisper can retain a bounded complete PCM turn and retry once without its original
+vocabulary hints. The owner expires, is cancelled on stream/worker invalidation,
+and releases PCM before semantic inference. Reprocessing uses managed STT resource
+admission. Vosk carries real decoder alternatives/native scores; Omnilingual does
+not acquire those capabilities by sharing a session class. Raw ASR scores, IPA
+retrieval similarity and semantic intent are distinct quantities. Experimental
+limits and validation are documented in [the L04 policy](L04_RECOVERY_POLICY_FA.md)
+and [implementation report](../development/L04_IMPLEMENTATION_2026-10-26_FA.md).
+
 The reference cases in `datasets/commands/semantic_cases.jsonl` define desired
 behavior, not a measured accuracy result. They distinguish owner-verified,
 owner-reported, and designed examples. No audio is bundled.
@@ -158,3 +176,25 @@ claims. English, Persian, and German examples are present; other languages
 need native-speaker or otherwise reliable references before being scored.
 
 No additional runtime dependency is introduced by this contract.
+
+### L04 follow-up: bounded role recovery
+
+English direction evidence now compares the verb and direction independently;
+the weaker slot determines the score. An exact opposite direction cannot be
+corrected away. Visible state recovery requires an exact label, a current
+window observation, readable checked state and matching semantic state.
+Two or three explicit app-operation clauses may form a recovery plan only when
+each has its own target. Ordered steps must all match, and any action review
+requiring a question/follow-up rejects the executable plan. Search/chat payloads
+are never split at conjunctions or phonemized as app-name candidates.
+
+Final STT producer time bounds the entire recovery wait, including the command
+queue. Initial acquisition/STT is outside this budget; events without producer
+time use interpreter entry. Generation invalidation cancels the worker's active
+Operation as well as rejecting stale publication. Native calls remain subject
+to their cooperative cancellation/transport timeout; cancellation is not rollback.
+Explicit negative requests and unsupported dictation payloads recognized as
+non-actions bypass semantic inference/reprocessing rather than requesting a repeat.
+
+Owner-run live acceptance is pending; see L04_LIVE_ACCEPTANCE_FA.md. This does
+not establish general accent coverage or calibrated similarity thresholds.

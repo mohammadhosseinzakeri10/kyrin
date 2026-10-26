@@ -366,7 +366,9 @@ def test_model_scroll_requires_explicit_affirmative_request(
             context=CommandContext(observed_scroll_app="example.desktop"),
             pending=None,
         ),
-        UnrecognizedCommand,
+        NotACommand
+        if utterance == "Please do not scroll down"
+        else UnrecognizedCommand,
     )
 
 
@@ -502,7 +504,9 @@ def test_model_visible_control_requires_explicit_affirmative_request(
             context=CommandContext(observed_scroll_app="example.desktop"),
             pending=None,
         ),
-        UnrecognizedCommand,
+        NotACommand
+        if utterance == "Please do not click Search"
+        else UnrecognizedCommand,
     )
 
 
@@ -1203,6 +1207,7 @@ def test_ollama_device_options_and_probe() -> None:
         (DevicePreference.GPU, 999),
         (DevicePreference.AUTO, None),
     ):
+
         def probe(url: str, model: str, selected: DevicePreference = device) -> int:
             return 0 if selected is DevicePreference.CPU else 1024
 

@@ -189,7 +189,7 @@ ENGLISH: dict[str, str] = {
     ),
     "input_session_unprepared": "Live input is not prepared. Use the setup button.",
     "input_session_preparing": (
-        "Waiting for system consent; setup may show an OS dialog."
+        "Connecting input access; the system may request consent."
     ),
     "input_session_interaction_required": (
         "System consent is needed. Retry setup explicitly."
@@ -202,7 +202,8 @@ ENGLISH: dict[str, str] = {
         "The portal does not support the requested input devices."
     ),
     "input_session_persistent": (
-        "A restore token is saved; restart still requires explicit setup."
+        "Access is saved and reconnects automatically when KYRIN starts. "
+        "The system may request consent again if it cannot restore access."
     ),
     "input_session_temporary": (
         "No restore token was issued; this live session works until disconnection."

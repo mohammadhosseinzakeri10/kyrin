@@ -21,6 +21,11 @@ from kyrin.actions.control_policy import (
 )
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
+from kyrin.actions.platforms.control_inventory_protocol import (
+    ControlInventoryReply,
+    ControlObservationError,
+    name_key,
+)
 from kyrin.actions.platforms.input_session import run_input_helper as run_process
 from kyrin.actions.visible_control import VisibleControlTarget
 from kyrin.app.permissions import PermissionPolicy
@@ -110,6 +115,7 @@ class DesktopControlExecutor:
         """Observe independently of language-model options, without any input."""
         observation = request.intent.control_observation
         assert observation is not None
+        accessibility_status = "ok"
         if request.intent.control_source != "ocr":
             try:
                 result = run_process(
@@ -129,49 +135,76 @@ class DesktopControlExecutor:
                     timeout=6,
                     check=False,
                 )
-                payload = json.loads(result.stdout) if result.returncode == 0 else []
-                if not isinstance(payload, list):
-                    return None
+                reply = ControlInventoryReply.from_output(
+                    result.stdout, result.returncode
+                )
+                accessibility_status = reply.status
+                if not reply.complete:
+                    raise ControlObservationError(reply.status)
+                rejection = reply.rejection_for(label)
+                if rejection is not None:
+                    raise ControlObservationError(rejection)
                 matches = [
                     item
-                    for item in payload
-                    if isinstance(item, dict)
-                    and str(item.get("label", "")).casefold() == label.casefold()
+                    for item in reply.controls
+                    if name_key(str(item.get("label", ""))) == name_key(label)
                 ]
                 if matches:
                     if len(matches) != 1:
-                        return None
+                        raise ControlObservationError("target_ambiguous")
                     item = matches[0]
-                    target = AccessibilityTarget.from_json(item["accessibility"])
+                    raw_target = item["accessibility"]
+                    if not isinstance(raw_target, str):
+                        raise ControlObservationError("invalid_reply")
+                    target = AccessibilityTarget.from_json(raw_target)
                     checked, role = item.get("checked"), item.get("role")
                     x, y = item.get("x"), item.get("y")
                     if (
                         not isinstance(role, str)
                         or (checked is not None and type(checked) is not bool)
-                        or type(x) is not int
-                        or type(y) is not int
-                        or min(x, y) < 0
+                        or not (
+                            (x is None and y is None)
+                            or (type(x) is int and type(y) is int and min(x, y) >= 0)
+                        )
                     ):
-                        return None
+                        raise ControlObservationError("invalid_reply")
                     return ControlEvidence(
-                        label, "accessibility", role, checked, (x, y), target
+                        label,
+                        "accessibility",
+                        role,
+                        checked,
+                        (x, y) if type(x) is int and type(y) is int else None,
+                        target,
                     )
-            except OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError:
-                return None
+            except subprocess.TimeoutExpired as error:
+                raise ControlObservationError("helper_timeout") from error
+            except OSError as error:
+                raise ControlObservationError("helper_unavailable") from error
+            except (ValueError, KeyError, TypeError) as error:
+                raise ControlObservationError("invalid_reply") from error
         if (
             request.intent.control_source == "accessibility"
             or request.intent.control_state is not None
-            or self._verifier is None
-            or not self._verifier.ready()
         ):
-            return None
+            raise ControlObservationError(
+                "application_not_exported"
+                if accessibility_status == "application_not_exported"
+                else "target_not_found"
+            )
+        if self._verifier is None or not self._verifier.ready():
+            raise ControlObservationError(
+                "application_not_exported"
+                if accessibility_status == "application_not_exported"
+                else "ocr_unavailable"
+            )
         target_box = self._verifier.find_visible_control(*identity, label)
+        if target_box is None:
+            raise ControlObservationError("target_not_found")
         if (
-            target_box is None
-            or target_box.geometry is None
+            target_box.geometry is None
             or target_box.geometry.window_token != observation.window_token
         ):
-            return None
+            raise ControlObservationError("ocr_geometry_mismatch")
         return ControlEvidence(
             label,
             "ocr",
@@ -206,7 +239,10 @@ class DesktopControlExecutor:
         def failure(reason: str) -> ActionResult:
             return ActionResult(request.key, ActionOutcome.FAILED, error_code=reason)
 
-        target = self._resolve(request, identity, label)
+        try:
+            target = self._resolve(request, identity, label)
+        except ControlObservationError as error:
+            return failure("visible_control_observation:" + error.reason)
         if target is None or target.label != label:
             return failure("visible_control_uncertain")
         if (
@@ -245,7 +281,10 @@ class DesktopControlExecutor:
             self._identity_reader() != identity
         ):
             return failure("visible_control_confirmation_expired")
-        fresh = self._resolve(request, identity, label)
+        try:
+            fresh = self._resolve(request, identity, label)
+        except ControlObservationError as error:
+            return failure("visible_control_observation:" + error.reason)
         if (
             fresh is None
             or fresh.source == "window"
@@ -571,6 +610,14 @@ class DesktopControlExecutor:
                 request.key,
                 ActionOutcome.FAILED,
                 error_code="backend:" + result.stdout.strip().partition(":")[2],
+            )
+        if result.stdout.startswith("OBSERVATION_FAILED:"):
+            detail = result.stdout.strip().partition(":")[2]
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="visible_control_observation:"
+                + ControlObservationError(detail).reason,
             )
         if "CONTROL_SETUP_REQUIRED" in result.stdout:
             outcome, reason = ActionOutcome.FAILED, "visible_control_setup_required"

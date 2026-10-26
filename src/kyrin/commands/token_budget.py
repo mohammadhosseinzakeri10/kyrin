@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from kyrin.commands.ollama_models import ollama_model_stores
-from kyrin.operations import run_process
+from kyrin.operations import remaining, run_process
 
 
 def local_tokenizer() -> Path | None:
@@ -73,6 +73,7 @@ class OllamaTokenCounter:
         self._validated = False
         self._binary: Path | None = None
         self._blob: Path | None = None
+        self.rendered_prompt: str | None = None
 
     def __call__(self, payload: dict[str, object]) -> int:
         if not self._validated:
@@ -81,7 +82,9 @@ class OllamaTokenCounter:
                 raise ValueError("local command tokenizer is unavailable")
             # Older versions may ignore debug fields and generate instead. Do not
             # send a render request unless the inspected API contract is present.
-            with urlopen(f"{self._base_url}/api/version", timeout=3) as response:
+            with urlopen(
+                f"{self._base_url}/api/version", timeout=remaining(3)
+            ) as response:
                 version = json.load(response).get("version", "")
             parts = str(version).split(".")
             if (
@@ -97,7 +100,7 @@ class OllamaTokenCounter:
         rendered = self._transport(
             f"{self._base_url}/api/chat",
             {**payload, "_debug_render_only": True, "truncate": False, "shift": False},
-            120,
+            remaining(120),
         )
         if (
             not isinstance(rendered, dict)
@@ -105,6 +108,7 @@ class OllamaTokenCounter:
             or not isinstance(prompt := debug.get("rendered_template"), str)
         ):
             raise ValueError("Ollama did not return an untruncated chat template")
+        self.rendered_prompt = prompt
         result = run_process(
             [
                 str(self._binary),

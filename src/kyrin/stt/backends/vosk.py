@@ -3,6 +3,7 @@
 import importlib
 import json
 from collections.abc import Callable, Sequence
+from math import isfinite
 from pathlib import Path
 from threading import Lock
 from typing import Protocol, cast
@@ -12,6 +13,7 @@ from kyrin.audio.audio_format import AudioFormat, AudioSampleFormat
 from kyrin.stt.capabilities import SpeechToTextCapabilities
 from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOptions
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
+from kyrin.stt.evidence import SpeechEvidence, SpeechHypothesis, SpeechScore
 from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
 
 
@@ -33,6 +35,44 @@ def _result_text(payload: str, key: str) -> str:
     if not isinstance(result, dict) or not isinstance(result.get(key), str):
         raise SpeechToTextError(f"Vosk result is missing a text field: {key}")
     return cast(str, result[key]).strip()
+
+
+def _final_result(payload: str) -> tuple[str, SpeechEvidence | None]:
+    try:
+        result = json.loads(payload)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise SpeechToTextError("Vosk returned invalid JSON") from exc
+    if not isinstance(result, dict):
+        raise SpeechToTextError("Vosk final result must be an object")
+    alternatives = result.get("alternatives")
+    if alternatives is None:
+        return _result_text(payload, "text"), None
+    if not isinstance(alternatives, list) or not alternatives:
+        raise SpeechToTextError("Vosk alternatives must be a nonempty list")
+    hypotheses: list[tuple[str, tuple[SpeechScore, ...]]] = []
+    for item in alternatives[:4]:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            raise SpeechToTextError("Vosk alternative must contain text")
+        value = item.get("confidence")
+        scores: tuple[SpeechScore, ...] = (
+            (SpeechScore("utterance_score", float(value)),)
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isfinite(value)
+            else ()
+        )
+        hypotheses.append((item["text"].strip(), scores))
+    text, scores = hypotheses[0]
+    evidence = SpeechEvidence(
+        "vosk",
+        tuple(
+            SpeechHypothesis(other, "vosk", scores=other_scores)
+            for other, other_scores in hypotheses[1:]
+            if other and other != text
+        ),
+        scores,
+    )
+    return text, evidence
 
 
 class VoskSession:
@@ -76,8 +116,8 @@ class VoskSession:
             raise SpeechToTextError("Vosk could not process audio") from exc
 
         if endpoint:
-            text = _result_text(payload, "text")
-            update = self._final_update(text)
+            text, evidence = _final_result(payload)
+            update = self._final_update(text, evidence)
             return (update,) if update is not None else ()
 
         text = _result_text(payload, "partial")
@@ -90,11 +130,19 @@ class VoskSession:
             ),
         )
 
-    def _final_update(self, text: str) -> TranscriptUpdate | None:
+    def _final_update(
+        self,
+        text: str,
+        evidence: SpeechEvidence | None = None,
+    ) -> TranscriptUpdate | None:
         update = None
         if text or self._last_partial is not None:
             update = TranscriptUpdate(
-                self._segment_id, text, TranscriptStatus.FINAL, self._language
+                self._segment_id,
+                text,
+                TranscriptStatus.FINAL,
+                self._language,
+                evidence=evidence,
             )
         self._segment_id += 1
         self._last_partial = None
@@ -106,8 +154,8 @@ class VoskSession:
             payload = recognizer.FinalResult()
         except Exception as exc:  # Vosk's Python API raises plain Exception.
             raise SpeechToTextError("Vosk could not finish the stream") from exc
-        text = _result_text(payload, "text")
-        update = self._final_update(text)
+        text, evidence = _final_result(payload)
+        update = self._final_update(text, evidence)
         self._finished = True
         return (update,) if update is not None else ()
 
@@ -137,6 +185,8 @@ class VoskEngine:
             supported_languages=frozenset({language}),
             supports_partial_updates=True,
             supports_language_detection=False,
+            supports_alternatives=True,
+            supports_native_scores=True,
         )
         try:
             vosk = importlib.import_module("vosk")
@@ -177,6 +227,10 @@ class VoskEngine:
                 )
             except Exception as exc:  # Vosk's Python API raises plain Exception.
                 raise SpeechToTextError("Vosk could not open a session") from exc
+            if options.include_evidence:
+                set_alternatives = getattr(recognizer, "SetMaxAlternatives", None)
+                if callable(set_alternatives):
+                    set_alternatives(options.maximum_alternatives)
             self._active_sessions += 1
         return VoskSession(
             recognizer, self._input_format, self._language, self._session_closed

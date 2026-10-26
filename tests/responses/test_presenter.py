@@ -39,6 +39,35 @@ TELEGRAM = CommandIntent(CommandKind.OPEN_APP, "telegram")
 
 @pytest.mark.parametrize("language", ["fa", "en"])
 @pytest.mark.parametrize(
+    "reason,fragments",
+    [
+        ("helper_error", ("ابزار مشاهده", "helper failed")),
+        ("window_bounds_mismatch", ("محدوده", "bounds")),
+        ("target_ambiguous", ("چند کنترل", "Multiple controls")),
+        ("target_invalid", ("کنترل پیدا شد", "control was found")),
+        ("tree_incomplete", ("کامل نشد", "incomplete")),
+    ],
+)
+def test_control_observation_failure_explains_stage_without_private_content(
+    language: str,
+    reason: str,
+    fragments: tuple[str, str],
+) -> None:
+    feedback = ActionFeedback(
+        KEY,
+        CommandIntent(CommandKind.VISIBLE_CONTROL, "Private label"),
+        ActionOutcome.FAILED,
+        ResponseChannel.TEXT_ONLY,
+        "visible_control_observation:" + reason,
+        language,
+    )
+    text = ResponsePresenter(language).present(feedback).text
+    assert fragments[language == "en"] in text
+    assert "Private" not in text and reason not in text
+
+
+@pytest.mark.parametrize("language", ["fa", "en"])
+@pytest.mark.parametrize(
     ("code", "fragment"),
     [
         ("window_close_rejected:stale", ("رد شد", "rejected")),
@@ -184,8 +213,11 @@ def test_repeat_request_uses_english_fallback_for_unsupported_language() -> None
 
 def test_numbered_close_question_is_localized() -> None:
     question = ResponseRequest(
-        1, ResponseKind.CONFIRM_NUMBERED_CLOSE, ResponseChannel.TEXT_AND_VOICE,
-        target="desktop", window_index=2,
+        1,
+        ResponseKind.CONFIRM_NUMBERED_CLOSE,
+        ResponseChannel.TEXT_AND_VOICE,
+        target="desktop",
+        window_index=2,
     )
     assert ResponsePresenter("en").present(question).text == (
         "Close window number 2? Yes or no?"
@@ -294,7 +326,10 @@ def test_visible_control_stage_detail_keeps_the_plain_user_message() -> None:
 
 def test_legacy_capture_explains_required_session_restart() -> None:
     feedback = ActionFeedback(
-        KEY, TELEGRAM, ActionOutcome.FAILED, ResponseChannel.TEXT_AND_VOICE,
+        KEY,
+        TELEGRAM,
+        ActionOutcome.FAILED,
+        ResponseChannel.TEXT_AND_VOICE,
         "visible_control_capture_geometry_required",
     )
     assert "log out of Ubuntu" in ResponsePresenter("en").present(feedback).text

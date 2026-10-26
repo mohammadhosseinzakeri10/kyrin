@@ -1647,7 +1647,8 @@ def test_telegram_control_access_is_requested_from_settings(
         finished = Signal(object)
 
         def __init__(
-            self, service: object, capability: str, parent: QObject
+            self, service: object, capability: str, parent: QObject,
+            *, restore: bool = False,
         ) -> None:
             super().__init__(parent)
             self.capability = capability
@@ -1673,6 +1674,76 @@ def test_telegram_control_access_is_requested_from_settings(
         window._timer.stop()
         window.deleteLater()
         application.processEvents()
+
+
+@pytest.mark.parametrize(
+    "case", ["restore", "disconnect", "missing_settings", "quit", "restore_denied"]
+)
+def test_saved_input_restores_once_on_each_window_start_without_setup_clicks(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    from typing import Any
+
+    from kyrin.actions.platforms.input_session import InputSessionService
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    save_opaque_token(permission_token_path("desktop-input"), "existing-grant")
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings(
+        listening_enabled=False, action_execution_enabled=True,
+        trust_all_capabilities=True,
+    ))
+    calls: list[tuple[str, bool]] = []
+
+    class SavedService(InputSessionService):
+        def prepare(self, capability: str, *, restore: bool = False) -> dict[str, Any]:
+            calls.append((capability, restore))
+            self._state = (
+                "interaction_required" if case == "restore_denied" else "ready"
+            )
+            return self.status()
+
+        def status(self) -> dict[str, Any]:
+            return {
+                "state": self._state,
+                "devices": 3 if self._state == "ready" else 0,
+                "persistent": self._state == "ready",
+            }
+
+    for _restart in range(2):
+        service = SavedService()
+        monkeypatch.setattr("kyrin.app.qt.window.INPUT_SESSIONS", service)
+        window = _window(store.load(), store, _controller([]))
+        previous_calls = len(calls)
+        try:
+            if case == "disconnect":
+                window._disconnect_input_session()
+            elif case == "missing_settings":
+                window._settings = None
+            elif case == "quit":
+                window._quitting = True
+            application.processEvents()
+            if case in {"disconnect", "missing_settings", "quit"}:
+                assert len(calls) == previous_calls
+            else:
+                def finished(current: ControlWindow = window) -> bool:
+                    return current._pointer_grant_process is None
+
+                _pump_until(application, finished)
+                assert calls[previous_calls:] == [("telegram_chat", True)]
+                label = window.actions_page.telegram_pointer_grant_status
+                expected = "needed" if case == "restore_denied" else "connected"
+                assert expected in label.text()
+                window._restore_input_session()
+                window._refresh_input_session()
+                application.processEvents()
+                assert len(calls) == previous_calls + 1
+        finally:
+            window._timer.stop()
+            window._input_status_timer.stop()
+            window.deleteLater()
+            application.processEvents()
 
 
 def test_actions_page_scrolls_without_squashing_app_list(

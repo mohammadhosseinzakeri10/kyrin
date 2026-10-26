@@ -1,5 +1,6 @@
 """A model may only choose unique options observed in the same focused window."""
 
+import json
 import subprocess
 from time import monotonic
 
@@ -7,9 +8,39 @@ import pytest
 
 from kyrin.actions.platforms import desktop_control_inventory
 from kyrin.actions.visible_control import VisibleTextOption, visible_ocr_labels
+from kyrin.desktop.accessibility_target import AccessibilityTarget
 from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
+
+
+def _scan_result(
+    args: list[str], returncode: int, stdout: str, stderr: str
+) -> subprocess.CompletedProcess[str]:
+    controls = json.loads(stdout)
+    for index, control in enumerate(controls):
+        control.setdefault(
+            "accessibility",
+            AccessibilityTarget(
+                (
+                    (0, "FRAME", "Main"),
+                    (index, control["role"], control["label"]),
+                )
+            ).to_json(),
+        )
+    return subprocess.CompletedProcess(
+        args,
+        returncode,
+        json.dumps(
+            {
+                "version": 1,
+                "status": "ok",
+                "controls": controls,
+                "rejected": [],
+            }
+        ),
+        stderr,
+    )
 
 
 def _geometry() -> CaptureGeometry:
@@ -48,7 +79,7 @@ def test_inventory_prefers_unique_accessible_options_and_rejects_duplicates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
+        return _scan_result(
             args,
             0,
             '[{"label":"Settings","role":"button","checked":null,"x":50,"y":20},'
@@ -76,7 +107,7 @@ def test_inventory_discards_snapshot_when_focus_changes(
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
+        lambda args, **_kwargs: _scan_result(args, 0, "[]", ""),
     )
     identities = iter((("example.desktop", 42), ("other.desktop", 1)))
     inventory = desktop_control_inventory.DesktopControlInventory(
@@ -91,7 +122,7 @@ def test_exact_accessible_name_avoids_ocr_pass(
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(
+        lambda args, **_kwargs: _scan_result(
             args,
             0,
             '[{"label":"Search","role":"icon","checked":null,"x":20,"y":30}]',
@@ -122,7 +153,7 @@ def test_matching_option_near_bottom_survives_catalog_limit(
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
+        lambda args, **_kwargs: _scan_result(args, 0, "[]", ""),
     )
 
     class LongReader(Reader):
@@ -177,7 +208,7 @@ def test_inventory_rejects_same_process_window_switch_during_scan(
     def scan(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[-1] == "window-7"
         token[0] = "window-8"
-        return subprocess.CompletedProcess(
+        return _scan_result(
             args,
             0,
             '[{"label":"Search","role":"icon","checked":null,"x":20,"y":30}]',
@@ -215,7 +246,7 @@ def test_accessible_inventory_works_when_ocr_is_off(
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kw: subprocess.CompletedProcess(
+        lambda args, **_kw: _scan_result(
             args,
             0,
             '[{"label":"Settings","role":"button","checked":null,"x":20,"y":30}]',
@@ -259,9 +290,7 @@ def test_inventory_preserves_role_ancestry_for_action_without_coordinates(
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kw: subprocess.CompletedProcess(
-            args, 0, json.dumps(payload), ""
-        ),
+        lambda args, **_kw: _scan_result(args, 0, json.dumps(payload), ""),
     )
 
     class OffReader(Reader):
@@ -281,7 +310,7 @@ def test_inventory_rejects_ocr_duplicates_under_locator_normalization(
 ) -> None:
     monkeypatch.setattr(
         "subprocess.run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "[]", ""),
+        lambda args, **_kwargs: _scan_result(args, 0, "[]", ""),
     )
 
     class NormalizedDuplicates(Reader):
@@ -303,4 +332,56 @@ def test_inventory_rejects_ocr_duplicates_under_locator_normalization(
     )
     assert [item.label for item in inventory.read_options("example.desktop")] == [
         "Unique"
+    ]
+
+
+@pytest.mark.parametrize(
+    "status", ["helper_error", "tree_incomplete", "window_bounds_mismatch"]
+)
+def test_model_inventory_does_not_hide_failed_scan_with_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    status: str,
+) -> None:
+    from kyrin.actions.platforms.control_inventory_protocol import ControlInventoryReply
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, ControlInventoryReply(status).to_json(), "private stderr"
+        ),
+    )
+
+    class NoRead(Reader):
+        def ready(self) -> bool:
+            pytest.fail("failed scan cannot admit OCR")
+
+    inventory = desktop_control_inventory.DesktopControlInventory(
+        lambda: ("example.desktop", 42), NoRead(), token_reader=lambda: "window-7"
+    )
+    assert inventory.read_options("example.desktop") == ()
+    assert status in caplog.text and "private stderr" not in caplog.text
+
+
+@pytest.mark.parametrize("reason", ["target_invalid", "target_ambiguous"])
+def test_model_inventory_does_not_reintroduce_rejected_name_from_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    from kyrin.actions.platforms.control_inventory_protocol import ControlInventoryReply
+
+    reply = ControlInventoryReply("ok", rejected=(("Sound", reason),))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, reply.to_json(), ""
+        ),
+    )
+    inventory = desktop_control_inventory.DesktopControlInventory(
+        lambda: ("example.desktop", 42), Reader(), token_reader=lambda: "window-7"
+    )
+    assert [item.label for item in inventory.read_options("example.desktop")] == [
+        "Settings"
     ]

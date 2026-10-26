@@ -136,3 +136,50 @@ def test_tts_reloads_after_oom_and_releases_before_playback(
         == [DevicePreference.CPU if device is DevicePreference.AUTO else device] * 2
     )
     assert not synth._loaded
+
+
+def test_retained_audio_reprocessing_keeps_stt_resource_admission() -> None:
+    from kyrin.audio.audio_data import AudioData
+    from kyrin.stt.audio_recovery import AudioRecoveryPolicy
+    from kyrin.stt.backends.whisper import WhisperSession
+    from kyrin.stt.capabilities import SpeechToTextCapabilities
+
+    resources = ModelResources(memory=lambda: MemorySnapshot())
+    calls: list[bytes] = []
+
+    def retry(pcm: bytes, language: str) -> str:
+        assert resources._active and "stt:test" in resources._residents
+        calls.append(pcm)
+        return "Open Telegram"
+
+    raw = WhisperSession(
+        lambda pcm, language: "oh pen Telegram",
+        "en",
+        lambda: None,
+        emit_partials=False,
+        recovery_policy=AudioRecoveryPolicy(),
+        retry_infer=retry,
+    )
+
+    class Engine:
+        capabilities = SpeechToTextCapabilities(
+            frozenset({ComputeDevice.CPU}), frozenset({"en"}), True, False
+        )
+
+        def open_session(self, options: SpeechToTextOptions) -> WhisperSession:
+            return raw
+
+        def close(self) -> None:
+            pass
+
+    engine = ManagedSttEngine(Engine, resources, "stt:test")
+    session = engine.open_session(SpeechToTextOptions())
+    assert isinstance(session, TurnAwareSpeechToTextSession)
+    session.start_turn()
+    session.accept_audio(AudioData(b"\x01\x00" * 8, raw.input_format))
+    owner = session.end_turn()[0].retained_audio
+    assert owner is not None and owner.reprocess() is not None
+    assert calls == [b"\x01\x00" * 8]
+    assert not resources._active
+    session.close()
+    engine.close()

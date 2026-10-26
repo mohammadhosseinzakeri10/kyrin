@@ -273,3 +273,38 @@ def test_whisper_session_passes_optional_hints_without_changing_other_sessions(
         session.close()
     engine.close()
     assert calls == [("fa", ("مرورگر",)), ("fa", ())]
+
+
+def test_retained_turn_is_complete_bounded_and_closed_with_session() -> None:
+    from kyrin.stt.audio_recovery import AudioRecoveryPolicy
+
+    seen: list[bytes] = []
+
+    def retry(pcm: bytes, language: str) -> str:
+        seen.append(pcm)
+        return "Open Telegram"
+
+    session = WhisperSession(
+        lambda pcm, language: "oh pen Telegram",
+        "en",
+        lambda: None,
+        emit_partials=False,
+        recovery_policy=AudioRecoveryPolicy(max_pcm_bytes=32_000),
+        retry_infer=retry,
+    )
+    session.start_turn()
+    pcm = audio(0.5)
+    session.accept_audio(pcm)
+    update = session.end_turn()[0]
+    assert update.retained_audio is not None
+    assert update.retained_audio.reprocess() is not None
+    assert seen == [pcm.data]
+    session.start_turn()
+    session.accept_audio(audio(2))
+    assert session.end_turn()[0].retained_audio is None  # no truncated retry
+    session.start_turn()
+    session.accept_audio(pcm)
+    owner = session.end_turn()[0].retained_audio
+    assert owner is not None and owner.retained_bytes
+    session.close()
+    assert owner.retained_bytes == 0

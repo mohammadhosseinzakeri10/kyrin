@@ -75,13 +75,21 @@ class _ManagedSession:
     def supports_partial_updates(self) -> bool:
         return self._session.supports_partial_updates
 
+    def _handoff(
+        self, updates: Sequence[TranscriptUpdate]
+    ) -> Sequence[TranscriptUpdate]:
+        for update in updates:
+            if update.retained_audio is not None:
+                update.retained_audio.bind_admission(self._engine._admit)
+        return updates
+
     def accept_audio(self, chunk: AudioData) -> Sequence[TranscriptUpdate]:
         with self._engine._admit():
-            return self._session.accept_audio(chunk)
+            return self._handoff(self._session.accept_audio(chunk))
 
     def finish(self) -> Sequence[TranscriptUpdate]:
         with self._engine._admit():
-            return self._session.finish()
+            return self._handoff(self._session.finish())
 
     def close(self) -> None:
         self._session.close()
@@ -91,9 +99,9 @@ class _ManagedTurnSession(_ManagedSession):
     def start_turn(self) -> Sequence[TranscriptUpdate]:
         assert isinstance(self._session, TurnAwareSpeechToTextSession)
         with self._engine._admit():
-            return self._session.start_turn()
+            return self._handoff(self._session.start_turn())
 
     def end_turn(self) -> Sequence[TranscriptUpdate]:
         assert isinstance(self._session, TurnAwareSpeechToTextSession)
         with self._engine._admit():
-            return self._session.end_turn()
+            return self._handoff(self._session.end_turn())

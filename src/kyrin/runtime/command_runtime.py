@@ -534,6 +534,8 @@ class LiveCommandRuntime:
                     if isinstance(event, TranscriptUpdate):
                         self.listening_diagnostics.pulse(event.status.value)
                         if self._control_speech(event):
+                            if event.retained_audio is not None:
+                                event.retained_audio.close()
                             continue
                     else:
                         with self._voice_lock:

@@ -1,0 +1,407 @@
+{
+  "schema": 1,
+  "corpus_sha256": "7bd8c31aeb5c4081870887fc4b4c1cb00c44cb81b94d917b11853681b07a46f1",
+  "rules": {
+    "total": {
+      "cases": 158,
+      "command_cases": 59,
+      "noncommand_cases": 92,
+      "asked_or_repeat": 18,
+      "correct": 127,
+      "correct_command": 28,
+      "missed_command": 31,
+      "wrong_action_proposal": 0,
+      "false_action_on_noncommand": 0
+    },
+    "by_category": {
+      "ambiguous": {
+        "cases": 6,
+        "command_cases": 0,
+        "noncommand_cases": 6,
+        "asked_or_repeat": 3,
+        "correct": 6,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "clean_command": {
+        "cases": 27,
+        "command_cases": 27,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 3,
+        "correct": 25,
+        "correct_command": 25,
+        "missed_command": 2,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "context": {
+        "cases": 8,
+        "command_cases": 5,
+        "noncommand_cases": 3,
+        "asked_or_repeat": 4,
+        "correct": 4,
+        "correct_command": 1,
+        "missed_command": 4,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "control_ambiguity": {
+        "cases": 3,
+        "command_cases": 0,
+        "noncommand_cases": 3,
+        "asked_or_repeat": 1,
+        "correct": 3,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "explicit_control": {
+        "cases": 3,
+        "command_cases": 0,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 0,
+        "correct": 3,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "explicit_power": {
+        "cases": 4,
+        "command_cases": 0,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 0,
+        "correct": 4,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "late_event": {
+        "cases": 2,
+        "command_cases": 0,
+        "noncommand_cases": 2,
+        "asked_or_repeat": 0,
+        "correct": 2,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "negation": {
+        "cases": 28,
+        "command_cases": 0,
+        "noncommand_cases": 28,
+        "asked_or_repeat": 3,
+        "correct": 28,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "ordinary": {
+        "cases": 10,
+        "command_cases": 0,
+        "noncommand_cases": 10,
+        "asked_or_repeat": 0,
+        "correct": 10,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "payload": {
+        "cases": 14,
+        "command_cases": 0,
+        "noncommand_cases": 14,
+        "asked_or_repeat": 0,
+        "correct": 14,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "provisional": {
+        "cases": 2,
+        "command_cases": 0,
+        "noncommand_cases": 2,
+        "asked_or_repeat": 0,
+        "correct": 2,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "quotation": {
+        "cases": 13,
+        "command_cases": 0,
+        "noncommand_cases": 13,
+        "asked_or_repeat": 0,
+        "correct": 13,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "sensitive_ambiguity": {
+        "cases": 4,
+        "command_cases": 0,
+        "noncommand_cases": 4,
+        "asked_or_repeat": 0,
+        "correct": 4,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "synthetic_error": {
+        "cases": 27,
+        "command_cases": 27,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 4,
+        "correct": 2,
+        "correct_command": 2,
+        "missed_command": 25,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "ungrounded_visible": {
+        "cases": 2,
+        "command_cases": 0,
+        "noncommand_cases": 2,
+        "asked_or_repeat": 0,
+        "correct": 2,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "unsupported_or_noise": {
+        "cases": 5,
+        "command_cases": 0,
+        "noncommand_cases": 5,
+        "asked_or_repeat": 0,
+        "correct": 5,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      }
+    },
+    "by_split": {
+      "audit": {
+        "cases": 54,
+        "command_cases": 22,
+        "noncommand_cases": 32,
+        "asked_or_repeat": 10,
+        "correct": 43,
+        "correct_command": 11,
+        "missed_command": 11,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "development": {
+        "cases": 104,
+        "command_cases": 37,
+        "noncommand_cases": 60,
+        "asked_or_repeat": 8,
+        "correct": 84,
+        "correct_command": 17,
+        "missed_command": 20,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      }
+    }
+  },
+  "qwen_fixed_subset": {
+    "total": {
+      "cases": 16,
+      "command_cases": 10,
+      "noncommand_cases": 6,
+      "asked_or_repeat": 4,
+      "correct": 12,
+      "correct_command": 6,
+      "missed_command": 4,
+      "wrong_action_proposal": 0,
+      "false_action_on_noncommand": 0
+    },
+    "by_category": {
+      "clean_command": {
+        "cases": 5,
+        "command_cases": 5,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 0,
+        "correct": 5,
+        "correct_command": 5,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "context": {
+        "cases": 2,
+        "command_cases": 1,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 1,
+        "correct": 2,
+        "correct_command": 1,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "negation": {
+        "cases": 1,
+        "command_cases": 0,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 0,
+        "correct": 1,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "ordinary": {
+        "cases": 1,
+        "command_cases": 0,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 0,
+        "correct": 1,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "payload": {
+        "cases": 1,
+        "command_cases": 0,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 1,
+        "correct": 1,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "quotation": {
+        "cases": 1,
+        "command_cases": 0,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 0,
+        "correct": 1,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "sensitive_ambiguity": {
+        "cases": 1,
+        "command_cases": 0,
+        "noncommand_cases": 1,
+        "asked_or_repeat": 0,
+        "correct": 1,
+        "correct_command": 0,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "synthetic_error": {
+        "cases": 4,
+        "command_cases": 4,
+        "noncommand_cases": 0,
+        "asked_or_repeat": 2,
+        "correct": 0,
+        "correct_command": 0,
+        "missed_command": 4,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      }
+    },
+    "by_split": {
+      "audit": {
+        "cases": 7,
+        "command_cases": 5,
+        "noncommand_cases": 2,
+        "asked_or_repeat": 3,
+        "correct": 5,
+        "correct_command": 3,
+        "missed_command": 2,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "development": {
+        "cases": 9,
+        "command_cases": 5,
+        "noncommand_cases": 4,
+        "asked_or_repeat": 1,
+        "correct": 7,
+        "correct_command": 3,
+        "missed_command": 2,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      }
+    }
+  },
+  "qwen_native_calls": 10,
+  "qwen_valid_meanings": 4,
+  "qwen_contract_errors": 6,
+  "audio": {
+    "files": 8,
+    "reference_characters": 118,
+    "edit_distance": 0,
+    "reference_words": 20,
+    "word_edit_distance": 0,
+    "model_language": "en",
+    "requested_device": "cpu"
+  },
+  "model_manifests": [
+    {
+      "tag": "gemma4:12b",
+      "store": "/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/gemma4-12b",
+      "manifest_sha256": "6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b",
+      "referenced_bytes": 8021618941,
+      "blobs_present": true,
+      "weight_hashes_recomputed": false
+    },
+    {
+      "tag": "gemma4:e4b",
+      "store": "/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/gemma4-e4b",
+      "manifest_sha256": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+      "referenced_bytes": 9608350718,
+      "blobs_present": true,
+      "weight_hashes_recomputed": false
+    },
+    {
+      "tag": "qwen3.5:4b",
+      "store": "/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/qwen3.5-4b",
+      "manifest_sha256": "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04",
+      "referenced_bytes": 3324173934,
+      "blobs_present": true,
+      "weight_hashes_recomputed": false
+    },
+    {
+      "tag": "qwen3.5:9b",
+      "store": "/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/qwen3.5-9b",
+      "manifest_sha256": "56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90",
+      "referenced_bytes": 6550825550,
+      "blobs_present": true,
+      "weight_hashes_recomputed": false
+    }
+  ],
+  "source_hashes": {
+    "datasets/commands/l04_cases.jsonl": "7bd8c31aeb5c4081870887fc4b4c1cb00c44cb81b94d917b11853681b07a46f1",
+    "datasets/commands/l04_audio_cases.jsonl": "9fbf66595940a063075bf73ece42c943ef6708623fec8eceee00f33debeaee1c",
+    "src/kyrin/commands/demo_interpreter.py": "d3837d13d883e289571841d01fa0a783878ff52862075d3e39a783e1d6442814",
+    "src/kyrin/commands/model_interpreter.py": "aeda48157fdeb0b8c837a88cc0890f5ef5a3ed1b2b1f86bccf5a5835303ef3c2",
+    "src/kyrin/commands/ollama_engine.py": "54c5b5cdefaf70b57d44979ca3c5009dfe6bbb94b187ada4bfcf8266012f8756",
+    "src/kyrin/commands/coordinator.py": "b0a8caa1825740ffbdf7291839b8dea638979b1f9359ed3d34c97026f119b965",
+    "src/kyrin/stt/transcript.py": "c8aaef8531f1d8713e8b5b2dc33fb7d361579e80f51424ef989e159d093aed3e",
+    "src/kyrin/stt/backends/whisper.py": "9d00b4a63e0015e829bc7b56eac5ad86fdf4751cfb7521ebf5989e854efb7d88",
+    "src/kyrin/stt/backends/whisper_server.py": "685532e11c423ee012101a79529572c3e04683ff0d44840cf2a038700ee912cf",
+    "src/kyrin/stt/backends/vosk.py": "b162eaaad72df0249e7ce4f5f9873c152f6295f2d95074262146cdeb6ab39ffb",
+    "src/kyrin/stt/backends/omnilingual.py": "127bd6698c553161d326a2988d0efcf716bbcecebe68d1e0c7ed90e68789b500"
+  },
+  "no_desktop_actions": true,
+  "no_product_behavior_changes": true
+}

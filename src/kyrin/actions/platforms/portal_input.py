@@ -57,7 +57,7 @@ class PortalInputSession:
         self.status()
         if self.session is not None and self.devices & devices == devices:
             return self.status()
-        devices |= self.devices  # Extension only from explicit settings setup.
+        devices |= self.devices  # Settings setup/startup restore; never an action.
         self.close()
         if self.backend.version < 1 or self.backend.available & devices != devices:
             self.state = "unsupported"

@@ -42,9 +42,8 @@ def _coordinator(tmp_path: Path) -> CommandCoordinator:
     names = CatalogSpokenAppResolver(
         XdgDesktopAppCatalog((tmp_path,)), {"telegram.desktop": "telegram"}
     )
-    rules = DemoCommandInterpreter(
-        names, allowed_window_apps=frozenset({"telegram"})
-    )
+    rules = DemoCommandInterpreter(names, allowed_window_apps=frozenset({"telegram"}))
+
     class OverviewModel:
         def classify_confirmation(
             self, utterance: UnderstandingInput, *, question: str
@@ -59,21 +58,28 @@ def _coordinator(tmp_path: Path) -> CommandCoordinator:
                 (ProposedMeaning((MeaningStep(RequestedOperation.SHOW_ALL_WINDOWS),)),),
             )
 
-    return CommandCoordinator(ModelAssistedInterpreter(
-        rules, OverviewModel(), names,
-        allowed_apps=frozenset({"telegram"}),
-        supported_chat_apps=frozenset(),
-        action_review=rules.review_model_action,
-    ))
+    return CommandCoordinator(
+        ModelAssistedInterpreter(
+            rules,
+            OverviewModel(),
+            names,
+            allowed_apps=frozenset({"telegram"}),
+            supported_chat_apps=frozenset(),
+            action_review=rules.review_model_action,
+        )
+    )
 
 
-@pytest.mark.parametrize("utterance", (
-    "Show all open windows",
-    "Show all open apps",
-    "Let me see every running application window",
-    "تمام صفحات برنامه‌های باز را نشان بده",
-    "Montre toutes les fenêtres ouvertes",
-))
+@pytest.mark.parametrize(
+    "utterance",
+    (
+        "Show all open windows",
+        "Show all open apps",
+        "Let me see every running application window",
+        "تمام صفحات برنامه‌های باز را نشان بده",
+        "Montre toutes les fenêtres ouvertes",
+    ),
+)
 def test_semantic_request_then_choose_by_number_or_name(
     tmp_path: Path, utterance: str
 ) -> None:
@@ -108,12 +114,22 @@ def test_unknown_name_and_cancel_do_not_activate(tmp_path: Path) -> None:
     assert cancelled[0].intent.kind is CommandKind.HIDE_APP_WINDOWS
 
 
-@pytest.mark.parametrize("phrase", (
-    "close number two", "exit number 2", "quit two", "close 2",
-    "close the second window", "number two close", "شماره دو را ببند",
-    "دومی را ببند", "ببند پنجره ۲", "شماره دو ببند",
-    "please close window 2",
-))
+@pytest.mark.parametrize(
+    "phrase",
+    (
+        "close number two",
+        "exit number 2",
+        "quit two",
+        "close 2",
+        "close the second window",
+        "number two close",
+        "شماره دو را ببند",
+        "دومی را ببند",
+        "ببند پنجره ۲",
+        "شماره دو ببند",
+        "please close window 2",
+    ),
+)
 def test_numbered_close_requires_confirmation(tmp_path: Path, phrase: str) -> None:
     coordinator = _coordinator(tmp_path)
     coordinator.observe(_final(0, "Show all open windows"))
@@ -151,14 +167,17 @@ def test_numbered_close_cancellation_and_invalid_number(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("utterance", (
-    "Show all installed apps",
-    "Show all browser tabs",
-    "Do not show all open windows",
-    "همه پنجره‌ها را نشان نده",
-    "همه پنجره‌ها را نشان بده و تلگرام را باز کن",
-    "تمام صفحات را نشان بده",
-))
+@pytest.mark.parametrize(
+    "utterance",
+    (
+        "Show all installed apps",
+        "Show all browser tabs",
+        "Do not show all open windows",
+        "همه پنجره‌ها را نشان نده",
+        "همه پنجره‌ها را نشان بده و تلگرام را باز کن",
+        "تمام صفحات را نشان بده",
+    ),
+)
 def test_bad_model_proposal_cannot_turn_other_or_negative_requests_into_overview(
     tmp_path: Path, utterance: str
 ) -> None:
@@ -166,3 +185,25 @@ def test_bad_model_proposal_cannot_turn_other_or_negative_requests_into_overview
     result = coordinator.observe(_final(0, utterance))
     assert isinstance(result[0], CommandResolution)
     assert result[0].intent is None
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    (
+        "Powerz off this computer",
+        "Show every app",
+        "Type show all windows",
+        "The weather looks good",
+        'The words "show all windows" are on the screen',
+        "Show Telegram windows",
+    ),
+)
+def test_model_cannot_invent_window_overview_without_source_slots(
+    tmp_path: Path,
+    phrase: str,
+) -> None:
+    result = _coordinator(tmp_path).observe(_final(0, phrase))
+    assert not any(
+        isinstance(event, CommandResolution) and event.intent is not None
+        for event in result
+    )

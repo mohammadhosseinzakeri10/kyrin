@@ -8,7 +8,7 @@ import socket
 import subprocess
 import tempfile
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic, sleep
 from typing import cast
@@ -16,8 +16,10 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
 
+from kyrin.operations import remaining
 from kyrin.stt.device import ComputeDevice
 from kyrin.stt.errors import DeviceUnavailableError, SpeechToTextError
+from kyrin.stt.evidence import SpeechEvidence, SpeechScore
 
 _HTTP = build_opener(ProxyHandler({}))
 
@@ -42,6 +44,7 @@ _LANGUAGE_CODES = {
 class WhisperResult:
     text: str
     language: str | None
+    evidence: SpeechEvidence | None = field(default=None, compare=False)
 
 
 def _free_loopback_port() -> int:
@@ -184,7 +187,7 @@ class WhisperCppServer:
             method="POST",
         )
         try:
-            with _HTTP.open(request, timeout=8) as response:
+            with _HTTP.open(request, timeout=remaining(8)) as response:
                 payload = json.load(response)
         except (OSError, URLError, ValueError) as exc:
             raise SpeechToTextError("local Whisper inference failed") from exc
@@ -201,6 +204,38 @@ class WhisperCppServer:
             else self._request_inference(pcm, language, "json")
         )
         return cast(str, payload["text"]).strip()
+
+    def transcribe_detailed(
+        self,
+        pcm: bytes,
+        language: str,
+        *,
+        hints: tuple[str, ...] = (),
+    ) -> WhisperResult:
+        payload = self._request_inference(pcm, language, "verbose_json", hints)
+        return WhisperResult(
+            cast(str, payload["text"]).strip(), language, self._evidence(payload)
+        )
+
+    @staticmethod
+    def _evidence(payload: dict[str, object]) -> SpeechEvidence:
+        scores: list[SpeechScore] = []
+        segments = payload.get("segments")
+        if isinstance(segments, list):
+            for index, segment in enumerate(segments[:32]):
+                if not isinstance(segment, dict):
+                    continue
+                for key in ("avg_logprob", "no_speech_prob"):
+                    value = segment.get(key)
+                    if (
+                        isinstance(value, (int, float))
+                        and not isinstance(value, bool)
+                        and math.isfinite(value)
+                    ):
+                        scores.append(
+                            SpeechScore(f"segment_{index}.{key}", float(value))
+                        )
+        return SpeechEvidence("whisper.cpp", scores=tuple(scores))
 
     def transcribe_auto(
         self, pcm: bytes, *, hints: tuple[str, ...] = ()
@@ -234,7 +269,9 @@ class WhisperCppServer:
             }
             if valid:
                 code = max(valid, key=lambda language: valid[language])
-        return WhisperResult(cast(str, payload["text"]).strip(), code)
+        return WhisperResult(
+            cast(str, payload["text"]).strip(), code, self._evidence(payload)
+        )
 
     def close(self) -> None:
         if self._process.poll() is None:

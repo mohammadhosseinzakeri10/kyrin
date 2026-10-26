@@ -129,6 +129,24 @@ class CommandCoordinator:
         observed_scroll_app: str | None = None,
     ) -> Sequence[CommandEvent]:
         """Observe one update; pass a fresh OS observation, never cached context."""
+        try:
+            return self._observe(
+                update,
+                observed_active_app=observed_active_app,
+                observed_scroll_app=observed_scroll_app,
+            )
+        finally:
+            if update.retained_audio is not None:
+                update.retained_audio.close()
+
+    def _observe(
+        self,
+        update: TranscriptUpdate,
+        *,
+        observed_active_app: str | None = None,
+        observed_scroll_app: str | None = None,
+    ) -> Sequence[CommandEvent]:
+        """Observe one update; pass a fresh OS observation, never cached context."""
         if update.segment_id <= self._finalized_through:
             return ()
         if self._segment_id is not None and update.segment_id < self._segment_id:
@@ -204,6 +222,9 @@ class CommandCoordinator:
                 and observed_active_app == "telegram"
                 and monotonic() - self._telegram_settings_context_at
                 <= _TELEGRAM_SETTINGS_CONTEXT_SECONDS,
+                speech_evidence=update.evidence,
+                retained_audio=update.retained_audio,
+                transcript_emitted_ns=update.emitted_ns,
             ),
             pending=self._pending,
         )
