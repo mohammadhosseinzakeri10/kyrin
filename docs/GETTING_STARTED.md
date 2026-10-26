@@ -7,15 +7,17 @@ There is no single download containing every model and runtime.
 ## 1. Install the development application
 
 Use Python 3.14 or newer. The reproducible check profile is CPython 3.14.4 on
-Linux x86_64. Desktop adapters target Ubuntu/GNOME; owner live validation was
-on Ubuntu 26.04 / GNOME Shell 50. Headless CI on Ubuntu 24.04 does not establish
-live integration support for its desktop version.
+Ubuntu 26.04 x86_64. Desktop adapters target Ubuntu/GNOME; owner live validation
+was on Ubuntu 26.04 / GNOME Shell 50. Headless CI uses Ubuntu 26.04; it does not
+establish live desktop integration on the runner. Portal helpers additionally
+require the system `/usr/bin/python3` to support Python 3.14+ and provide GI.
+Installing a separate application Python does not upgrade that interpreter.
 
 On Ubuntu, install missing system libraries:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg
+sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatcher
 ```
 
 From a clone of this repository:
@@ -41,7 +43,9 @@ install the `desktop` extra for Qt plus Sherpa local TTS support:
 ```
 
 The optional-extra command resolves compatible versions from `pyproject.toml`;
-it is not the pinned check-environment installation. Other optional runtimes
+it is not the pinned check-environment installation. System voice settings use
+`spd-say` from the Ubuntu `speech-dispatcher` package; no speech daemon is
+required for the headless checks. Other optional runtimes
 may require their own Python environments and compatible hardware.
 
 A missing STT selection opens setup without microphone capture. No speech
@@ -170,6 +174,8 @@ for initial tests.
   speech runtime are different setup failures. Include the exact error in a
   bug report after removing private paths/content.
 
-For the developer gate, install `gjs`, `dbus-daemon`, `systemd` and the pinned
-`requirements/dev.txt`, then run `scripts/development/check.py`. See
+For the developer gate, install `gjs`, `dbus-daemon`, `systemd`, `python3-gi`,
+`gir1.2-glib-2.0` and `bubblewrap`, plus the pinned `requirements/dev.txt`, then
+run `scripts/development/check.py`. The gate constructs protected OCR commands
+and uses inert workers; it does not run downloaded model code. See
 [validation](VALIDATION.md) and [quality setup](development/QUALITY_CHECKS.md).

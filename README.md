@@ -61,7 +61,7 @@ The dashboard also has optional animated CPU/GPU renderers.
 
 - Python **3.14+**. The pinned development environment uses **3.14.4**.
 - Linux for the development setup; Ubuntu with GNOME for desktop integration.
-  Owner live checks were on Ubuntu 26.04 / GNOME 50. CI uses Ubuntu 24.04
+  Owner live checks were on Ubuntu 26.04 / GNOME 50. CI uses Ubuntu 26.04
   without a live desktop session. Windows and macOS adapters are not provided.
 - PortAudio and the Qt system libraries. Model-backed features need additional
   local files/runtimes; GPU operation is optional.
@@ -70,7 +70,7 @@ On Ubuntu, install the system libraries if they are missing:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg
+sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatcher
 ```
 
 Clone the source and install the pinned core and Qt environment:
@@ -138,7 +138,7 @@ Read the [current architecture](docs/architecture/OVERVIEW.md),
 Install the remaining system tools and pinned development dependencies:
 
 ```bash
-sudo apt-get install -y gjs dbus-daemon systemd
+sudo apt-get install -y gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 bubblewrap
 .venv/bin/python -m pip install -r requirements/dev.txt
 .venv/bin/python -m pip check
 .venv/bin/python scripts/development/check.py

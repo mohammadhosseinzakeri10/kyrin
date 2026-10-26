@@ -1,5 +1,17 @@
 # KYRIN — Project Context
 
+**First real publication CI environment correction — 2026-10-26:** GitHub
+Actions on the previous Ubuntu 24.04 runner passed syntax, Ruff and strict
+mypy but reported 28 failed and 2548 passing tests. The private Gio fixture
+launches /usr/bin/python3, which on that runner rejected Python 3.14 exception
+syntax. Other failures traced to missing spd-say and bwrap in settings/OCR
+checks. CI now uses the officially available ubuntu-26.04 image, matching the
+project's system-Python/GI target, and explicitly installs GI bindings, Speech
+Dispatcher and Bubblewrap. Preflight checks system Python >=3.14, Gio imports
+and executable presence. No tests/guards were removed, skipped or relaxed.
+Public setup/validation notes state the system-Python requirement separately
+from the application venv; remote revalidation remains necessary.
+
 **Initial public portfolio release preparation — 2026-10-26:** The owner
 requested publishing the current implementation as the initial open-source
 portfolio version, with later versions planned to remain private. The existing

@@ -39,6 +39,22 @@ versioned templates; this also prevents cached packaging file lists from
 reintroducing those local manifests. Source contents are inspected locally
 before release assets are uploaded.
 
+## First remote run and environment correction
+
+The first GitHub Actions run on Ubuntu 24.04 passed syntax, Ruff and strict
+mypy, then reported 28 failed and 2,548 passing tests. The private Gio portal
+fixture used `/usr/bin/python3`, whose older grammar rejected Python 3.14
+exception syntax. Other failures came from missing `spd-say` and `bwrap`: those
+executables are checked while validating voice settings and protected OCR
+commands, including tests using inert workers.
+
+CI now targets Ubuntu 26.04, aligned with the supported system-Python/GI
+environment, and explicitly installs/checks those tools and GI bindings. No
+test was removed or skipped and no authorization/sandbox boundary was relaxed.
+The available runner label was verified against the official
+[runner image catalog](https://github.com/actions/runner-images#available-images).
+The live workflow link above identifies subsequent results.
+
 ## Live evidence inherited from development
 
 - The owner reported successful selected app-opening, Telegram Saved Messages
