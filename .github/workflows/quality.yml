@@ -31,12 +31,13 @@ jobs:
       - name: Install system test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libportaudio2 libegl1 libopengl0 ffmpeg gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 speech-dispatcher bubblewrap
+          sudo apt-get install -y --no-install-recommends libportaudio2 libegl1 libopengl0 ffmpeg gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 speech-dispatcher bubblewrap
       - name: Verify system helper prerequisites
         run: |
           /usr/bin/python3 -c "import sys; assert sys.version_info >= (3, 14), 'Portal helpers require system Python 3.14+'; from gi.repository import Gio, GLib"
           command -v spd-say
           command -v bwrap
+          gjs -c 'const GdkPixbuf = imports.gi.GdkPixbuf;'
       - name: Install pinned Python dependencies
         run: |
           python -m pip install -r requirements/bootstrap.txt

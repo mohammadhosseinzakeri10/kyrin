@@ -63,6 +63,14 @@ more than 60 seconds; this is diagnostic output, not a relaxed timeout or a
 passing exception. Branch pushes use PR validation; pushes to main validate
 the published merge.
 
+A later diagnostic run exposed a test-only lifetime bug: the fake live session
+expired after two seconds, so a slow CI event loop could reach an unmocked
+history-confirmation dialog and wait indefinitely. The fake now stays alive
+until explicit controller stop, as the scenario requires; the test fails
+immediately if a live producer opens the confirmation dialog. This changes
+no production timeout or permission check. GJS image tests also explicitly
+require the GdkPixbuf GI typelib, now installed and checked during CI setup.
+
 ## Live evidence inherited from development
 
 - The owner reported successful selected app-opening, Telegram Saved Messages

@@ -105,7 +105,9 @@ class FakeSession:
 
     def run(self) -> None:
         self.running.set()
-        assert self.stopped.wait(2)
+        # Model a live session until the controller explicitly stops it.
+        # Rendering on a CI host must not silently end the fake producer.
+        self.stopped.wait()
 
     def stop(self) -> None:
         self.stopped.set()
@@ -441,7 +443,11 @@ def test_history_mutation_waits_for_producer_shutdown(
         def forbidden_path() -> Path:
             pytest.fail("a live producer must block database mutation")
 
+        def forbidden_confirmation(*_args: object) -> None:
+            pytest.fail("a live producer must block history confirmation")
+
         monkeypatch.setattr("kyrin.app.qt.window.default_history_path", forbidden_path)
+        monkeypatch.setattr(QMessageBox, "question", forbidden_confirmation)
         window.clear_memory_button.click()
         assert window.feedback_label.text() == window._translations.text(
             "history_stop_first"

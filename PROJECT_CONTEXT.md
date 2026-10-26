@@ -1,5 +1,16 @@
 # KYRIN — Project Context
 
+**Publication CI diagnostics and test-session lifetime — 2026-10-26:** A
+streamed verbose run with a 60-second faulthandler dump located the stall in
+test_history_mutation_waits_for_producer_shutdown at the real history modal.
+FakeSession.run had a two-second automatic expiry, allowing a slow CI event
+loop to observe a stopped producer and enter an unmocked confirmation. The
+fake now waits for explicit stop, and the test rejects any unexpected modal
+immediately. No production lifetime, action guard or test case was removed.
+CI explicitly installs/checks the GdkPixbuf GI typelib used by GJS PNG tests.
+Verbose logs are streamed without changing the full checker; branch pushes
+validate via the PR, and main pushes validate the merged source.
+
 **First real publication CI environment correction — 2026-10-26:** GitHub
 Actions on the previous Ubuntu 24.04 runner passed syntax, Ruff and strict
 mypy but reported 28 failed and 2548 passing tests. The private Gio fixture

@@ -175,7 +175,7 @@ for initial tests.
   bug report after removing private paths/content.
 
 For the developer gate, install `gjs`, `dbus-daemon`, `systemd`, `python3-gi`,
-`gir1.2-glib-2.0` and `bubblewrap`, plus the pinned `requirements/dev.txt`, then
+`gir1.2-glib-2.0`, `gir1.2-gdkpixbuf-2.0` and `bubblewrap`, plus the pinned `requirements/dev.txt`, then
 run `scripts/development/check.py`. The gate constructs protected OCR commands
 and uses inert workers; it does not run downloaded model code. See
 [validation](VALIDATION.md) and [quality setup](development/QUALITY_CHECKS.md).
