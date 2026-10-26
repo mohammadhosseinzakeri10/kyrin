@@ -1,134 +1,179 @@
-# KYRIN
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/brand/hero-still.webp">
+    <img src="assets/brand/hero-motion.gif" alt="KYRIN by Kailarin, a blue and violet desktop-agent emblem" width="1200">
+  </picture>
+</p>
 
-An open-source, modular AI desktop agent under active development.
+<h1 align="center">KYRIN</h1>
+<p align="center">
+  A local-first voice desktop agent with permission-gated actions.<br>
+  Built by <a href="https://github.com/mohammadhosseinzakeri10">Mohammad Hossein Zakeri</a> · Kailarin
+</p>
+<p align="center">
+  <a href="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml"><img src="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml/badge.svg?branch=main" alt="Python quality checks"></a>
+  <a href="LICENSE">MIT license</a> · Python 3.14+ · Ubuntu / GNOME · v0.1.0 alpha
+</p>
+<p align="center">
+  <a href="#try-it">Try it</a> · <a href="docs/architecture/OVERVIEW.md">Architecture</a> ·
+  <a href="docs/README.md">Documentation</a> · <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-For a map of the source, tests, models, and installed local data, see
-[project layout](docs/development/PROJECT_LAYOUT.md).
+KYRIN connects continuous speech recognition to bounded command understanding
+and desktop actions. Audio capture, recognition, interpretation, authorization,
+and execution have separate contracts, so replacing a speech engine does not
+require rewriting desktop control.
 
-## Vision
+**This is the initial open-source portfolio release, distributed as source.**
+It is an experimental developer project, not a portable installer or a general
+computer-use assistant. Later versions are planned to be developed privately;
+this release remains available under the MIT license. See the
+[release policy](docs/RELEASE_POLICY.md).
 
-KYRIN is an intelligent AI agent designed to understand voice, vision, and text, and interact with the operating system naturally like a human.
+## What works today
 
-## Current status
+| Area | Implementation | Limits |
+| --- | --- | --- |
+| Speech input | Continuous microphone pipeline, VAD, local-file replay; Vosk, whisper.cpp and isolated Omnilingual adapters | Recognition requires separately acquired models and compatible runtimes |
+| Command understanding | Deterministic rules, optional local Ollama proposals, bounded speech-error recovery and numbered clarification | Arbitrary requests and universal multilingual control are not supported |
+| Desktop actions | Allowed app launch/activation, window controls, scrolling and named visible controls | Ubuntu/GNOME adapters; some actions need the bundled GNOME extension and portal consent |
+| Observation | AT-SPI accessibility and optional screen/OCR readers | Missing, ambiguous, stale or unsupported observations can block an action |
+| Control center | PySide6 settings, local model library, English/Persian UI, optional local TTS and status character | Optional engines, GPU drivers and model packages need separate setup |
+| Permissions | Per-capability grants, app selection, persistent portal session restoration and revocation | Grants do not establish target correctness; each action performs its own checks |
 
-KYRIN runs as a local Ubuntu/GNOME desktop application with continuous
-microphone listening, a PySide6 control center, and an optional movable GNOME
-status character. Its components separate audio acquisition, replaceable STT,
-bounded command understanding, permission-gated actions, optional screen/OCR
-observation, TTS, and responses. The current user's session can start KYRIN at
-login; the control center can pause listening or quit. Opening the launcher
-again activates the existing window. This development installation is not yet
-a portable, self-contained release.
+Live owner checks cover selected application, Telegram and visible-control
+scenarios. They do not establish support for every application, distribution or
+recognizer. The [validation notes](docs/VALIDATION.md) distinguish deterministic
+tests from live desktop evidence and remaining gaps.
 
-The control center has separate pages for audio input, speech recognition,
-local speech models, command understanding, voice output, desktop actions,
-screen access, and preferences. English and Persian interface text are built
-in; other interface languages can be imported from local JSON packs. The
-selected black-hole K logo appears in the window and Ubuntu launcher. Models
-are selected from local files; KYRIN does not download model weights in the
-application. The **Model Library** shows installed STT models in All, CPU,
-and GPU views and stores compatible Whisper weights only once. See
-[model library](docs/app/MODEL_LIBRARY.md),
-[interface language packs](docs/app/UI_LANGUAGE_PACKS.md), and
-[voice management](docs/responses/TTS_MODEL_MANAGEMENT.md).
+## A look at the application
 
-The current Ubuntu action path can open or activate explicitly allowed apps,
-control supported windows, and show a numbered open-window overview. Telegram
-Saved Messages and named-chat selection have passed live speech-to-action
-checks, including the owner's choice of a second visible same-name chat.
-Other layouts and Persian titles still need live validation. Screen and
-keyboard permissions can be remembered and
-revoked in the app. System power actions require separate permission and two
-confirmations; the owner has also reported successful real Power Off and
-Restart voice flows, while Logout and Suspend remain unverified live.
-Finalized speech text can be retained in a bounded local conversation history;
-audio is not stored by that feature.
+![KYRIN control center](docs/images/control-center.png)
 
-For spoken command examples and their meanings, see the [Persian command guide](docs/commands/USER_COMMAND_GUIDE_FA.md).
+The real Qt control window rendered in an isolated preview with default settings;
+no microphone, personal desktop session or model was used for this image.
+The dashboard also has optional animated CPU/GPU renderers.
 
-Vosk currently runs on CPU. Whisper can use CPU or a separately installed
-CUDA runtime on supported NVIDIA hardware; the same weights serve both. A
-local Omnilingual ASR runtime can use one of six separately stored v2
-checkpoints through an isolated Python worker. Its model comparison and
-current hardware limits are documented in
-[local speech model comparison](docs/stt/LOCAL_MODEL_COMPARISON_FA.md). A
-local Ollama command model can assist the live interpreter behind independent
-source-text and action-permission checks. The interpreter is still bounded:
-automatic language detection, arbitrary phrasing, and general multilingual
-desktop control are not guaranteed. STT, TTS, and command-model weights are
-not bundled by default.
-See [Whisper GPU execution](docs/stt/WHISPER_GPU_EXECUTION.md),
-[command-model integration](docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md), and
-[OCR architecture](docs/vision/OCR_ARCHITECTURE.md).
+## Try it
 
-## Development entry point
+### Requirements
 
-For pinned check-environment dependencies and the shared local/CI quality gate,
-see [quality checks](docs/development/QUALITY_CHECKS.md). These checks need no
-external model weights or personal data; existing type-check failures remain
-visible and fail the gate.
+- Python **3.14+**. The pinned development environment uses **3.14.4**.
+- Linux for the development setup; Ubuntu with GNOME for desktop integration.
+  Owner live checks were on Ubuntu 26.04 / GNOME 50. CI uses Ubuntu 24.04
+  without a live desktop session. Windows and macOS adapters are not provided.
+- PortAudio and the Qt system libraries. Model-backed features need additional
+  local files/runtimes; GPU operation is optional.
 
-Python 3.14 or newer is required by the current package. From a configured
-development environment, inspect the microphone diagnostic options with:
+On Ubuntu, install the system libraries if they are missing:
 
 ```bash
-.venv/bin/python scripts/audio/check_live_speech.py --help
+sudo apt-get update
+sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg
 ```
 
-The diagnostic needs an explicit local STT model and language for speech or
-command modes. Whisper runs on CPU by default in this diagnostic; pass
-`--compute-device gpu` with a working GPU-enabled `--whisper-server` to test
-the GPU path. Application execution additionally requires `--execute-actions`
-and an explicit `--launch-app` binding. See
-[live application launch](docs/actions/LIVE_OPEN_APP_INTEGRATION.md) and
-[local models](models/README.md). No microphone audio is saved by the
-diagnostic. See [project context](PROJECT_CONTEXT.md) for confirmed state,
-experiments, and remaining limitations.
-
-For the development control window, install the optional desktop dependency
-in a connected development environment, then run:
+Clone the source and install the pinned core and Qt environment:
 
 ```bash
-.venv/bin/python -m pip install -e '.[desktop]'
-.venv/bin/python -m kyrin.app.qt.main
+git clone https://github.com/mohammadhosseinzakeri10/kyrin.git
+cd kyrin
+git checkout v0.1.0
+export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
+export HF_HOME="$PWD/local-data/cache/huggingface"
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements/bootstrap.txt
+.venv/bin/python -m pip install -r requirements/core.txt -r requirements/test-ui.txt
+.venv/bin/python -m pip install --no-build-isolation --no-deps -e .
+.venv/bin/kyrin-desktop
 ```
 
-The window uses `$XDG_CONFIG_HOME/kyrin/settings.json`, or
-`~/.config/kyrin/settings.json` when the XDG variable is unset. It does not
-create this file until settings are saved. A Whisper model also needs a local
-`whisper-server` executable beside the installed `kyrin-desktop` script or on
-`PATH`, or an absolute executable path in `KYRIN_WHISPER_SERVER`. For Whisper
-GPU, provide a CUDA-enabled `whisper-server-gpu` in either executable location
-or set `KYRIN_WHISPER_GPU_SERVER` to its absolute path. The app shows the
-device actually opened by STT. Explicit GPU selection
-reports an error if the GPU runtime cannot start, while AUTO can use the CPU
-runtime if GPU startup fails. Vosk still runs on CPU. The close
-button minimizes the window while listening continues; use **Quit KYRIN** to
-stop and exit. The **Voice Output** page selects local voices by language,
-including Persian Piper/VITS packages and supported Kokoro packages, along with speaking speed and
-compute preference. It can play a short sample. See
-[voice model management](docs/responses/TTS_MODEL_MANAGEMENT.md).
+This opens the control center for setup. With no selected speech model, KYRIN
+does not start microphone capture. The Qt-only preview does not need optional
+speech engines; using those features does. The `desktop` extra additionally
+installs the Sherpa speech-output runtime; see the
+[installation guide](docs/GETTING_STARTED.md) for the available paths.
 
-In **Preferences**, **Start KYRIN when I sign in** registers a per-user XDG
-autostart entry and desktop-menu launcher. Turning it off removes only the
-KYRIN autostart entry; the menu launcher remains. The entry points to the
-current `kyrin-desktop` installation. If this development environment moves
-or is removed, install KYRIN at its new location and reapply the setting.
-The saved `start_at_login` flag alone does not install an entry; use the
-Preferences control. With no STT model selected, startup opens the control
-window in setup mode without opening the microphone.
+For a first speech session, import a supported local STT model through **Model
+Library**, select it in **Speech Recognition**, and choose a microphone in
+**Audio Input**. Start with CPU recognition and desktop actions disabled.
+[Configure desktop integration](docs/GETTING_STARTED.md#desktop-integration)
+only when needed. Weights, recordings, permission tokens and user settings are
+not included in this repository. The small bundled Silero VAD model has its
+own retained [license notice](THIRD_PARTY_NOTICES.md).
 
-## Roadmap
+Closing the window minimizes it while the application continues running.
+Use **Quit KYRIN** to exit. Spoken standby pauses command handling; **Turn off
+microphone completely** stops capture. See the
+[command guide (Persian)](docs/commands/USER_COMMAND_GUIDE_FA.md).
 
-- Voice Interaction
-- Vision Understanding
-- Desktop Automation
-- Cross-Platform Support
+## Architecture at a glance
 
-## Package version
+```mermaid
+flowchart LR
+    A[Microphone / audio file] --> B[Audio framing and VAD]
+    B --> C[Replaceable STT backend]
+    C --> D[Bounded command understanding]
+    D --> E[Permission and target checks]
+    E --> F[Ubuntu / GNOME executor]
+    F --> G[Postconditions and response]
+    O[Fresh desktop observations] --> D
+    O --> E
+    G --> H[Qt UI / optional local TTS]
+```
 
-0.1.0 (early development)
+The command model proposes meaning; it does not receive unrestricted shell
+execution. Raw microphone acquisition does not contain STT or agent logic.
+Fresh window identity, cancellation and observation deadlines help prevent old
+requests from acting on a replacement target. A dispatched action can still
+have an unverified outcome; the UI preserves that distinction.
 
-## License
+Read the [current architecture](docs/architecture/OVERVIEW.md),
+[source map](docs/development/PROJECT_LAYOUT.md),
+[control policy](docs/actions/CONTROL_POLICY.md) and
+[security boundaries](SECURITY.md).
 
-MIT License
+## Development and verification
+
+Install the remaining system tools and pinned development dependencies:
+
+```bash
+sudo apt-get install -y gjs dbus-daemon systemd
+.venv/bin/python -m pip install -r requirements/dev.txt
+.venv/bin/python -m pip check
+.venv/bin/python scripts/development/check.py
+```
+
+The same gate runs in GitHub Actions: syntax checks, Ruff, strict mypy and the
+complete deterministic test suite. It uses an isolated temporary home and
+headless Qt; external speech weights and a personal GNOME session are not
+required. Logs are written to `local-data/quality/`. CI also builds source and
+wheel distributions and checks that the wheel includes required assets.
+
+See [validation](docs/VALIDATION.md) for results and
+[quality setup (Persian)](docs/development/QUALITY_CHECKS.md) for the environment
+history. Deterministic tests are not a replacement for hardware and live-model
+acceptance checks.
+
+## Contributing and support
+
+Use [issues](https://github.com/mohammadhosseinzakeri10/kyrin/issues) for
+reproducible bugs and focused proposals. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+before changing code. Public-facing entry documentation is in English; many
+engineering and learning notes are in Persian and retain their original
+language. Historical plans are not promises of released features.
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Do not attach personal recordings, screenshots, settings or access tokens to
+public reports. This is a personal project with no guaranteed response or
+maintenance schedule.
+
+## License and attribution
+
+KYRIN source is released under the [MIT License](LICENSE), copyright 2026
+Mohammad Hossein Zakeri. See [third-party notices](THIRD_PARTY_NOTICES.md) for
+bundled material and optional-runtime/model licensing boundaries.
+
+The project was developed with AI assistance. The maintainer directs the
+design and reviews changes; verification claims refer to the checks and
+explicitly bounded live reports documented in this repository.

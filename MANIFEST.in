@@ -1,0 +1,19 @@
+include *.md LICENSE pyproject.toml
+recursive-include requirements *.txt
+recursive-include scripts *.py
+recursive-include tests *.py
+recursive-include docs *.md *.png
+recursive-include datasets *.md *.json *.jsonl .gitignore
+recursive-exclude datasets/stt manifest*.csv
+include datasets/stt/manifest.template.csv
+include datasets/stt/manifest.*.template.csv
+recursive-include models README.md .gitignore
+recursive-include integrations *.js *.json *.svg *.css
+recursive-include assets/brand *.md *.py *.png *.jpg *.svg *.gif *.webp
+prune local-data
+prune models/local
+prune models/archive
+prune datasets/stt/recordings
+prune datasets/stt/results
+prune datasets/commands/results
+global-exclude __pycache__ *.py[cod]

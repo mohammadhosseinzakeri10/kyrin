@@ -1,15 +1,26 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 
 [project]
 name = "kyrin"
 version = "0.1.0"
-description = "An open-source modular AI Desktop Agent."
+description = "A local-first voice desktop agent with permission-gated Ubuntu/GNOME actions."
 readme = "README.md"
 requires-python = ">=3.14"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "src/kyrin/audio/activity/models/LICENSE.silero"]
+keywords = ["desktop-agent", "speech-recognition", "voice-control", "local-ai", "gnome"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 
 authors = [
     { name = "Mohammad Hossein Zakeri" },
@@ -57,6 +68,9 @@ kyrin-desktop = "kyrin.app.qt.main:main"
 
 [project.urls]
 Repository = "https://github.com/mohammadhosseinzakeri10/kyrin"
+Documentation = "https://github.com/mohammadhosseinzakeri10/kyrin/blob/main/docs/README.md"
+Issues = "https://github.com/mohammadhosseinzakeri10/kyrin/issues"
+Changelog = "https://github.com/mohammadhosseinzakeri10/kyrin/blob/main/CHANGELOG.md"
 
 
 # ---------------------------------------------------------------------------

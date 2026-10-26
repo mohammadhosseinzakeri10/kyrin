@@ -1,5 +1,22 @@
 # KYRIN — Project Context
 
+**Initial public portfolio release preparation — 2026-10-26:** The owner
+requested publishing the current implementation as the initial open-source
+portfolio version, with later versions planned to remain private. The existing
+public GitHub main contained an older overview, not the local implementation.
+A publication branch merged that history, retaining its presentation assets
+and the current architecture requirements. Existing MIT licensing is retained;
+public-release policy explicitly preserves rights to already published copies
+and makes no promise to publish later private versions. Added public install,
+architecture, validation and contribution guides, security/conduct policies,
+issue/PR templates, changelog, third-party notices and release metadata. CI
+actions use verified commit SHAs and build source/wheel distributions. Source
+packaging explicitly excludes local STT manifests even with cached file lists.
+The full original local gate passed syntax, Ruff, strict mypy on 429 files and
+all 2576 tests in 150.76 seconds. Local wheel build/install/resource checks pass;
+no new hardware, model or live desktop validation was performed. Publication
+and remote CI outcomes are tracked in docs/VALIDATION.md. L04 remains open.
+
 **L04 local visible-control acceptance — 2026-10-26, owner confirmed:** After
 the directional-action fix, the owner explicitly reports that the requested
 commands were tested and all worked correctly. Together with the preceding
