@@ -1,0 +1,144 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "kyrin"
+version = "0.1.0"
+description = "A local-first voice desktop agent with permission-gated Ubuntu/GNOME actions."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "src/kyrin/audio/activity/models/LICENSE.silero"]
+keywords = ["desktop-agent", "speech-recognition", "voice-control", "local-ai", "gnome"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+authors = [
+    { name = "Mohammad Hossein Zakeri" },
+]
+
+dependencies = [
+    "numpy>=2.0",
+    "onnxruntime>=1.30,<2",
+    "soxr>=1.1.0",
+    "sounddevice>=0.5.6",
+]
+
+
+[project.optional-dependencies]
+desktop = [
+    "PySide6_Essentials>=6.10,<7",
+    "sherpa-onnx>=1.13,<2",
+]
+stt-vosk = [
+    "vosk>=0.3.45,<0.4",
+]
+tts-kitten = [
+    "sherpa-onnx>=1.13,<2",
+]
+tts-sherpa = [
+    "sherpa-onnx>=1.13,<2",
+]
+tts-chatterbox = [
+    "chatterbox-tts>=0.1.7,<1",
+]
+tts-qwen = [
+    "qwen-tts>=0.1.1,<1",
+]
+dev = [
+    "coverage>=7.0",
+    "mypy>=2.0",
+    "pytest>=9.0",
+    "ruff>=0.16",
+]
+
+
+[project.scripts]
+kyrin-desktop = "kyrin.app.qt.main:main"
+
+
+[project.urls]
+Repository = "https://github.com/mohammadhosseinzakeri10/kyrin"
+Documentation = "https://github.com/mohammadhosseinzakeri10/kyrin/blob/main/docs/README.md"
+Issues = "https://github.com/mohammadhosseinzakeri10/kyrin/issues"
+Changelog = "https://github.com/mohammadhosseinzakeri10/kyrin/blob/main/CHANGELOG.md"
+
+
+# ---------------------------------------------------------------------------
+# Setuptools
+# ---------------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"kyrin.audio.activity.models" = ["*.onnx", "LICENSE.silero", "README.md"]
+"kyrin.app.qt" = ["assets/*.png", "assets/*.json"]
+
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+]
+
+
+[tool.ruff.format]
+quote-style = "double"
+
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unused_configs = true
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["."]
+
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+
+[tool.coverage.run]
+branch = true
+source = ["kyrin"]
+
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

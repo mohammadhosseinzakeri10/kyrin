@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="120" viewBox="0 0 96 120">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a530ff"/>
+      <stop offset="0.55" stop-color="#7130f8"/>
+      <stop offset="1" stop-color="#087dff"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#73f0ff"/>
+      <stop offset="1" stop-color="#525bff"/>
+    </linearGradient>
+  </defs>
+  <!-- Wide, simple limbs remain legible when the character is small. -->
+  <path d="M33 83 L31 101 Q30 107 36 108 L43 108 Q46 107 46 102 L45 85 Z" fill="#5525c8" stroke="#36b9ff" stroke-width="2.5"/>
+  <path d="M52 85 L50 102 Q50 108 55 108 L63 108 Q68 106 65 101 L63 83 Z" fill="#5525c8" stroke="#36b9ff" stroke-width="2.5"/>
+  <path d="M29 101 Q21 103 22 109 Q27 113 43 110 L44 106 Z" fill="#1759cf" stroke="#73eaff" stroke-width="2"/>
+  <path d="M54 106 L64 101 Q73 103 73 109 Q66 113 52 110 Z" fill="#1759cf" stroke="#73eaff" stroke-width="2"/>
+  <path d="M29 60 Q19 62 17 75 L14 83 Q15 89 21 88 Q27 84 30 73 L36 68 Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="2.5"/>
+  <path d="M67 60 Q77 62 79 75 L82 83 Q81 89 75 88 Q69 84 66 73 L60 68 Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="2.5"/>
+  <circle cx="17" cy="87" r="6" fill="#1c71e9" stroke="#70edff" stroke-width="2"/>
+  <circle cx="79" cy="87" r="6" fill="#1c71e9" stroke="#70edff" stroke-width="2"/>
+  <path d="M34 59 Q48 54 62 59 L69 78 Q64 90 48 92 Q32 90 27 78 Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="3"/>
+  <path d="M24 28 L18 18 Q24 19 30 23 M72 28 L78 18 Q72 19 66 23" fill="#8d2cff" stroke="#63dcff" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M16 40 Q16 17 48 15 Q80 17 80 40 Q80 63 48 65 Q16 63 16 40 Z" fill="url(#shell)" stroke="#72eaff" stroke-width="3.5"/>
+  <path d="M22 38 Q22 26 48 24 Q74 26 74 38 L72 48 Q69 58 48 59 Q27 58 24 48 Z" fill="#161342" stroke="#3959ff" stroke-width="2"/>
+  <path d="M31 38 Q36 33 42 39 Q40 45 35 45 Q31 44 31 38 Z M65 38 Q60 33 54 39 Q56 45 61 45 Q65 44 65 38 Z" fill="#55e9ff"/>
+  <circle cx="38" cy="39" r="1.5" fill="#d2ffff"/>
+  <circle cx="58" cy="39" r="1.5" fill="#d2ffff"/>
+  <path d="M45 50 Q48 52 51 50" fill="none" stroke="#73b8ff" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- The core suggests a black hole without fine detail. -->
+  <circle cx="48" cy="75" r="10" fill="#15103e" stroke="#42c7ff" stroke-width="3"/>
+  <ellipse cx="48" cy="75" rx="13" ry="5" transform="rotate(-23 48 75)" fill="none" stroke="#9e4cff" stroke-width="2.5"/>
+  <circle cx="48" cy="75" r="4" fill="#0d0b2d"/>
+  <circle cx="35" cy="74" r="1.2" fill="#a8edff"/>
+  <circle cx="61" cy="80" r="1.2" fill="#a8edff"/>
+</svg>

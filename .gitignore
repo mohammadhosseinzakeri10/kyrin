@@ -51,6 +51,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Local transient session identifier (not project source)
+/:memory:.ses
+
 # Translations
 *.mo
 *.pot
@@ -149,6 +152,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -216,3 +221,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Machine-local KYRIN models, optional runtimes, and download tools.
+/local-data/

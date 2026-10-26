@@ -1,0 +1,76 @@
+# Ordered commands in the English V1 diagnostic
+
+## Scope
+
+An English final transcript can describe two explicit steps, such as
+`Open Telegram and open Alice chat` or `Open Telegram and open WhatsApp`.
+`DemoCommandInterpreter` resolves exact app names to stable internal app IDs
+and returns one `CommandPlanResolution` with ordered `CommandIntent` steps.
+`Alice` is a spoken chat target, not a verified contact. The plan data model is
+bounded to two or three steps; the current parser recognizes only two-step
+English forms. No new language model or dependency was added.
+
+The first clause must name an application. The second clause may open another
+application or request a chat in the first application. An optional `KYRIN`
+prefix is accepted. Approximate or ambiguous app names are **not** accepted
+inside a plan yet, because the current clarification state cannot retain the
+remaining steps. Unknown, incomplete, negated, or otherwise unsupported
+compound forms do not authorize any fragment of the utterance.
+An exact registered app name that also reads as a chat clause is ambiguous;
+the current plan parser rejects the whole plan. The single-command app/chat
+clarification does not retain other plan steps.
+
+## Execution boundary
+
+The data flow is:
+
+```text
+final transcript -> CommandPlanResolution -> ActionPlanRunner
+                 -> ActionGate -> ActionExecutor -> ActionFeedback / ActionNotice
+```
+
+Partial transcripts may display a replaceable single-step candidate, but
+never authorize an action. If the final text becomes a plan, the old candidate
+is retracted. Each final plan step has a distinct `(stream_id, segment_id,
+step_index)` action key. The gate checks policy separately for each step and
+rejects a duplicate plan. The runner executes one step at a time and stops
+after a denied, unsupported, failed, unknown, or confirmation-required step.
+Earlier completed steps are not rolled back.
+
+The Ubuntu application now supports more actions than the initial launcher
+diagnostic described here. Its only supported chat target is Telegram's
+`Saved Messages`, subject to separate permission, a fresh matching foreground
+window, temporary keyboard access, and verification of the opened header.
+`Open Telegram and open Alice chat` may complete the first step but cannot
+open Alice's chat; the second step reports an unsupported target. A successful
+`gio launch` alone reports `LAUNCH_ACCEPTED`, not proof that a window opened.
+The runner requires a fresh foreground-app observation immediately before a
+supported `OPEN_CHAT` step. Without an observer, or if focus differs, it
+stops. See `docs/actions/TELEGRAM_CHAT_NAVIGATION_DESIGN.md`.
+
+The separate live microphone diagnostic remains a **dry run by default**. An
+explicit `--execute-actions` flag plus `--launch-app` bindings connect final
+plan steps to its limited Ubuntu launcher. Only bound `OPEN_APP` steps can
+execute in that diagnostic; chat steps still return an unsupported notice.
+This diagnostic limit does not describe the installed Qt application's
+permission-gated `Saved Messages` action. `ActionPlanRunner` is tested using
+a fake executor, and the diagnostic's action dispatch is tested without
+hardware.
+See `docs/actions/LIVE_OPEN_APP_INTEGRATION.md`. Voice-output selection is
+managed separately in `docs/responses/TTS_MODEL_MANAGEMENT.md`.
+
+## Deliberate limits
+
+- Site navigation such as `Open Chrome and go to Google` has no action kind or
+  executor yet. The entire utterance asks for repetition; Chrome is not opened
+  as a fragment of an unrecognized command.
+- General chat discovery and navigation are not implemented. The narrowly
+  scoped `Saved Messages` action does not verify arbitrary contact names.
+- A launch request may be accepted before the app is visibly open. Dependent
+  chat navigation waits for a fresh foreground observation when supported.
+- The parser supports a small set of exact English forms. Multilingual plans,
+  natural-language planning, more steps, and clarification within a plan are
+  separate work.
+
+Focused tests: `tests/commands/test_multi_step_commands.py` and
+`tests/actions/test_plan_runner.py`.

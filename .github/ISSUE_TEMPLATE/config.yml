@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installation and documentation
+    url: https://github.com/mohammadhosseinzakeri10/kyrin/blob/main/docs/GETTING_STARTED.md
+    about: Start here for source setup, models and desktop integration.
+  - name: Private vulnerability report
+    url: https://github.com/mohammadhosseinzakeri10/kyrin/security/advisories/new
+    about: Do not publish vulnerability details or private user data in an issue.

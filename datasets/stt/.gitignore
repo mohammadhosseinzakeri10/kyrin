@@ -1,0 +1,8 @@
+/recordings/
+/results/
+/manifest.csv
+/manifest.multilingual.csv
+/manifest.german.csv
+/manifest.safety.csv
+/manifest.neutral.csv
+/manifest.speaker-*.csv

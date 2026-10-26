@@ -1,0 +1,82 @@
+.kyrin-status {
+    background-color: transparent;
+    border: none;
+    padding: 2px;
+}
+
+.kyrin-status-content {
+    spacing: 0;
+}
+
+.kyrin-audio-import {
+    font-size: 11px;
+    color: #e3dbff;
+    background-color: rgba(19, 13, 47, 0.93);
+    border: 1px solid #7863ee;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+
+.kyrin-status-icon {
+    icon-size: 112px;
+}
+
+.kyrin-status-symbol {
+    font-size: 19px;
+    font-weight: bold;
+    color: #e9faff;
+    background-color: rgba(28, 18, 69, 0.95);
+    border: 1px solid #72eaff;
+    border-radius: 15px;
+    padding: 1px 5px;
+}
+
+.kyrin-status-symbol-question {
+    border-color: #a56cff;
+}
+
+.kyrin-status-symbol-confirmed {
+    border-color: #73eaff;
+}
+
+.kyrin-status-symbol-unverified {
+    border-color: #7863ee;
+}
+
+.kyrin-status-symbol-failed {
+    border-color: #f5a35d;
+}
+
+.kyrin-status-caption {
+    font-size: 12px;
+    font-weight: bold;
+    color: #e3dbff;
+    background-color: rgba(19, 13, 47, 0.93);
+    border: 1px solid #7863ee;
+    border-radius: 9px;
+    padding: 4px 6px;
+    text-align: center;
+}
+
+.kyrin-status-close {
+    font-size: 18px;
+    font-weight: bold;
+    color: white;
+    background-color: rgba(27, 15, 61, 0.93);
+    border: 1px solid #8a69ff;
+    border-radius: 12px;
+    padding: 0 5px;
+}
+
+.kyrin-status-close-row {
+    spacing: 5px;
+}
+
+.kyrin-status-tooltip {
+    font-size: 11px;
+    color: #e3dbff;
+    background-color: rgba(19, 13, 47, 0.93);
+    border: 1px solid #7863ee;
+    border-radius: 6px;
+    padding: 2px 5px;
+}

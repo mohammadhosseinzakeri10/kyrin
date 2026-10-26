@@ -1,0 +1,6 @@
+{
+  "uuid": "window-capture-prototype@kyrin.local",
+  "name": "KYRIN Window Capture Prototype",
+  "description": "Experimental, on-demand capture of the focused window for local testing.",
+  "shell-version": ["50"]
+}

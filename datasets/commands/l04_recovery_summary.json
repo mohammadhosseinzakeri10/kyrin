@@ -1,0 +1,1085 @@
+{
+  "schema": 1,
+  "corpus_sha256": "7bd8c31aeb5c4081870887fc4b4c1cb00c44cb81b94d917b11853681b07a46f1",
+  "turn_reference_sha256": "0db7c6937b62492569e9651751d04dd2d332e753f81ab82afd13ea230aaea2af",
+  "scope": "designed public English text; coordinator proposals only; no execution",
+  "experiments": {
+    "rules-verified": {
+      "historical_last_turn": {
+        "total": {
+          "cases": 158,
+          "command_cases": 59,
+          "noncommand_cases": 92,
+          "asked_or_repeat": 18,
+          "correct": 127,
+          "correct_command": 28,
+          "missed_command": 31,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "by_category": {
+          "ambiguous": {
+            "cases": 6,
+            "command_cases": 0,
+            "noncommand_cases": 6,
+            "asked_or_repeat": 3,
+            "correct": 6,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "clean_command": {
+            "cases": 27,
+            "command_cases": 27,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 3,
+            "correct": 25,
+            "correct_command": 25,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "context": {
+            "cases": 8,
+            "command_cases": 5,
+            "noncommand_cases": 3,
+            "asked_or_repeat": 4,
+            "correct": 4,
+            "correct_command": 1,
+            "missed_command": 4,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "control_ambiguity": {
+            "cases": 3,
+            "command_cases": 0,
+            "noncommand_cases": 3,
+            "asked_or_repeat": 1,
+            "correct": 3,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "explicit_control": {
+            "cases": 3,
+            "command_cases": 0,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 3,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "explicit_power": {
+            "cases": 4,
+            "command_cases": 0,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 4,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "late_event": {
+            "cases": 2,
+            "command_cases": 0,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 0,
+            "correct": 2,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "negation": {
+            "cases": 28,
+            "command_cases": 0,
+            "noncommand_cases": 28,
+            "asked_or_repeat": 3,
+            "correct": 28,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ordinary": {
+            "cases": 10,
+            "command_cases": 0,
+            "noncommand_cases": 10,
+            "asked_or_repeat": 0,
+            "correct": 10,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "payload": {
+            "cases": 14,
+            "command_cases": 0,
+            "noncommand_cases": 14,
+            "asked_or_repeat": 0,
+            "correct": 14,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "provisional": {
+            "cases": 2,
+            "command_cases": 0,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 0,
+            "correct": 2,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "quotation": {
+            "cases": 13,
+            "command_cases": 0,
+            "noncommand_cases": 13,
+            "asked_or_repeat": 0,
+            "correct": 13,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "sensitive_ambiguity": {
+            "cases": 4,
+            "command_cases": 0,
+            "noncommand_cases": 4,
+            "asked_or_repeat": 0,
+            "correct": 4,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "synthetic_error": {
+            "cases": 27,
+            "command_cases": 27,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 4,
+            "correct": 2,
+            "correct_command": 2,
+            "missed_command": 25,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ungrounded_visible": {
+            "cases": 2,
+            "command_cases": 0,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 0,
+            "correct": 2,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "unsupported_or_noise": {
+            "cases": 5,
+            "command_cases": 0,
+            "noncommand_cases": 5,
+            "asked_or_repeat": 0,
+            "correct": 5,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        },
+        "by_split": {
+          "audit": {
+            "cases": 54,
+            "command_cases": 22,
+            "noncommand_cases": 32,
+            "asked_or_repeat": 10,
+            "correct": 43,
+            "correct_command": 11,
+            "missed_command": 11,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "development": {
+            "cases": 104,
+            "command_cases": 37,
+            "noncommand_cases": 60,
+            "asked_or_repeat": 8,
+            "correct": 84,
+            "correct_command": 17,
+            "missed_command": 20,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        }
+      },
+      "all_turns_final_reference": {
+        "turns": 178,
+        "command_turns": 67,
+        "model_calls": 0,
+        "model_errors": 0,
+        "correct": 143,
+        "correct_command": 32,
+        "missed_command": 35,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0,
+        "wrong_destination": 0,
+        "no_proposal": 139,
+        "clarification": 32,
+        "conversational_reply": 0,
+        "repeat_request": 13,
+        "unexpected_clarification": 6,
+        "missing_clarification": 0,
+        "model_error": 0,
+        "model_proposal_disagrees": 0,
+        "wrong_clarification": 1
+      },
+      "model_error_categories": {},
+      "native_completed_in_this_transport_log": 0,
+      "per_turn_references_rescored_offline": true
+    },
+    "qwen-before": {
+      "historical_last_turn": {
+        "total": {
+          "cases": 16,
+          "command_cases": 10,
+          "noncommand_cases": 6,
+          "asked_or_repeat": 4,
+          "correct": 12,
+          "correct_command": 6,
+          "missed_command": 4,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "by_category": {
+          "clean_command": {
+            "cases": 5,
+            "command_cases": 5,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 5,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "context": {
+            "cases": 2,
+            "command_cases": 1,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 2,
+            "correct_command": 1,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "negation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ordinary": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "payload": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "quotation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "sensitive_ambiguity": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "synthetic_error": {
+            "cases": 4,
+            "command_cases": 4,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 2,
+            "correct": 0,
+            "correct_command": 0,
+            "missed_command": 4,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        },
+        "by_split": {
+          "audit": {
+            "cases": 7,
+            "command_cases": 5,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 3,
+            "correct": 5,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "development": {
+            "cases": 9,
+            "command_cases": 5,
+            "noncommand_cases": 4,
+            "asked_or_repeat": 1,
+            "correct": 7,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        }
+      },
+      "all_turns_final_reference": {
+        "turns": 18,
+        "command_turns": 12,
+        "model_calls": 10,
+        "model_errors": 6,
+        "correct": 14,
+        "correct_command": 8,
+        "missed_command": 4,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0,
+        "wrong_destination": 0,
+        "no_proposal": 10,
+        "clarification": 4,
+        "conversational_reply": 0,
+        "repeat_request": 2,
+        "unexpected_clarification": 1,
+        "missing_clarification": 0,
+        "model_error": 6,
+        "model_proposal_disagrees": 2,
+        "wrong_clarification": 0
+      },
+      "model_error_categories": {
+        "legacy_unclassified": 6
+      },
+      "native_completed_in_this_transport_log": 8,
+      "per_turn_references_rescored_offline": true
+    },
+    "qwen-after-contract": {
+      "historical_last_turn": {
+        "total": {
+          "cases": 16,
+          "command_cases": 10,
+          "noncommand_cases": 6,
+          "asked_or_repeat": 6,
+          "correct": 12,
+          "correct_command": 6,
+          "missed_command": 4,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "by_category": {
+          "clean_command": {
+            "cases": 5,
+            "command_cases": 5,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 5,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "context": {
+            "cases": 2,
+            "command_cases": 1,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 2,
+            "correct_command": 1,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "negation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ordinary": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "payload": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "quotation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "sensitive_ambiguity": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "synthetic_error": {
+            "cases": 4,
+            "command_cases": 4,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 4,
+            "correct": 0,
+            "correct_command": 0,
+            "missed_command": 4,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        },
+        "by_split": {
+          "audit": {
+            "cases": 7,
+            "command_cases": 5,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 3,
+            "correct": 5,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "development": {
+            "cases": 9,
+            "command_cases": 5,
+            "noncommand_cases": 4,
+            "asked_or_repeat": 3,
+            "correct": 7,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        }
+      },
+      "all_turns_final_reference": {
+        "turns": 18,
+        "command_turns": 12,
+        "model_calls": 10,
+        "model_errors": 4,
+        "correct": 14,
+        "correct_command": 8,
+        "missed_command": 4,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0,
+        "wrong_destination": 0,
+        "no_proposal": 10,
+        "clarification": 6,
+        "conversational_reply": 0,
+        "repeat_request": 4,
+        "unexpected_clarification": 1,
+        "missing_clarification": 0,
+        "model_error": 4,
+        "model_proposal_disagrees": 2,
+        "wrong_clarification": 0
+      },
+      "model_error_categories": {
+        "contract": 4
+      },
+      "native_completed_in_this_transport_log": 10,
+      "per_turn_references_rescored_offline": true
+    },
+    "qwen-after-raw": {
+      "historical_last_turn": {
+        "total": {
+          "cases": 16,
+          "command_cases": 10,
+          "noncommand_cases": 6,
+          "asked_or_repeat": 8,
+          "correct": 11,
+          "correct_command": 6,
+          "missed_command": 4,
+          "wrong_action_proposal": 1,
+          "false_action_on_noncommand": 1
+        },
+        "by_category": {
+          "clean_command": {
+            "cases": 5,
+            "command_cases": 5,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 5,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "context": {
+            "cases": 2,
+            "command_cases": 1,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 2,
+            "correct_command": 1,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "negation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ordinary": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "payload": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "quotation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "sensitive_ambiguity": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 0,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 1,
+            "false_action_on_noncommand": 1
+          },
+          "synthetic_error": {
+            "cases": 4,
+            "command_cases": 4,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 4,
+            "correct": 0,
+            "correct_command": 0,
+            "missed_command": 4,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        },
+        "by_split": {
+          "audit": {
+            "cases": 7,
+            "command_cases": 5,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 4,
+            "correct": 5,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "development": {
+            "cases": 9,
+            "command_cases": 5,
+            "noncommand_cases": 4,
+            "asked_or_repeat": 4,
+            "correct": 6,
+            "correct_command": 3,
+            "missed_command": 2,
+            "wrong_action_proposal": 1,
+            "false_action_on_noncommand": 1
+          }
+        }
+      },
+      "all_turns_final_reference": {
+        "turns": 18,
+        "command_turns": 12,
+        "model_calls": 10,
+        "model_errors": 1,
+        "correct": 13,
+        "correct_command": 8,
+        "missed_command": 4,
+        "wrong_action_proposal": 1,
+        "false_action_on_noncommand": 1,
+        "wrong_destination": 0,
+        "no_proposal": 9,
+        "clarification": 8,
+        "conversational_reply": 0,
+        "repeat_request": 5,
+        "unexpected_clarification": 2,
+        "missing_clarification": 0,
+        "model_error": 1,
+        "model_proposal_disagrees": 4,
+        "wrong_clarification": 0
+      },
+      "model_error_categories": {
+        "contract": 1
+      },
+      "native_completed_in_this_transport_log": 10,
+      "per_turn_references_rescored_offline": true
+    },
+    "qwen-recovery-resumed": {
+      "historical_last_turn": {
+        "total": {
+          "cases": 16,
+          "command_cases": 10,
+          "noncommand_cases": 6,
+          "asked_or_repeat": 4,
+          "correct": 16,
+          "correct_command": 10,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "by_category": {
+          "clean_command": {
+            "cases": 5,
+            "command_cases": 5,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 5,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "context": {
+            "cases": 2,
+            "command_cases": 1,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 2,
+            "correct_command": 1,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "negation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "ordinary": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "payload": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "quotation": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 0,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "sensitive_ambiguity": {
+            "cases": 1,
+            "command_cases": 0,
+            "noncommand_cases": 1,
+            "asked_or_repeat": 1,
+            "correct": 1,
+            "correct_command": 0,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "synthetic_error": {
+            "cases": 4,
+            "command_cases": 4,
+            "noncommand_cases": 0,
+            "asked_or_repeat": 0,
+            "correct": 4,
+            "correct_command": 4,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        },
+        "by_split": {
+          "audit": {
+            "cases": 7,
+            "command_cases": 5,
+            "noncommand_cases": 2,
+            "asked_or_repeat": 2,
+            "correct": 7,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          },
+          "development": {
+            "cases": 9,
+            "command_cases": 5,
+            "noncommand_cases": 4,
+            "asked_or_repeat": 2,
+            "correct": 9,
+            "correct_command": 5,
+            "missed_command": 0,
+            "wrong_action_proposal": 0,
+            "false_action_on_noncommand": 0
+          }
+        }
+      },
+      "all_turns_final_reference": {
+        "turns": 18,
+        "command_turns": 12,
+        "model_calls": 10,
+        "model_errors": 1,
+        "correct": 18,
+        "correct_command": 12,
+        "missed_command": 0,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0,
+        "wrong_destination": 0,
+        "no_proposal": 6,
+        "clarification": 4,
+        "conversational_reply": 0,
+        "repeat_request": 4,
+        "unexpected_clarification": 2,
+        "missing_clarification": 0,
+        "model_error": 1,
+        "model_proposal_disagrees": 3,
+        "wrong_clarification": 0
+      },
+      "model_error_categories": {
+        "contract": 1
+      },
+      "native_completed_in_this_transport_log": 6,
+      "per_turn_references_rescored_offline": true,
+      "resume": {
+        "reused_exact_completed_requests": 4,
+        "new_native_requests": 6,
+        "source": "local-data/l04-implementation/qwen-recovery-final.transport.json",
+        "timing_scope": "cached calls are replay time; no comparative latency claim"
+      }
+    }
+  },
+  "historical_qwen_fixed_subset": {
+    "last_turn": {
+      "total": {
+        "cases": 16,
+        "command_cases": 10,
+        "noncommand_cases": 6,
+        "asked_or_repeat": 4,
+        "correct": 12,
+        "correct_command": 6,
+        "missed_command": 4,
+        "wrong_action_proposal": 0,
+        "false_action_on_noncommand": 0
+      },
+      "by_category": {
+        "clean_command": {
+          "cases": 5,
+          "command_cases": 5,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 0,
+          "correct": 5,
+          "correct_command": 5,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "context": {
+          "cases": 2,
+          "command_cases": 1,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 1,
+          "correct": 2,
+          "correct_command": 1,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "negation": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "ordinary": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "payload": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 1,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "quotation": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "sensitive_ambiguity": {
+          "cases": 1,
+          "command_cases": 0,
+          "noncommand_cases": 1,
+          "asked_or_repeat": 0,
+          "correct": 1,
+          "correct_command": 0,
+          "missed_command": 0,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "synthetic_error": {
+          "cases": 4,
+          "command_cases": 4,
+          "noncommand_cases": 0,
+          "asked_or_repeat": 2,
+          "correct": 0,
+          "correct_command": 0,
+          "missed_command": 4,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      },
+      "by_split": {
+        "audit": {
+          "cases": 7,
+          "command_cases": 5,
+          "noncommand_cases": 2,
+          "asked_or_repeat": 3,
+          "correct": 5,
+          "correct_command": 3,
+          "missed_command": 2,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        },
+        "development": {
+          "cases": 9,
+          "command_cases": 5,
+          "noncommand_cases": 4,
+          "asked_or_repeat": 1,
+          "correct": 7,
+          "correct_command": 3,
+          "missed_command": 2,
+          "wrong_action_proposal": 0,
+          "false_action_on_noncommand": 0
+        }
+      }
+    },
+    "native_calls": 10,
+    "valid_meanings": 4,
+    "contract_errors": 6,
+    "all_turn_trace_available": false
+  },
+  "followup_summary": "datasets/commands/l04_followup_summary.json",
+  "snapshot_scope": "initial implementation; see followup_summary for later changes",
+  "limitations": [
+    "Final-turn historical references and the frozen corpus were not changed.",
+    "Per-turn references were authored and corrected during evaluation-tool development, not product improvement.",
+    "A valid model structure is not evidence of correct meaning; disagreements are counted separately.",
+    "No accent, blind-test, live desktop or microphone validation.",
+    "Partially resumed model calls have replay timing; no comparable model-latency claim.",
+    "The intermediate raw-model experiment produced one wrong action proposal; the source guard was subsequently fixed."
+  ],
+  "automated_validation": {
+    "syntax": 0,
+    "lint": 0,
+    "type": 0,
+    "tests": 0,
+    "passed_tests": 2390,
+    "strict_type_checked_files": 422,
+    "test_seconds": 142.36,
+    "report": "local-data/l04-implementation/full-check-verified/"
+  },
+  "audio_api_validation": {
+    "files": 8,
+    "matching_reference_word_tokens": 8,
+    "explicit_reprocess_api_checks": 1,
+    "all_retained_pcm_released": true,
+    "max_retained_pcm_bytes": 86400,
+    "scope": "eight authorized existing clips, backend API validation, no accent or improvement claim"
+  },
+  "source_sha256_at_initial_implementation": {
+    "scripts/commands/evaluate_l04_baseline.py": "5a551bb0d44becab7b473ad1d82900dfe7d052a9c5d8ea4c6d9bcb92c18a2027",
+    "src/kyrin/commands/__init__.py": "646136a92d7ab0161a9f96a8c3fa69efb7c3567cfd5ba3b29d00af927534b1ed",
+    "src/kyrin/commands/app_names.py": "7a0baf82f7867e3dc7798bc71c54339c7239908864e5783eb02e6b57860725d7",
+    "src/kyrin/commands/chat_command_catalog.py": "4c38ebb932e55fd73719715c8d474331519aefb4998242fcb808fd9d585410e0",
+    "src/kyrin/commands/choice_numbers.py": "64624bbbfe1989f3ade264f2765d72fe8f27e98ff27d4e6b639858fb5fbcb447",
+    "src/kyrin/commands/context_resolver.py": "9ce3944fc1d5c18bba614cd8626bee7e8b343cebb2df51dd21bb827e30366ea7",
+    "src/kyrin/commands/coordinator.py": "97b4d6784f5b26e1701f40a212128cf5de0cd1914117ce3b9fea1e3764649a71",
+    "src/kyrin/commands/demo_interpreter.py": "d3837d13d883e289571841d01fa0a783878ff52862075d3e39a783e1d6442814",
+    "src/kyrin/commands/fragments.py": "714e6860603975a917fb412b5a99520f8b1b0518308629f8ffc03ba5909cfc3e",
+    "src/kyrin/commands/interpreter.py": "3528ddc5677bfefb81ea6dd696ef84f7970ee4f3267110e3c98ee955a0d449cd",
+    "src/kyrin/commands/model_interpreter.py": "c685fb2c346ba4726ff79be3cec8d76a6d558e41667e0d7f5334d33f0cf9b2a8",
+    "src/kyrin/commands/models.py": "92d940b4015d2400ff5f32921d8e74115587889db2680978fdefe704381421ff",
+    "src/kyrin/commands/ollama_engine.py": "0a434027b594b9bb752ed269e8ada5ebec144c5ba4df2b3dff6ae5b7b7a5be5b",
+    "src/kyrin/commands/ollama_models.py": "5de24c94cd2373601fb663a1afbb83ef31aba8e572d527cd6a9e97f48fd15765",
+    "src/kyrin/commands/ollama_server.py": "460dfe6501c16e0f1b1d5b173d26061eb476a734814e481c497c8b3cb94f6f62",
+    "src/kyrin/commands/open_window_meaning.py": "2e1079851bff098a82f4067128efb650a74353835bfde618ad22a2489242c9fe",
+    "src/kyrin/commands/operation_verifier.py": "0807fb551e5b1e632914274c9bef0b39deb3fe0f89407b59f60b5c01d9f338bb",
+    "src/kyrin/commands/phonetics.py": "0174b8e2b6789736758a1f7bd24bd8cb77c92d4dd28bc108939298469f05a331",
+    "src/kyrin/commands/recovery_candidates.py": "3dc4f7636ea481da6bf7601e3b92d618e586a820a7e654b8be99e8b937388ff0",
+    "src/kyrin/commands/speech_recovery.py": "884a1d6f04edd89c694215836d0e640b35d61b728d028f383dbdcb7f6f1c1a69",
+    "src/kyrin/commands/target_grounding.py": "ddb849efbf8b5199371f97c2c56825ad8a441de11482a9cdd912e27a73145a01",
+    "src/kyrin/commands/target_resolution.py": "0aa78538be7389c1805023d3b12b4d821fb530be484212e5b8db9429fe35b193",
+    "src/kyrin/commands/telegram_settings.py": "5b884a1a5c912373d9bdfd55fac7a1bc8b84da433a5d1320e48b9094312cc66d",
+    "src/kyrin/commands/token_budget.py": "8f591ec306d751952ab6717d734c2ef5ddddcbc021b628df69403142f64da357",
+    "src/kyrin/commands/understanding.py": "3ace3265be7d2957d70b1286c1d2965d924f369d19aebb40e37fb0ae2e0aae41",
+    "src/kyrin/commands/understanding_json.py": "b856c4c2ac245bc25c038547f9e64d680365b7ca8bd94eea92578e5f12fb7cab",
+    "src/kyrin/commands/visible_options.py": "b4c691e47a66b2df87a9ec864d0ddccd3dbed6af89ca72ef884e46445d6717bd",
+    "src/kyrin/commands/wake_names.py": "a05d1a9af20b146b5972c9c05f7211b88595f9cff00dfa965775b0a77cbb58fb",
+    "src/kyrin/stt/__init__.py": "7ff28c25082bd4dfab9f0a2f111f29c0e46d3b579f767b92f581c49a31f0322b",
+    "src/kyrin/stt/audio_recovery.py": "b0fcee18830558c1702db167d63e7fa4a720228d4d2e79828e8c90c2e27e602e",
+    "src/kyrin/stt/backends/__init__.py": "2eb79f5cacf29896cee9c8e1757fb42f93528bcce244a6d1d280ba87ac40422f",
+    "src/kyrin/stt/backends/omnilingual.py": "127bd6698c553161d326a2988d0efcf716bbcecebe68d1e0c7ed90e68789b500",
+    "src/kyrin/stt/backends/omnilingual_worker.py": "350465f816ae4a7c8ee4785eaddd4d48df9feba1d6adc30e2c0c60c6bd6d30fd",
+    "src/kyrin/stt/backends/vosk.py": "510dcb5bf3493d000e6520534e0d85c9ca8e29633cca5c6b4962aec32b8b6d39",
+    "src/kyrin/stt/backends/whisper.py": "26be5986000b675f0a8cf0469ae833d2cbb52b4400a12e23160db84889fb273b",
+    "src/kyrin/stt/backends/whisper_server.py": "8457416db1429b8bb43fb0940b6329f2a25b1a79143c32ead19970a5e17769fd",
+    "src/kyrin/stt/capabilities.py": "91d0ab9b253177443a253db92922e31f535f2ff93cde818b2cc1837b64979201",
+    "src/kyrin/stt/contracts.py": "8d0ff1afa0a6b0ddcc409f47d7660189894d98aecdce81d1e7b4b0685f07d89e",
+    "src/kyrin/stt/device.py": "38d9e1494b27bc2f3c9e9708e708ff9b3554744e909aeaf9ce4743bbfc1ee8dc",
+    "src/kyrin/stt/errors.py": "9326e6f0583f135c0d53b52f1fe210c3b0459f1e15de1d4a25981e7d66caacbb",
+    "src/kyrin/stt/evaluation.py": "a17284e4259e70bc5ed9fb1a432b5b961c6ffa4537a2918671587c1777017002",
+    "src/kyrin/stt/evidence.py": "7d96bc2da6122d94094049e1c6a431681f4511adcacc640d53c32f9b846d2bb7",
+    "src/kyrin/stt/path_comparison.py": "367a1bf480f49de5ce564214f2cfbd0285d3c2a895326d0349d07f5ec29c6d99",
+    "src/kyrin/stt/resources.py": "349915618a63bb1fa6e403f20c1f419da0e30b8a4afa9e40add077b3b01fd414",
+    "src/kyrin/stt/transcript.py": "0b3012f4a7346ba403134e5d9408ab716a5fb15d0632377071fe6bd6676b5e66",
+    "src/kyrin/runtime/command_worker.py": "3ed9225734e2e40f8aed9308a64d3ee2288f1daffff18bfd35252bd4eaa3d6b2",
+    "src/kyrin/app/platforms/ubuntu.py": "262da7d67ca0fe9c2e001660b58c0e71f9bd40fc62b32b613924ed739ead2fb7"
+  }
+}

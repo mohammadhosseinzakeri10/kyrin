@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem in the published KYRIN snapshot.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic examples. Remove private transcripts, screenshots, settings and tokens.
+        Report vulnerabilities privately through Security → Report a vulnerability.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or a full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, GNOME version if relevant, Python version, selected engine and compute device. Do not paste personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps and synthetic inputs, with expected and actual results.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence and validation
+      description: Exact error, relevant gate stage, and whether this is a unit test, live desktop, microphone or model observation.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues and removed credentials and personal data.
+          required: true

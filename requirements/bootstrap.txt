@@ -1,0 +1,5 @@
+# Resolved on CPython 3.14.4, Ubuntu x86_64; see docs/development/QUALITY_CHECKS.md.
+packaging==26.3
+pip==26.2.1
+setuptools==84.0.0
+wheel==0.48.0
