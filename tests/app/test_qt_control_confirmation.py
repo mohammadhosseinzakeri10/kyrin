@@ -122,13 +122,12 @@ def test_expired_prompt_and_ui_thread_call_cannot_open_dialog() -> None:
     assert isinstance(app, QApplication)
     bridge = QtControlConfirmation()
     original = prompt()
+    # Derive the deadline from the shifted start, as the contract does;
+    # shifting both bounds can exceed the age limit by one rounding step.
+    stale = original.window.observed_at - 11
     expired = replace(
         original,
-        window=replace(
-            original.window,
-            observed_at=original.window.observed_at - 11,
-            deadline=original.window.deadline - 11,
-        ),
+        window=replace(original.window, observed_at=stale, deadline=stale + 10),
     )
     assert not bridge.confirm(original)
     assert not worker(app, lambda: bridge.confirm(expired), lambda: None)
