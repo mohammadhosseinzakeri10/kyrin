@@ -1,9 +1,9 @@
 # Contributing to KYRIN
 
-KYRIN v0.1.0 is a public portfolio snapshot. Focused fixes, reproducible bug
-reports and architectural feedback about this release are welcome. Later
-versions are planned to be private; see the [release policy](docs/RELEASE_POLICY.md).
-There is no guaranteed review or maintenance schedule.
+Public `main` carries the reviewed current KYRIN source. Focused fixes,
+reproducible bug reports and architectural feedback are welcome. The
+[release policy](docs/RELEASE_POLICY.md) describes published milestones and
+how changes reach `main`. There is no guaranteed review or maintenance schedule.
 
 ## Before changing code
 

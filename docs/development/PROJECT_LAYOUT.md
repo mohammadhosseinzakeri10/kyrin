@@ -1,6 +1,6 @@
 # KYRIN project layout
 
-This map describes the v0.1.0 source tree and its local setup. Keep separately
+This map describes the current source tree and its local setup. Keep separately
 acquired models, optional runtimes, recordings and settings outside Git.
 The bundled Silero VAD model has its own [notice](../../THIRD_PARTY_NOTICES.md).
 
@@ -31,7 +31,8 @@ The bundled Silero VAD model has its own [notice](../../THIRD_PARTY_NOTICES.md).
 | `desktop/` | Installed-app catalog, window identity, observation, and desktop adapters | `tests/desktop/` |
 | `vision/` | Screen capture and OCR boundaries | `tests/vision/` |
 | `responses/` | Text, speech, and visual feedback | `tests/responses/` |
-| `system_power/` | Separately confirmed power operations | `tests/system_power/` |
+| `memory/` | Local, text-only conversation history | `tests/memory/` |
+| `system_power/` | Separately permitted power operations and the safe confirmation preview | `tests/system_power/` |
 | `runtime/` | Listening-session and command orchestration | `tests/runtime/` |
 | `app/` | Settings, model import, Ubuntu composition, and `qt/` user interface | `tests/app/` |
 

@@ -2,10 +2,10 @@
 
 ## Supported scope
 
-This policy covers the published KYRIN v0.1.0 source snapshot. It is an
-experimental personal project with no guaranteed response time or long-term
-security maintenance. There has been no independent comprehensive security
-audit. Later private versions are outside this repository's support scope.
+This policy covers the KYRIN source published in this repository: current
+`main` and the tagged v0.1.0 milestone. It is an experimental personal project
+with no guaranteed response time or long-term security maintenance. There has
+been no independent comprehensive security audit.
 
 ## Report a vulnerability privately
 

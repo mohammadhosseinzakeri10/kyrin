@@ -1,6 +1,6 @@
 # Current architecture
 
-This describes the implementation in the v0.1.0 public snapshot. The original
+This describes the implementation in the current public source. The original
 [Voice Core requirements](v1-voice-core-analysis.md) document an earlier scope.
 The implementation now includes a Qt application and guarded Ubuntu/GNOME
 desktop operations as well as audio and recognition.

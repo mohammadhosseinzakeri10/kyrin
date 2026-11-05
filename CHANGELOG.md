@@ -7,9 +7,6 @@ source milestones, not portable binary distributions.
 
 - Clarify installation, example commands, desktop requirements, local storage,
   and the evidence behind the published v0.1.0 snapshot.
-
-## Unreleased
-
 - Add guarded selection among windows of one app, app-scoped normal close, and
   targeted Ptyxis tab operations. These paths have route-specific live limits.
 - Strengthen Telegram accessibility targeting, original-window checks and
@@ -20,6 +17,9 @@ source milestones, not portable binary distributions.
   reporting, and per-language recognition evaluation.
 - Publish the English architecture, permission contracts, contributor workflow,
   decision records, and development roadmap alongside the source.
+- Publish the Persian contract and guide originals, the engineering protocol,
+  agent skills, development audits and notes, and designed prompt corpora.
+- Require eSpeak NG in the quality gate for phonetic recovery tests.
 
 ## [0.1.0] - 2026-10-26
 

@@ -28,7 +28,7 @@ behavior has not been established.
 | Item | State |
 | --- | --- |
 | Package | `kyrin`, version `0.1.0` (`pyproject.toml`); Python `>=3.14` |
-| Release | v0.1.0 is the public alpha source snapshot; later development is planned to be private ([release policy](docs/RELEASE_POLICY.md)) |
+| Release | Public `main` carries the reviewed current source; v0.1.0 is the tagged alpha milestone, and later changes are unreleased until a new version is approved ([release policy](docs/RELEASE_POLICY.md)) |
 | Platform | Ubuntu with GNOME Shell 50 (extensions declare `shell-version` 50). Windows, macOS and mobile adapters are not implemented |
 | Processing | Local: speech recognition, command models and TTS run on the user's machine. Model files are user-supplied data, not source |
 | Language scope | English is the primary V1 command and acceptance language; Persian speech commands are limited, experimental compatibility ([language policy](docs/LANGUAGE_POLICY.md)) |
