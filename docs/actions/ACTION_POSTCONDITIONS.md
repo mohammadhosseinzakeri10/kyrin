@@ -1,33 +1,84 @@
-<div dir="rtl">
+# Tool result and postcondition contract (F03)
 
-# قرارداد نتیجه و پس‌شرط ابزارها — F03
+This note replaces the historical "click accepted" description in the generic
+control and Telegram paths. (English migration of a previously Persian-only
+note; the original is preserved in the private migration pre-images and in Git
+history.)
 
-این یادداشت رفتار فعلی را جایگزین شرح تاریخیِ «کلیک پذیرفته شد» در مسیر کنترل عمومی و تلگرام می‌کند.
+- `CONFIRMED`: the requested state was confirmed by observation. It may already
+  have held, so no input may have been needed.
+- `LAUNCH_ACCEPTED`: the application launch request was accepted but the result
+  has not been observed. Earlier uses by tools outside this card are kept.
+- `DISPATCHED_UNVERIFIED`: input dispatch was reported but the postcondition was
+  not verified. This is not success and produces no verified active app.
+- `UNKNOWN`: the transport or execution answer is unknown; even input dispatch
+  may be unknown. A user message must not claim definite failure or success.
+- `FAILED`: the tool reported a specific error. It is not permission for
+  automatic retry.
 
-- `CONFIRMED`: وضعیت درخواستی با مشاهده تأیید شده است؛ ممکن است از قبل برقرار بوده و هیچ ورودی لازم نباشد.
-- `LAUNCH_ACCEPTED`: درخواست راه‌اندازی برنامه پذیرفته شده، اما نتیجه هنوز مشاهده نشده است. کاربردهای قبلیِ ابزارهای خارج از این کارت حفظ شده‌اند.
-- `DISPATCHED_UNVERIFIED`: ارسال ورودی گزارش شده، ولی پس‌شرط تأیید نشده است؛ این نتیجه موفقیت محسوب نمی‌شود و برنامهٔ فعالِ تأییدشده تولید نمی‌کند.
-- `UNKNOWN`: پاسخ انتقال یا اجرا نامعلوم است؛ حتی ارسال ورودی هم ممکن است نامعلوم باشد. پیام کاربر نباید شکست قطعی یا موفقیت را ادعا کند.
-- `FAILED`: ابزار خطای مشخص گزارش کرده است؛ این وضعیت مجوز تکرار خودکار نیست.
+## Required evidence
 
-## شاهد لازم
+For generic navigation, only a fresh, active dialog of the same application and
+a process with the exact option title counts as evidence. The token must change
+relative to the initial window and stay stable when read. Application identity
+is rechecked. An image change, an arbitrary node appearing, an already-open
+dialog or the existence of a button name is not enough. Internal pages or dialogs
+with a different title stay unverified.
 
-برای ناوبری عمومی، فقط dialog تازه و فعالِ همان برنامه و فرایند با عنوان دقیقِ گزینه شاهد محسوب می‌شود؛ token باید نسبت به پنجرهٔ اولیه تغییر کرده و هنگام خواندن ثابت بماند. هویت برنامه نیز دوباره بررسی می‌شود. تغییر تصویر، ظاهرشدن یک node دلخواه، dialog ازقبل‌باز یا وجود نام دکمه کافی نیست. صفحه‌های داخلی یا dialogهایی با عنوان متفاوت تأییدنشده می‌مانند.
+For a toggle, the boolean state of the same node and structure in the same
+window is re-read after input. Both the semantic and the coordinate paths do
+this check. An already-desired state is confirmed without input. An uncertain
+Action response is first checked by reading state and never triggers a fallback
+click. Permission for generic toggles follows
+[the F02 capability and bounded-approval policy](CONTROL_POLICY.md); approval of
+an action does not replace postcondition observation.
 
-برای toggle، وضعیت boolean همان node و همان ساختار، در همان پنجره، بعد از ورودی بازخوانی می‌شود. مسیر معنایی و مسیر مختصاتی هر دو این بررسی را دارند. وضعیت ازقبل‌مطلوب بدون ورودی تأیید می‌شود. پاسخ نامطمئنِ Action نیز ابتدا با خواندن وضعیت بررسی می‌شود و باعث کلیک جایگزین نمی‌شود. مجوز toggleهای عمومی تابع [سیاست قابلیت و تأیید محدود F02](CONTROL_POLICY.md) است؛ تأیید اجرای عمل، جایگزین مشاهدهٔ پس‌شرط نیست.
+For Telegram, the navigation target title, search phrase or chat header is read.
+A chat title alone does not prove the exact contact: paths through visible rows
+and duplicate titles stay unverified even with a matching header. A search path
+with a unique identity still needs a matching header. For Escape and search
+focus there is no sufficient generic postcondition, so only input dispatch is
+reported.
 
-برای تلگرام، عنوان مقصد ناوبری، عبارت جست‌وجو یا header چت خوانده می‌شود. عنوان چت به‌تنهایی هویت دقیق مخاطب را ثابت نمی‌کند: مسیر ردیف‌های قابل مشاهده و عنوان‌های تکراری، حتی با header منطبق، تأییدنشده می‌مانند. مسیر جست‌وجوی دارای هویت یکتا همچنان به header منطبق نیاز دارد. برای Escape و تمرکز جست‌وجو پس‌شرط عمومی کافی نداریم و فقط ارسال ورودی گزارش می‌شود.
+Each Telegram operation is bound to the GNOME window token focused when it
+starts; a pending chat selection or result page keeps the token of the window
+whose capture showed its rows. Every helper call, scroll, OCR read and
+postcondition requires that token, not only the application ID and process ID.
+A same-process replacement window therefore receives no further input, and its
+text is treated as absent evidence: the step fails before input or stays
+`dispatched_unverified`, never `confirmed`. A capture without a window token
+cannot be bound and is rejected. No transition to another window is accepted as
+a legitimate destination, and no input is retried after a replacement.
 
-مهلت پذیرش پس‌شرط عمومی ۳۰۰ میلی‌ثانیه است و بررسی تلگرام حداکثر سه خواندن با فاصلهٔ ۱۰۰ میلی‌ثانیه دارد؛ سقف عملیات، لغو و مهلت مشاهدهٔ اولیه همچنان اعمال می‌شوند. این فاصله‌ها زمان اجرای فراخوانی‌های دسترس‌پذیری یا OCR را تضمین نمی‌کنند. نتیجهٔ دیرتر از بودجه، موفقیت فرض نمی‌شود.
+The generic postcondition acceptance window is 300 ms. Telegram verification
+reads at most three times, 100 ms apart. The operation ceiling, cancellation and
+initial observation deadline still apply. These intervals do not guarantee the
+duration of accessibility or OCR calls. A result later than the budget is not
+assumed successful.
 
-## وابستگی و بازیابی
+## Dependencies and recovery
 
-مراحل وابسته فقط با پیش‌نیاز تأییدشده اجرا می‌شوند. بازکردن برنامهٔ نام‌دار متفاوت مستقل است و می‌تواند ادامه یابد. تکرار همان راه‌اندازیِ تأییدنشده مستقل محسوب نمی‌شود. برای بازکردن چت، مشاهدهٔ تازهٔ برنامهٔ فعال می‌تواند پیش‌نیاز راه‌اندازی را تأیید کند؛ شاهد یک ناوبری یا toggle را جایگزین نمی‌کند. نبود فرادادهٔ وابستگی دقیق‌تر باعث می‌شود سایر مراحل با احتیاط به مراحل قبلی وابسته باشند.
+Dependent steps run only with a confirmed prerequisite. Opening a different
+named application is independent and may continue. Repeating the same
+unverified launch is not independent. For opening a chat, a fresh observation
+of the active application may confirm the launch prerequisite; it does not
+replace the evidence of a navigation or toggle. Without finer dependency
+metadata, other steps conservatively depend on earlier ones.
 
-ابزارها هنگام بررسی پس‌شرط فقط می‌خوانند و ورودی را دوباره نمی‌فرستند. نبود گزینهٔ منوی تلگرام یا ناپدیدشدن عنوان Archive، شاهد مثبتِ گذار صحیح نیست؛ پس کلیک دوم خودکار حذف شده است. اگر اولین کلیک از Archive برگردد ولی منو مشاهده نشود، نتیجه تأییدنشده می‌ماند. درخواست تازه ابتدا وضعیت منو را دوباره می‌خواند. پس از پایان بودجه، مرحلهٔ وابسته با پیام مشخص اجرا نمی‌شود؛ ادامهٔ خودکارِ دیررس یا بازگردانی عمل وجود ندارد.
+Tools only read while checking a postcondition and never resend input. A missing
+Telegram menu option or the disappearance of an Archive title is not positive
+evidence of the correct transition, so the automatic second click was removed.
+If the first click on Archive returns but no menu is observed, the result stays
+unverified. A fresh request first re-reads menu state. After the budget ends, the
+dependent step does not run, with a specific message; there is no late automatic
+continuation or rollback.
 
-معنای فراخوانی Action و پاک‌کردن cache با مستندات رسمی [اجرای Action](https://docs.gtk.org/atspi2/method.Action.do_action.html) و [بازخوانی اطلاعات دسترس‌پذیری](https://docs.gtk.org/atspi2/method.Accessible.clear_cache.html) تطبیق داده شده است.
+The meaning of invoking an Action and of clearing the cache was checked against
+the official documentation:
+[Action invocation](https://docs.gtk.org/atspi2/method.Action.do_action.html)
+and [refreshing accessibility information](https://docs.gtk.org/atspi2/method.Accessible.clear_cache.html).
 
-آزمون‌ها قطعی‌اند و کلیک بی‌اثر، مقصد کند، وضعیت ازقبل‌مطلوب، پاسخ نامعلوم، تعویض node یا focus و ادامهٔ عمل مستقل را پوشش می‌دهند. آزمون زندهٔ GNOME، AT-SPI و تلگرام انجام نشده است.
-
-</div>
+Tests are deterministic and cover an ineffective click, a slow target, an
+already-desired state, an unknown answer, node or focus replacement and
+continuation of independent actions. Live GNOME, AT-SPI and Telegram tests were
+not performed.

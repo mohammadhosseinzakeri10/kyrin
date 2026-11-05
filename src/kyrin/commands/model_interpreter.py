@@ -49,7 +49,7 @@ from kyrin.commands.understanding import (
 )
 from kyrin.commands.visible_options import VisibleOption
 from kyrin.text_normalization import fold_case, source_spelling
-from kyrin.timing import timed_stage
+from kyrin.timing import mark, timed_stage
 
 
 def _words(value: str) -> tuple[str, ...]:
@@ -348,6 +348,12 @@ class ModelAssistedInterpreter:
         direct = self._rules.interpret(
             text, language=language, context=context, pending=pending
         )
+        # Bulk scope has its own exact source contract and native confirmation.
+        # A model must not reinterpret a rejected bulk request as single close.
+        from kyrin.commands.bulk_close import has_bulk_close_prefix
+
+        if has_bulk_close_prefix(text):
+            return direct
         if not context.is_final_transcript:
             # Keep provisional previews on rules only, before confirmation
             # inference, catalog refresh, or visible-control inventory/OCR.
@@ -392,6 +398,7 @@ class ModelAssistedInterpreter:
                             ),
                         )
                 except CommandModelError, ValueError:
+                    mark("model_failed")
                     return NeedsClarification(pending)
                 if decision is ConfirmationDecision.YES and not _NEGATIVE_REPLY.search(
                     text.casefold()
@@ -419,6 +426,7 @@ class ModelAssistedInterpreter:
                 try:
                     proposal = self._model.understand(source, context=model_context)
                 except CommandModelError, ValueError:
+                    mark("model_failed")
                     return direct
                 recovered = self._review_recovery(source, proposal, model_context)
                 if recovered is not None:
@@ -478,7 +486,17 @@ class ModelAssistedInterpreter:
             with timed_stage("inference"):
                 proposal = self._model.understand(source, context=context)
         except CommandModelError, ValueError:
+            mark("model_failed")
             return self._unusable_model_result(direct, source)
+        if (
+            isinstance(direct, NotACommand)
+            and proposal.status is not UnderstandingStatus.RESPOND
+            and _SOURCE_NOT_INSTRUCTION.search(fold_case(text).strip())
+        ):
+            # An informational question cannot seed action consent or repetition
+            # just because the model proposes an action or reports ambiguity.
+            # RESPOND still follows its normal path.
+            return direct
         discovered_visible = False
         exact_visible_option: VisibleOption | None = None
         if (
@@ -516,6 +534,7 @@ class ModelAssistedInterpreter:
                     with timed_stage("inference"):
                         proposal = self._model.understand(source, context=context)
                 except CommandModelError, ValueError:
+                    mark("model_failed")
                     return UnrecognizedCommand()
                 if (
                     proposal.status is not UnderstandingStatus.READY

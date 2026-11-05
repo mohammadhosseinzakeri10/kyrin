@@ -49,11 +49,62 @@ const ModalDialog = {ModalDialog: class {
 """
 
 
+@pytest.mark.parametrize("language", ["en", "fa-IR"])
+@pytest.mark.parametrize("decision", ["approve", "cancel", "timeout"])
+def test_group_dialog_explicit_count_scope_and_decision(
+    language: str, decision: str,
+) -> None:
+    gjs = shutil.which("gjs")
+    assert gjs is not None
+    source = "\n".join(
+        line for line in _SOURCE.read_text().splitlines()
+        if not line.startswith("import ")
+    ).replace("export class", "class")
+    action = {
+        "approve": "dialog.buttons[1].action();",
+        "cancel": "dialog.buttons[0].action();",
+        "timeout": "now = 11000000; callback();",
+    }[decision]
+    body = """
+const results = [];
+const confirmation = new WindowCloseConfirmation(value => results.push(value));
+confirmation.show({app_id: 'test.desktop', deadline: 11, windows: [{}, {}]}, LANGUAGE);
+const dialog = instances[0];
+if (!dialog.children[0].text.includes('2') ||
+    !dialog.children[0].text.includes('test.desktop') || timerMs !== 10000)
+    throw new Error('group confirmation must display app/count and original deadline');
+ACTION
+confirmation.cancel();
+if (results.length !== 1 || results[0] !== EXPECTED || !dialog.destroyed)
+    throw new Error('wrong group decision or leaked UI');
+print('group dialog: passed');
+""".replace("LANGUAGE", repr(language)).replace("ACTION", action).replace(
+        "EXPECTED", "true" if decision == "approve" else "false"
+    )
+    result = subprocess.run([gjs, "-c", _HARNESS + source + body],
+                            capture_output=True, text=True, check=False, timeout=5)
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "case", ["approve", "cancel", "timeout", "destroy", "no_grab", "expired"]
 )
-@pytest.mark.parametrize("language", ["en", "fa"])
-def test_native_dialog_button_deadline_and_cleanup(case: str, language: str) -> None:
+@pytest.mark.parametrize(
+    ("language", "direction"),
+    [
+        ("en", 0),
+        ("en-US", 0),
+        (" EN_us ", 0),
+        ("de", 0),
+        ("fa", 1),
+        ("fa-IR", 1),
+        ("fa_IR", 1),
+        (" FA_ir ", 1),
+    ],
+)
+def test_native_dialog_button_deadline_and_cleanup(
+    case: str, language: str, direction: int
+) -> None:
     gjs = shutil.which("gjs")
     if gjs is None:
         pytest.skip("GJS is not installed")
@@ -98,9 +149,7 @@ def test_native_dialog_button_deadline_and_cleanup(case: str, language: str) -> 
         "expired": "",
     }[case]
     body = body.replace("SETUP", setup).replace("ACTION", action)
-    body = body.replace("LANGUAGE", language).replace(
-        "DIRECTION", "1" if language == "fa" else "0"
-    )
+    body = body.replace("LANGUAGE", language).replace("DIRECTION", str(direction))
     body = body.replace("EXPECTED", "true" if case == "approve" else "false")
     result = subprocess.run(
         [gjs, "-c", _HARNESS + source + body],

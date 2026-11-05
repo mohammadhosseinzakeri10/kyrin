@@ -171,7 +171,9 @@ def test_all_turns_preserve_wrong_intermediate_proposal() -> None:
     assert summarize_turns([record])["wrong_action_proposal"] == 1
 
 
-def test_historical_rules_summary_is_unchanged() -> None:
+def test_historical_baseline_only_has_known_menu_and_preview_improvements() -> None:
+    from copy import deepcopy
+
     from scripts.commands.evaluate_l04_baseline import summarize
 
     records = [
@@ -179,7 +181,28 @@ def test_historical_rules_summary_is_unchanged() -> None:
         for case in load_cases(CORPUS)
     ]
     frozen = json.loads(CORPUS.with_name("l04_baseline_summary.json").read_text())
-    assert summarize(records) == frozen["rules"]
+    expected = deepcopy(frozen["rules"])
+    # Three explicitly negated menu answers now dismiss the menu, as their
+    # existing no-question references require. Keep the historical file intact
+    # and account explicitly for the newly supported exact app-preview request.
+    expected["total"]["asked_or_repeat"] -= 3
+    expected["by_category"]["negation"]["asked_or_repeat"] -= 3
+    expected["by_split"]["audit"]["asked_or_repeat"] -= 3
+    preview = next(record for record in records
+                   if record["case_id"] == "show-windows-clean")
+    reference = next(case for case in load_cases(CORPUS)
+                     if case.id == "show-windows-clean")
+    assert preview["actual"] == reference.expected
+    assert preview["responses"] == ["choose_window"]
+    assert preview["turns"][0]["score"]["selection_ui_response"]
+    for section in (
+        expected["total"], expected["by_category"]["clean_command"],
+        expected["by_split"]["development"],
+    ):
+        section["correct"] += 1
+        section["correct_command"] += 1
+        section["missed_command"] -= 1
+    assert summarize(records) == expected
     assert sum(len(record["turns"]) for record in records) == 178
 
 
@@ -196,3 +219,77 @@ def test_destination_and_clarification_are_separate_metrics() -> None:
     )
     assert result["wrong_destination"] and result["wrong_action_proposal"]
     assert result["unexpected_clarification"] and result["model_error"]
+
+
+def test_decision_slots_are_scored_separately() -> None:
+    from scripts.commands.evaluate_l04_baseline import turn_score
+
+    def record(kind: str, target: str, **values: object) -> dict[str, object]:
+        return {
+            "route": "command",
+            "intents": [{"kind": kind, "target": target, **values}],
+        }
+
+    result = turn_score(
+        record("scroll_up", "browser", scroll_steps=2),
+        record("scroll_down", "browser", scroll_steps=3),
+        [],
+        "none",
+        [],
+    )
+    assert result["wrong_direction"] and result["wrong_scroll_amount"]
+    assert not result["wrong_destination"]
+    result = turn_score(
+        record("visible_control", "Test option", control_state=True),
+        record("visible_control", "Test option", control_state=False),
+        [],
+        "none",
+        [],
+    )
+    assert result["wrong_state"] and not result["wrong_direction"]
+    result = turn_score(
+        record("telegram_search", "Do not open Telegram"),
+        record("telegram_search", "Open Telegram"),
+        [],
+        "none",
+        [],
+    )
+    assert result["wrong_payload"]
+    result = turn_score(
+        record("select_app_window", "browser", window_index=1),
+        record("select_app_window", "browser", window_index=2),
+        [],
+        "none",
+        [],
+    )
+    assert result["wrong_window_index"]
+
+
+def test_audio_transcripts_must_match_frozen_text_before_interpretation() -> None:
+    from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+
+    case = load_cases(CORPUS)[0]
+    _, rules = fixture()
+    with pytest.raises(ValueError, match="frozen"):
+        replay_case(case, rules, transcripts=())
+    with pytest.raises(ValueError, match="frozen"):
+        replay_case(
+            case,
+            rules,
+            transcripts=(
+                TranscriptUpdate(0, "different", TranscriptStatus.FINAL, "en"),
+            ),
+        )
+
+
+def test_requested_window_chooser_is_ui_output_not_extra_semantic_question() -> None:
+    from scripts.commands.evaluate_l04_baseline import turn_score
+
+    command = {
+        "route": "command",
+        "intents": [{"kind": "show_all_windows", "target": "desktop"}],
+    }
+    result = turn_score(command, command, ["choose_window"], "none", [])
+    assert result["correct"]
+    assert not result["unexpected_clarification"]
+    assert result["selection_ui_response"]

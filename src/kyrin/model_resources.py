@@ -108,8 +108,39 @@ class ModelResources:
         self._waiting: list[tuple[Workload, int]] = []
         self._sequence = 0
         self._active = False
+        self._active_workload: Workload | None = None
+        self._active_since = 0.0
+        self._wait_started: dict[int, float] = {}
+        self._completed = dict.fromkeys(Workload, 0)
         self._residents: set[str] = set()
         self._blocked = False
+
+    def is_quiescent(self) -> bool:
+        """Admission accounting only; not proof of OS memory release."""
+        with self._condition:
+            return not (
+                self._active or self._waiting or self._residents or self._blocked
+            )
+
+    def snapshot(self) -> tuple[str, ...]:
+        """Bounded numeric ownership/wait evidence; model keys never escape."""
+        with self._condition:
+            now = self._clock()
+            active = self._active_workload
+            return (
+                f"active={active.name if active is not None else 'none'} "
+                f"age={now - self._active_since if self._active else 0:.3f}s "
+                f"residents={len(self._residents)} blocked={self._blocked}",
+                f"waiting={len(self._waiting)} limit={self.limits.max_waiters} "
+                "stt_reserved=1 unit=jobs",
+                *(
+                    f"wait workload={workload.name} ticket={sequence} "
+                    f"age={now - self._wait_started[sequence]:.3f}s"
+                    for workload, sequence in self._waiting
+                ),
+                "returned "
+                + " ".join(f"{w.name}={n}" for w, n in self._completed.items()),
+            )
 
     def block(self) -> None:
         """Unconfirmed model cleanup must not admit a competing model."""
@@ -201,6 +232,7 @@ class ModelResources:
                 ticket = (workload, self._sequence)
                 self._sequence += 1
                 self._waiting.append(ticket)
+                self._wait_started[ticket[1]] = self._clock()
                 self._condition.notify_all()
                 try:
                     while True:
@@ -220,12 +252,15 @@ class ModelResources:
                                 )
                             self._check_memory(key)
                             self._active = True
+                            self._active_workload = workload
+                            self._active_since = self._clock()
                             break
                         self._condition.wait(
                             min(0.05, max(0, deadline - self._clock()))
                         )
                 finally:
                     self._waiting.remove(ticket)
+                    self._wait_started.pop(ticket[1])
                     self._condition.notify_all()
         try:
             with timed_stage("model_resource_run"):
@@ -236,6 +271,8 @@ class ModelResources:
         finally:
             with self._condition:
                 self._active = False
+                self._active_workload = None
+                self._completed[workload] += 1
                 self._condition.notify_all()
 
 

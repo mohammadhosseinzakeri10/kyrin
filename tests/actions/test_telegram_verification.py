@@ -1,8 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
 from kyrin.actions.telegram_verification import (
     assess_visible_chat_choices,
     chat_header_visible,
+    same_operation_window,
     saved_messages_header_visible,
     search_choices,
     telegram_left_label,
@@ -14,6 +17,7 @@ from kyrin.actions.telegram_verification import (
     unique_search_result,
     visible_chat_choices,
 )
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.ocr.contracts import OcrDevice, OcrResult, RecognizedText, TextBox
 from kyrin.vision.text_reader import IdentifiedWindowText
 
@@ -888,3 +892,35 @@ def test_persian_search_result_uses_right_to_left_word_positions() -> None:
     )
     assert match is not None
     assert (match.left, match.top, match.width) == (104, 92, 246)
+
+
+def _geometry(window_token: str) -> CaptureGeometry:
+    return CaptureGeometry(
+        "logical_desktop",
+        0,
+        (0, 0, 1600, 900),
+        (1600, 900),
+        1,
+        1,
+        (0, 0, 0, 0),
+        (0, 0),
+        (1, 1),
+        window_token,
+        "capture-1",
+        100.0,
+    )
+
+
+def test_operation_window_requires_the_captured_window_token() -> None:
+    """App ID and PID cannot tell a same-process replacement window apart."""
+    original = replace(_observation(), geometry=_geometry("window-7"))
+    replacement = replace(_observation(), geometry=_geometry("window-8"))
+    assert same_operation_window(original, "telegram.desktop", 123, "window-7")
+    assert not same_operation_window(
+        replacement, "telegram.desktop", 123, "window-7"
+    )
+    # Evidence without a window token cannot be bound to the operation.
+    assert not same_operation_window(
+        _observation(), "telegram.desktop", 123, "window-7"
+    )
+    assert not same_operation_window(original, "telegram.desktop", 456, "window-7")

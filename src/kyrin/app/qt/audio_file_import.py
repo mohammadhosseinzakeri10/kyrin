@@ -3,21 +3,29 @@
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
+from typing import cast
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, Signal
 
 from kyrin.app.controller import ApplicationController, ApplicationState
+from kyrin.app.events import CommandDeviceReported
 from kyrin.app.platforms.ubuntu import UbuntuSessionFactory
 from kyrin.app.settings import AppSettings
 from kyrin.audio.audio_errors import AudioError
 from kyrin.audio.file_input import validate_audio_file
 from kyrin.audio.microphone.errors import MicrophoneError
+from kyrin.commands.ollama_device import InferenceState
+from kyrin.runtime.voice_control import VoiceModeChanged
 from kyrin.stt.errors import SpeechToTextError
 
 
 @dataclass(frozen=True, slots=True)
 class AudioImportResult:
     error: str | None = None
+    command_device: CommandDeviceReported | None = None
+    job_id: str = ""
+    cancelled: bool = False
 
 
 class AudioFileImport(QObject):
@@ -38,11 +46,40 @@ class AudioFileImport(QObject):
         self._busy = False
         self._cancelled = Event()
         self._session: object | None = None
+        self._job_id = ""
 
     @property
     def busy(self) -> bool:
         with self._lock:
             return self._busy
+
+    def event_belongs_to_session(self, session_id: str) -> bool:
+        """Accept observations only while this exact file session owns work."""
+        with self._lock:
+            if not self._busy or self._cancelled.is_set() or not session_id:
+                return False
+            getter = getattr(self._session, "voice_mode_state", None)
+            return (
+                getter is not None
+                and cast(VoiceModeChanged, getter()).session_id == session_id
+            )
+
+    def result_is_current(
+        self, result: AudioImportResult, *, allow_cancelled: bool = False
+    ) -> bool:
+        """Match the latest completed job; cancellation captions may opt in."""
+        with self._lock:
+            return (
+                bool(result.job_id)
+                and result.job_id == self._job_id
+                and not self._busy
+                and (allow_cancelled or not self._cancelled.is_set())
+            )
+
+    def invalidate_device_result(self) -> None:
+        with self._lock:
+            if not self._busy:
+                self._job_id = ""
 
     def submit(self, path: Path, settings: AppSettings) -> bool:
         if settings.stt is None:
@@ -54,16 +91,21 @@ class AudioFileImport(QObject):
             self.finished.emit(AudioImportResult(str(exc)))
             return False
         with self._lock:
-            if self._busy:
-                self.finished.emit(
-                    AudioImportResult("An audio file is already being processed")
-                )
-                return False
-            self._busy = True
-            self._cancelled.clear()
+            busy = self._busy
+            if not busy:
+                self._busy = True
+                self._cancelled.clear()
+                job_id = self._job_id = uuid4().hex
+        if busy:
+            # Same-thread Qt delivery is immediate. Slots may inspect .busy;
+            # never call them while holding the importer's non-reentrant lock.
+            self.finished.emit(
+                AudioImportResult("An audio file is already being processed")
+            )
+            return False
         Thread(
             target=self._run,
-            args=(path, settings),
+            args=(path, settings, job_id),
             name="kyrin-audio-file-import",
             daemon=True,
         ).start()
@@ -78,7 +120,7 @@ class AudioFileImport(QObject):
             if stop is not None:
                 stop()
 
-    def _run(self, path: Path, settings: AppSettings) -> None:
+    def _run(self, path: Path, settings: AppSettings, job_id: str) -> None:
         was_listening = (
             settings.listening_enabled
             and self._controller.status().state
@@ -86,6 +128,13 @@ class AudioFileImport(QObject):
         )
         commands_were_active = self._controller.commands_active()
         error: str | None = None
+        last_device: CommandDeviceReported | None = None
+
+        def collect_device(event: CommandDeviceReported) -> None:
+            nonlocal last_device
+            if event.report.state is not InferenceState.RUNNING:
+                last_device = event
+
         try:
             self._controller.request_stop()
             if not self._controller.wait_until_stopped(30):
@@ -97,7 +146,9 @@ class AudioFileImport(QObject):
                 )
             if self._cancelled.is_set():
                 return
-            with self._factory.for_audio_file(path)(settings) as session:
+            with self._factory.for_audio_file(path, on_command_device=collect_device)(
+                settings
+            ) as session:
                 with self._lock:
                     self._session = session
                 if self._cancelled.is_set():
@@ -128,7 +179,9 @@ class AudioFileImport(QObject):
             with self._lock:
                 self._busy = False
             self.finished.emit(
-                AudioImportResult(error or "Audio import cancelled")
+                AudioImportResult(
+                    error or "Audio import cancelled", job_id=job_id, cancelled=True
+                )
                 if self._cancelled.is_set()
-                else AudioImportResult(error)
+                else AudioImportResult(error, last_device, job_id)
             )

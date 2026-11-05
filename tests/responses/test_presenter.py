@@ -91,6 +91,50 @@ def test_close_stage_is_explained_without_raw_diagnostics(
     assert code not in text and "google-chrome" not in text
 
 
+@pytest.mark.parametrize("language", ["en", "fa"])
+@pytest.mark.parametrize(
+    ("code", "fragments"),
+    [
+        (
+            "telegram_accessibility_unavailable",
+            ("accessible control", "کنترل دسترس‌پذیر"),
+        ),
+        ("telegram_target_changed", ("window or control changed", "پنجره یا کنترل")),
+        (
+            "telegram_menu_action_unavailable",
+            ("Disable screen reader mode", "Disable screen reader mode"),
+        ),
+    ],
+)
+def test_telegram_control_failure_does_not_claim_focus_change_or_require_setup(
+    language: str, code: str, fragments: tuple[str, str],
+) -> None:
+    event = ActionFeedback(
+        KEY, CommandIntent(CommandKind.TELEGRAM_SEARCH, "Private search"),
+        ActionOutcome.FAILED, ResponseChannel.TEXT_AND_VOICE, code, language,
+    )
+    result = ResponsePresenter(language).present(event)
+    assert fragments[language == "fa"] in result.text
+    assert code not in result.text
+    assert "Private" not in result.text
+    assert "active window changed" not in result.text
+    assert "Setup" not in result.text and "Desktop Actions" not in result.text
+
+
+@pytest.mark.parametrize("language", ["en", "fa"])
+def test_actionless_menu_guidance_is_hedged_and_names_no_settings_path(
+    language: str,
+) -> None:
+    event = ActionFeedback(
+        KEY, CommandIntent(CommandKind.TELEGRAM_VIEW, "settings"),
+        ActionOutcome.FAILED, ResponseChannel.TEXT_AND_VOICE,
+        "telegram_menu_action_unavailable", language,
+    )
+    text = ResponsePresenter(language).present(event).text
+    assert ("may help" if language == "en" else "ممکن است") in text
+    assert "Advanced" not in text and "telegram_" not in text
+
+
 def test_chat_failure_explains_unsupported_name_and_missing_screen_access() -> None:
     intent = CommandIntent(CommandKind.OPEN_CHAT, "save message", "telegram")
     unsupported = ActionFeedback(

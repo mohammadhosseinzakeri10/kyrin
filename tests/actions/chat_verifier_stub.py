@@ -17,17 +17,17 @@ class StubChatVerifier:
         raise AssertionError("Unexpected chat verification call: find_visible_control")
 
     def find_search_result(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None:
         raise AssertionError("Unexpected chat verification call: find_search_result")
 
     def find_search_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None:
         raise AssertionError("Unexpected chat verification call: find_search_choices")
 
     def find_visible_chat_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None:
         raise AssertionError(
             "Unexpected chat verification call: find_visible_chat_choices"
@@ -36,24 +36,43 @@ class StubChatVerifier:
     def choice_status(self) -> str:
         raise AssertionError("Unexpected chat verification call: choice_status")
 
-    def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
+    def verify(
+        self,
+        app_id: str,
+        pid: int,
+        target: str = "Saved Messages",
+        *,
+        window_token: str | None = None,
+    ) -> bool:
         raise AssertionError("Unexpected chat verification call: verify")
 
     def find_left_label(
-        self, app_id: str, pid: int, label: str, *, menu: bool = False
+        self,
+        app_id: str,
+        pid: int,
+        label: str,
+        *,
+        menu: bool = False,
+        window_token: str | None = None,
     ) -> ChatSearchMatch | None:
         raise AssertionError("Unexpected chat verification call: find_left_label")
 
     def find_settings_item(
-        self, app_id: str, pid: int, label: str
+        self, app_id: str, pid: int, label: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None:
         raise AssertionError("Unexpected chat verification call: find_settings_item")
 
-    def settings_page_header(self, app_id: str, pid: int) -> str | None:
+    def settings_page_header(
+        self, app_id: str, pid: int, *, window_token: str | None = None
+    ) -> str | None:
         raise AssertionError("Unexpected chat verification call: settings_page_header")
 
-    def has_view_title(self, app_id: str, pid: int, title: str) -> bool:
+    def has_view_title(
+        self, app_id: str, pid: int, title: str, *, window_token: str | None = None
+    ) -> bool:
         raise AssertionError("Unexpected chat verification call: has_view_title")
 
-    def has_search_query(self, app_id: str, pid: int, query: str) -> bool:
+    def has_search_query(
+        self, app_id: str, pid: int, query: str, *, window_token: str | None = None
+    ) -> bool:
         raise AssertionError("Unexpected chat verification call: has_search_query")

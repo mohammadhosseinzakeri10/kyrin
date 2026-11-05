@@ -18,7 +18,7 @@ from kyrin.actions.platforms.input_session import InputSessionService, Wire
 from kyrin.actions.platforms.portal_input import PortalInputSession
 from kyrin.app.permission_token import read_opaque_token, save_opaque_token
 from kyrin.app.permissions import PermissionPolicy
-from kyrin.app.settings import AppSettings
+from kyrin.app.settings import AllowedApp, AppSettings
 from kyrin.operations import OperationStopped, budget
 
 
@@ -201,7 +201,7 @@ def action():
     return 0
 module.main = action
 sys.modules[module.__name__] = module
-for name in ("desktop_control_helper", "telegram_portal_helper"):
+for name in ("desktop_control_helper", "telegram_portal_helper", "terminal_tab_helper"):
     sys.modules["kyrin.actions.platforms." + name] = module
 serve(Wire(socket.socket(fileno=int(sys.argv[1]))), backend)
 """
@@ -274,16 +274,32 @@ def service_token_path() -> Path:
     return permission_token_path("desktop-input")
 
 
+@pytest.mark.parametrize(
+    "grant", ["all", "desktop_scroll", "desktop_control", "terminal_tab_keyboard"]
+)
 def test_one_setup_and_restart_restore_all_selected_input_capabilities(
-    service: InputSessionService, monkeypatch: pytest.MonkeyPatch
+    service: InputSessionService, monkeypatch: pytest.MonkeyPatch, grant: str,
 ) -> None:
     monkeypatch.setenv("KYRIN_TEST_PERSISTENT", "1")
     policy = PermissionPolicy(
-        AppSettings(action_execution_enabled=True, trust_all_capabilities=True)
+        AppSettings(
+            action_execution_enabled=True,
+            trust_all_capabilities=grant == "all",
+            allow_desktop_scroll=grant == "desktop_scroll",
+            allow_desktop_control=grant in {"desktop_control", "terminal_tab_keyboard"},
+            capability_grants=("terminal_tab_keyboard",)
+            if grant == "terminal_tab_keyboard" else (),
+        )
     )
+    capability = (
+        "telegram_chat" if grant == "all" else
+        "desktop_control" if grant == "terminal_tab_keyboard" else grant
+    )
+    devices = 3 if grant in {"all", "terminal_tab_keyboard"} else 2
     service.configure(policy)
     assert service.startup_capability() is None  # First run needs explicit setup.
-    assert service.prepare("desktop_scroll")["devices"] == 3
+    setup_capability = "desktop_scroll" if grant == "all" else capability
+    assert service.prepare(setup_capability)["devices"] == devices
     assert read_opaque_token(service_token_path()) == "initial-next"
     for index in range(2):
         service.disconnect()  # Same transition as actual application exit.
@@ -298,16 +314,22 @@ def test_one_setup_and_restart_restore_all_selected_input_capabilities(
 
         monkeypatch.setattr(restarted, "_start", launch)
         try:
-            assert restarted.startup_capability() == "telegram_chat"
-            restored = restarted.prepare("telegram_chat", restore=True)
-            assert restored["state"] == "ready" and restored["devices"] == 3
+            assert restarted.startup_capability() == capability
+            restored = restarted.prepare(capability, restore=True)
+            assert restored["state"] == "ready" and restored["devices"] == devices
             assert restored["starts"] == 1
             for name in (
                 "desktop_scroll_helper.py", "desktop_control_helper.py",
                 "telegram_portal_helper.py",
+                "terminal_tab_helper.py",
             ):
                 result = restarted.run(["python", name, "target"], timeout=2)
-                assert result.returncode == 0
+                permitted = grant == "all" or name == grant + "_helper.py"
+                if grant == "terminal_tab_keyboard":
+                    permitted = name in {
+                        "terminal_tab_helper.py", "desktop_control_helper.py",
+                    }
+                assert result.returncode == (0 if permitted else 3)
             assert restarted.status()["starts"] == 1
             expected = "initial" + "-next" * (index + 2)
             assert read_opaque_token(service_token_path()) == expected
@@ -624,3 +646,31 @@ def test_late_closed_signal_for_replaced_session_cannot_close_new_session() -> N
     assert not backend.closed
     backend._closed(None, "portal", "/new")
     assert backend.closed
+
+
+def test_terminal_tab_cannot_borrow_telegram_keyboard_permission(
+    service: InputSessionService, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KYRIN_TEST_PERSISTENT", "1")
+    service.configure(PermissionPolicy(AppSettings(
+        action_execution_enabled=True, allow_desktop_control=True,
+        allowed_apps=(AllowedApp("telegram", "org.telegram.desktop"),),
+        allowed_chat_apps=("telegram",), remember_telegram_pointer=True,
+    )))
+    assert service.prepare("desktop_control")["devices"] == 3
+    owner = service._process
+    result = service.run(["python", "terminal_tab_helper.py", "target"], timeout=2)
+    assert result.returncode == 3
+    assert service._process is owner and service.status()["starts"] == 1
+
+
+def test_terminal_keyboard_grant_alone_cannot_start_or_execute_input(
+    service: InputSessionService,
+) -> None:
+    service.configure(PermissionPolicy(AppSettings(
+        action_execution_enabled=True, capability_grants=("terminal_tab_keyboard",),
+    )))
+    assert service.startup_capability() is None
+    result = service.run(["python", "terminal_tab_helper.py", "target"], timeout=2)
+    assert result.returncode == 3
+    assert service._wire is None

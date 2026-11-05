@@ -26,6 +26,7 @@ class CommandKind(StrEnum):
     RESTORE_APP = "restore_app"
     MINIMIZE_APP = "minimize_app"
     CLOSE_APP_WINDOW = "close_app_window"
+    CLOSE_ALL_APP_WINDOWS = "close_all_app_windows"
     MAXIMIZE_APP = "maximize_app"
     UNMAXIMIZE_APP = "unmaximize_app"
     FULLSCREEN_APP = "fullscreen_app"
@@ -67,6 +68,11 @@ class CommandIntent:
     control_observation: WindowObservation | None = None
 
     control_accessibility: AccessibilityTarget | None = None
+    tab_selection_id: str | None = None
+    tab_observation: WindowObservation | None = None
+    # The focused window observed for this spoken scroll request. It travels
+    # through queues and input admission unchanged; it is never refreshed.
+    scroll_observation: WindowObservation | None = None
     recovery: RecoveryTrace | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
@@ -155,8 +161,26 @@ class CommandIntent:
                 raise ValueError(
                     "numbered window action requires a positive window number"
                 )
-        elif self.window_index is not None:
+        elif self.window_index is not None and not (
+            self.kind is CommandKind.NEW_APP_TAB
+            and self.tab_selection_id is not None
+            and type(self.window_index) is int
+            and self.window_index > 0
+        ):
             raise ValueError("only numbered window actions may carry a window number")
+        if self.tab_selection_id is not None and (
+            not self.tab_selection_id.strip()
+            or self.kind not in (CommandKind.SHOW_APP_WINDOWS, CommandKind.NEW_APP_TAB)
+            or (self.kind is CommandKind.NEW_APP_TAB and self.window_index is None)
+        ):
+            raise ValueError(
+                "tab selection needs a bound picker or numbered tab request"
+            )
+        if self.tab_observation is not None and (
+            self.kind is not CommandKind.NEW_APP_TAB
+            or self.tab_selection_id is not None
+        ):
+            raise ValueError("focused tab evidence cannot accompany a picker selection")
         if self.kind in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN):
             if self.scroll_steps is not None and (
                 type(self.scroll_steps) is not int or not 1 <= self.scroll_steps <= 4
@@ -168,6 +192,8 @@ class CommandIntent:
             raise ValueError("only scroll actions may carry scroll steps")
         elif self.scroll_area is not None:
             raise ValueError("only scroll actions may carry a scroll area")
+        elif self.scroll_observation is not None:
+            raise ValueError("only scroll actions may carry scroll window evidence")
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +253,8 @@ class CommandContext:
     )
     recovery_candidates: tuple[RecoveryCandidate, ...] = ()
     transcript_emitted_ns: int | None = field(default=None, compare=False)
+    observed_window: WindowObservation | None = None
+    request_id: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +289,8 @@ class PendingWindowSelection:
     app_candidate: SpokenAppCandidate
     count: int
     all_apps: bool = False
+    tab_selection_id: str | None = None
+    deadline: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +393,9 @@ class ResponseRequest:
     operation_candidates: tuple[CommandKind, ...] = ()
     window_count: int = 0
     window_index: int = 0
+    # Trusted built-in prompts may supply reviewed alternatives. Model replies
+    # carry only their original message and leave this immutable catalog empty.
+    message_translations: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind is ResponseKind.CONVERSATION:
@@ -374,7 +407,7 @@ class ResponseRequest:
                 or self.app_candidates
             ):
                 raise ValueError("conversation requires only a short message")
-        elif self.message is not None:
+        elif self.message is not None or self.message_translations:
             raise ValueError("only conversation may carry a message")
         if self.kind is ResponseKind.REPEAT_COMMAND and (
             self.target is not None or self.app_candidates

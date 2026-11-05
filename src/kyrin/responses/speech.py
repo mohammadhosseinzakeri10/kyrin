@@ -163,6 +163,15 @@ class ResponseSpeaker:
     def is_active(self) -> bool:
         return self._active.is_set()
 
+    def snapshot(self) -> tuple[str, ...]:
+        with self._lock:
+            return (
+                f"pending={self._queue.qsize()} limit={self._queue.maxsize} "
+                "unit=responses "
+                f"speaking={self._speaking} playing={self.is_playing} "
+                f"closed={self._closed.is_set()} alive={self._worker.is_alive()}",
+            )
+
     @property
     def is_playing(self) -> bool:
         """Echo guard state; queueing and known model synthesis are not audio.

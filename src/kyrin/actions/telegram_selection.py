@@ -136,9 +136,14 @@ class TelegramChatSelection:
         self,
         on_prompt: Callable[[ResponseRequest], None],
         on_feedback: Callable[[ActionFeedback], None],
+        *,
+        on_selection_start: Callable[[ActionRequest], None] | None = None,
+        on_navigation_start: Callable[[ActionRequest], None] | None = None,
     ) -> None:
         self._on_prompt = on_prompt
         self._on_feedback = on_feedback
+        self._on_selection_start = on_selection_start
+        self._on_navigation_start = on_navigation_start
         self._completion: Completion | None = None
         self._page_navigation: PageNavigation | None = None
         self._pending: _Pending | None = None
@@ -342,6 +347,8 @@ class TelegramChatSelection:
 
         def work() -> None:
             try:
+                if self._on_selection_start is not None and not cancellation.is_set():
+                    self._on_selection_start(pending.request)
                 result = completion(
                     pending.request,
                     pending.identity,
@@ -396,6 +403,8 @@ class TelegramChatSelection:
 
         def work() -> None:
             try:
+                if self._on_navigation_start is not None and not cancellation.is_set():
+                    self._on_navigation_start(pending.request)
                 choices = navigation(
                     pending.identity, pending.target, pending.choices, cancellation
                 )
@@ -487,7 +496,14 @@ class TelegramChatSelection:
         self._say(pending.request, english, persian)
 
     def _say(self, request: ActionRequest, english: str, persian: str) -> None:
-        is_persian = (request.language or "").startswith("fa")
+        language = (
+            (request.language or "en")
+            .strip()
+            .replace("_", "-")
+            .split("-", 1)[0]
+            .lower()
+        )
+        is_persian = language == "fa"
         self._on_prompt(
             ResponseRequest(
                 request.key.segment_id,
@@ -496,5 +512,6 @@ class TelegramChatSelection:
                 stream_id=request.key.stream_id,
                 language=request.language or "en",
                 message=persian if is_persian else english,
+                message_translations=(("en", english), ("fa", persian)),
             )
         )

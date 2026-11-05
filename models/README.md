@@ -1,28 +1,22 @@
 # Local model assets
 
-On the current development machine, installed STT/OCR models and optional TTS
-runtimes are stored on the same AI-Projects drive under
-`/mnt/ai_projects/KYRIN/local-data/kyrin/`. The standard user-data path is a
-symlink to that directory; see [local data storage](../docs/app/LOCAL_DATA_STORAGE.md).
-On this source checkout, TTS packages selected by the application now live in
-the organized `models/local/by-model/tts/` catalog. Installed STT and OCR data
-remain under `local-data/kyrin/models/`.
+Use [Getting started](../docs/GETTING_STARTED.md#2-configure-speech-input) to
+choose a supported speech-recognition adapter. Obtain the compatible runtime
+and model separately, and check upstream terms before redistribution. The
+[local data guide](../docs/app/LOCAL_DATA_STORAGE.md) explains where imports,
+settings and development caches live.
 
 ## Per-model development catalog
 
-The development catalog at `models/local/by-model/` separates four Ollama
-command models, four STT models, three TTS models, and English Tesseract data by
-function, engine, and full model name. Its local `README.md` lists the tree.
-Each Ollama model has its own complete store. Files shared by the original
-combined store are independent physical copies in the corresponding model
-directories. KYRIN now discovers all four command models from this catalog
-and starts Ollama against only the selected model's store.
+A source checkout can use named model directories under `models/local/by-model/`.
+Keep each Ollama model's `blobs/` and `manifests/` together. The app can start
+an owned loopback server using the selected model's store. Imported STT models
+are managed in the installed library. TTS packages in the source catalog use
+`models/local/by-model/tts/<family>/<model>/`.
 
-The application's imported STT library remains in `local-data/kyrin/models/`.
-Installed STT folders include their engine and model names before a stable
-unique suffix. The named TTS catalog is both the source-checkout model library
-and the Voice Output page's discovery root, avoiding duplicate TTS weights.
-Downloaded weights and local runtimes are excluded from Git.
+The records below describe models evaluated on a development machine. They
+describe development setup and experiments. Obtain and configure any
+model you want to use.
 
 ## Local command-understanding candidates
 
@@ -55,7 +49,7 @@ store. The other default-store models were left in place. To inspect one model
 outside KYRIN, start a **separate** local server pointed at that model's folder:
 
 ```bash
-OLLAMA_MODELS=/mnt/ai_projects/KYRIN/models/local/by-model/command-understanding/ollama/qwen3.5-4b \
+OLLAMA_MODELS="$PWD/models/local/by-model/command-understanding/ollama/qwen3.5-4b" \
   OLLAMA_HOST=127.0.0.1:11435 OLLAMA_NO_CLOUD=1 ollama serve
 ```
 
@@ -69,7 +63,7 @@ OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.5:4b
 KYRIN's Command Understanding page discovers all four names from their parent
 directory; selecting a name uses only its own store. The dry-run comparison
 tool and its limitations are described in
-[`LOCAL_MODEL_COMPARISON.md`](../docs/commands/LOCAL_MODEL_COMPARISON.md).
+[`LOCAL_MODEL_COMPARISON.md`](../docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md).
 
 This directory keeps development model assets in a predictable place. Model
 weights and archives are intentionally excluded from Git because they are large
@@ -115,7 +109,7 @@ Six Omnilingual ASR v2 checkpoints are stored separately under
 `models/local/by-model/stt/omnilingual-asr/<model-name>/`. Each folder includes
 its own copy of `omniASR_tokenizer_written_v2.model`. KYRIN reads these folders
 in place and runs the official package from an isolated Python 3.12 runtime;
-see [local integration](../docs/stt/OMNILINGUAL_ASR_FA.md).
+see [local integration](../docs/stt/OMNILINGUAL_ASR.md).
 
 ## Local Whisper comparison models
 

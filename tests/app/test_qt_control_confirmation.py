@@ -8,6 +8,7 @@ from time import monotonic, sleep
 import pytest
 
 pytest.importorskip("PySide6")
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton  # noqa: E402
 
 from kyrin.actions.control_policy import (  # noqa: E402
@@ -121,14 +122,75 @@ def test_expired_prompt_and_ui_thread_call_cannot_open_dialog() -> None:
     assert isinstance(app, QApplication)
     bridge = QtControlConfirmation()
     original = prompt()
+    # Derive the deadline from the shifted start, as the contract does;
+    # shifting both bounds can exceed the age limit by one rounding step.
+    stale = original.window.observed_at - 11
     expired = replace(
         original,
-        window=replace(
-            original.window,
-            observed_at=original.window.observed_at - 11,
-            deadline=original.window.deadline - 11,
-        ),
+        window=replace(original.window, observed_at=stale, deadline=stale + 10),
     )
     assert not bridge.confirm(original)
     assert not worker(app, lambda: bridge.confirm(expired), lambda: None)
     assert bridge._dialog is None
+
+
+@pytest.mark.parametrize(
+    ("language", "persian"),
+    [
+        ("en", False),
+        ("en-US", False),
+        (" EN_us ", False),
+        (None, False),
+        ("de", False),
+        ("fa", True),
+        ("fa-IR", True),
+        ("fa_IR", True),
+        (" FA_ir ", True),
+    ],
+)
+@pytest.mark.parametrize("close", [False, True])
+def test_confirmation_locale_keeps_target_and_requires_explicit_cancel(
+    language: str | None, persian: bool, close: bool
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    bridge = QtControlConfirmation()
+    value = replace(
+        prompt(),
+        language=language,
+        target=replace(prompt().target, label="گزینهٔ <b>آزمایش</b>"),
+        capability=ControlCapability.CLOSE_WINDOW
+        if close
+        else ControlCapability.ACTIVATE,
+    )
+    observed: list[tuple[str, str, Qt.LayoutDirection, Qt.TextFormat, str, str]] = []
+
+    def cancel() -> None:
+        dialog = bridge._dialog
+        if dialog is None or observed:
+            return
+        message = dialog.findChildren(QLabel)[0]
+        buttons = dialog.findChildren(QPushButton)
+        observed.append(
+            (
+                dialog.windowTitle(),
+                message.text(),
+                dialog.layoutDirection(),
+                message.textFormat(),
+                buttons[0].text(),
+                buttons[1].text(),
+            )
+        )
+        buttons[0].click()
+
+    assert not worker(app, lambda: bridge.confirm(value), cancel)
+    assert observed and bridge._dialog is None
+    title, text, direction, text_format, cancel_text, approve_text = observed[0]
+    assert text_format is Qt.TextFormat.PlainText
+    assert value.target.label in text
+    assert direction is (
+        Qt.LayoutDirection.RightToLeft if persian else Qt.LayoutDirection.LeftToRight
+    )
+    assert title == ("KYRIN — تأیید کنترل" if persian else "KYRIN — Confirm control")
+    assert cancel_text == ("لغو" if persian else "Cancel")
+    assert approve_text == ("تأیید همین عمل" if persian else "Approve this operation")

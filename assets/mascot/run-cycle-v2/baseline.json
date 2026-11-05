@@ -1,0 +1,104 @@
+{
+  "neutral": {
+    "translation_x": 0,
+    "translation_y": 0,
+    "rotation_angle_z": 0,
+    "scale_x": 1,
+    "scale_y": 1,
+    "opacity": 255
+  },
+  "executing": {
+    "repeat": true,
+    "frames": [
+      {
+        "duration": 240,
+        "body": {
+          "translation_y": -5
+        },
+        "head": {
+          "translation_y": -3,
+          "rotation_angle_z": -3
+        },
+        "leftLeg": {
+          "rotation_angle_z": 18,
+          "translation_y": -3
+        },
+        "rightLeg": {
+          "rotation_angle_z": -18
+        },
+        "leftArm": {
+          "rotation_angle_z": -24
+        },
+        "rightArm": {
+          "rotation_angle_z": 24
+        }
+      },
+      {
+        "duration": 240,
+        "body": {
+          "translation_y": 0
+        },
+        "head": {
+          "rotation_angle_z": 3
+        },
+        "leftLeg": {
+          "rotation_angle_z": -18
+        },
+        "rightLeg": {
+          "rotation_angle_z": 18,
+          "translation_y": -3
+        },
+        "leftArm": {
+          "rotation_angle_z": 24
+        },
+        "rightArm": {
+          "rotation_angle_z": -24
+        }
+      }
+    ]
+  },
+  "pivots": {
+    "leftLeg": [
+      0.4,
+      0.72
+    ],
+    "rightLeg": [
+      0.6,
+      0.72
+    ],
+    "leftArm": [
+      0.32,
+      0.51
+    ],
+    "rightArm": [
+      0.68,
+      0.51
+    ],
+    "body": [
+      0.5,
+      0.7
+    ],
+    "head": [
+      0.5,
+      0.49
+    ],
+    "eyes": [
+      0.5,
+      0.33
+    ]
+  },
+  "source_directory": "integrations/gnome-shell/visual-status@kyrin.local/",
+  "sha256": {
+    "mascotAnimation.js": "921435a4a4579190ade4ea9f34eb15de0b378863fac4c86a3be24518ee75d498",
+    "extension.js": "e12bc71439fb8113d745191bd68aa091db0022321c43fae27af8f6aae844068a",
+    "stylesheet.css": "84b161e8a13ae9db89b731769788ea1c4df373b4776db11935c72e0f9b357f40",
+    "mascot.svg": "4e60da6cf0c1fa83da5e303edde30115cae618639188222d1fb536c9a1d32454",
+    "mascotBody.svg": "09b3339abee4a3c11c57844af7f39e3dec37aa075e5dd67229ffdb38b5c46d0d",
+    "mascotEyes.svg": "9456e46a45e133dd4ab454a6b59fab001c25c8557ce16e0007a30b8a453204b1",
+    "mascotHead.svg": "d560358b09a83efd000e47069a99ea9b716c14f3fbb23d9593728c5f767c9e99",
+    "mascotLeftArm.svg": "9d7024b75ab043b07e3858debbcb568c66644498950e108ef387e4293d5916f4",
+    "mascotLeftLeg.svg": "ccb6bd4b1db57c8da19e6298ed13b5f362b752f1600fa84e1be30797fa8b3dae",
+    "mascotRightArm.svg": "25d25f1b15765327c1f52e0973bb25a03c73f04b09174c485ec560ce82139c47",
+    "mascotRightLeg.svg": "5ee0adcd64a478a34537c5d8c1d935d404d66607c05cb959a570ddba7696ebd6"
+  }
+}

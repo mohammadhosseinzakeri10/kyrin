@@ -15,19 +15,29 @@ There is no guaranteed review or maintenance schedule.
    describe experiments that have since been superseded.
 
 Use English for new public issues and pull requests where practical.
-Existing Persian engineering notes do not need wholesale translation.
+Preserve localized catalogs, literal targets and language-sensitive fixtures.
 
 ## Development setup
 
-Follow [getting started](docs/GETTING_STARTED.md), then install the pinned
-`requirements/dev.txt` and system test tools. Run from the repository root:
+Follow [getting started](docs/GETTING_STARTED.md) to install the pinned core
+and Qt requirements. To contribute, apply your changes on a branch from
+public `main`. On Ubuntu 26.04, the full gate uses additional system tools
+and the same development requirements as the
+[CI workflow](.github/workflows/quality.yml).
 
 ```bash
+sudo apt-get install -y gjs dbus-daemon systemd python3-gi \
+  gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 bubblewrap libespeak-ng1
 export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
 .venv/bin/python -m pip install -r requirements/dev.txt
 .venv/bin/python -m pip check
-.venv/bin/python scripts/development/check.py
+PYTHONPATH="$PWD/src" .venv/bin/python scripts/development/check.py
 ```
+
+The gate writes per-stage logs and `summary.json` to `local-data/quality/`.
+Record the commit, both the application and system Python versions, and the
+checks you ran when reporting results. The system GI helpers use
+`/usr/bin/python3` and need Python 3.14 or later.
 
 The gate checks all `src`, `tests` and `scripts` with syntax validation, Ruff,
 strict mypy and pytest. Qt runs headlessly. Tests must not use personal

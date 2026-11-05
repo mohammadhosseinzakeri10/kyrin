@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "scope": "design_contract_only_no_runtime_changes",
+  "owner_authorized_scope": "design_stages_1_through_7",
+  "result_lifetime": "retain_result_until_next_meaningful_event_not_silence",
+  "execution_policy": {
+    "start": "actual_action_executor_start",
+    "never_start_for": ["speech_partial", "interpretation", "queued_request", "dry_run"],
+    "stop": ["confirmed_result", "failed_result", "unverified_result", "cancellation"],
+    "minimum_display_duration_ms": 0,
+    "finish_cycle_before_showing_result": false,
+    "progress_percentage_from_animation": false
+  },
+  "states": {
+    "ready": {"meaning": "waiting_for_speech", "motion": "subtle_breathing", "symbol": null},
+    "conversation": {"meaning": "presenting_a_conversational_reply", "motion": "brief_visible_hand_gesture_once_per_new_reply", "symbol": null},
+    "listening": {"meaning": "user_speech_activity", "motion": "quiet_attention_and_brief_blink", "symbol": null},
+    "processing": {"meaning": "transcribing_or_interpreting", "motion": "quiet_thinking_pose", "symbol": null},
+    "question": {"meaning": "waiting_for_user_clarification_or_choice", "motion": "brief_question_pose_then_quiet_wait", "symbol": "?"},
+    "executing": {"meaning": "approved_action_is_actually_running", "motion": "run_in_place", "symbol": null},
+    "confirmed": {"meaning": "result_confirmed_by_action_evidence", "motion": "brief_coordinated_acknowledgement_then_rest", "symbol": "✓"},
+    "unverified": {"meaning": "request_sent_but_result_not_confirmed", "motion": "quiet_uncertain_pose_no_implied_active_check", "symbol": "…"},
+    "failed": {"meaning": "action_failed_or_was_blocked", "motion": "brief_clear_failure_pose_then_rest", "symbol": "!"}
+  },
+  "presentation_rules": {
+    "preserve_identity": ["head_shape", "eye_design", "blue_violet_palette", "core_emblem"],
+    "movement_on_desktop": false,
+    "reduced_motion": "static_pose_caption_and_symbol_remain_readable",
+    "hidden": "stop_motion_and_scheduled_frames",
+    "new_dependencies": false
+  }
+}

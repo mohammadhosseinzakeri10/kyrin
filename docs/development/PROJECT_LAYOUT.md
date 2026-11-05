@@ -1,9 +1,8 @@
 # KYRIN project layout
 
-This map separates product source, tests, documentation, development models,
-and installed application data. It describes the current repository, not a
-future package format. Model weights, runtimes, recordings, and settings are
-local machine data and are not committed to Git.
+This map describes the v0.1.0 source tree and its local setup. Keep separately
+acquired models, optional runtimes, recordings and settings outside Git.
+The bundled Silero VAD model has its own [notice](../../THIRD_PARTY_NOTICES.md).
 
 ## Top level
 
@@ -17,7 +16,7 @@ local machine data and are not committed to Git.
 | `datasets/` | Evaluation manifests; local recordings and results are ignored | Mixed |
 | `src/kyrin/app/qt/assets/` | Visual assets used by the Qt application | Tracked |
 | `models/` | Model documentation and ignored development model packages | Mixed |
-| `local-data/` | Installed STT/OCR models, optional runtimes, caches, and app settings on this workstation | Ignored |
+| `local-data/` | Checkout-local downloads, caches and development outputs | Ignored |
 | `downloads/`, `build/`, `.venv/` | Temporary downloads, build products, and development environment | Ignored |
 
 ## Product source and matching tests
@@ -83,64 +82,20 @@ raw acquisition. Its callers span the app, runtime, evaluation, and tests.
 A future boundary change should move that orchestration and update those
 callers together; the current file name and imports are stable.
 
-## Model and runtime locations on this Ubuntu workstation
+## Model and runtime locations
 
-```text
-models/
-  README.md
-  archive/                         downloaded source archives
-  local/
-    by-model/                       named development packages
-      command-understanding/ollama/ one complete store per model
-      stt/vosk/                     one extracted folder per Vosk model
-      stt/whisper.cpp/              one folder per Whisper model
-      stt/omnilingual-asr/           six local v2 model folders
-      tts/<family>/<model>/         selected TTS packages, one per model
-      ocr/tesseract/                OCR language data only
-    ocr/tesseract/                   experimental OCR executable and libraries
+Development model packages live under `models/local/by-model/`. App imports
+use the XDG application data directory. Imported STT entries have stable
+internal IDs and `model.json` metadata. See [local storage](../app/LOCAL_DATA_STORAGE.md)
+for settings, history and caches, and [model notes](../../models/README.md)
+for engine-specific catalog examples.
 
-local-data/
-  kyrin/
-    models/stt/                     models imported through the application
-    models/ocr/                     installed OCR runtime and language data
-    runtimes/                       optional engine environments
-    tools/                          download/setup tools
-    cache/                          project-specific caches, when used
-  diagnostics/                      retained local artifacts of uncertain origin
-  config/kyrin/                     application settings
-```
-
-The named `by-model/` directory is the canonical **development catalog** and,
-for TTS in this source checkout, the application's model library.
-Every Ollama model has its own `blobs/` and `manifests/`; a file needed by two
-models was copied into both stores. The Command Understanding page lists the
-four stores together and starts only the selected store. The old combined
-Ollama store and duplicate development STT folders were removed after path,
-content, and startup checks.
-
-`local-data/kyrin/models/` is the **installed application library**. Its STT
-entries have readable names plus unique internal IDs and `model.json` metadata,
-so the application can manage imports without depending on folder spelling.
-The UI displays model names from that metadata. Keeping an installed copy
-separate from a development model allows either one to change without silently changing the
-other. TTS packages are organized by family and model under
-`models/local/by-model/tts/` and are selected by path without an installed
-duplicate. A packaged app without this checkout uses its platform application
-data directory as a fallback. The OCR runtime is separate from its trained
-language data.
-
-The desktop entry point accepts a development model catalog only when its
-module is physically inside the expected `src/kyrin/app/qt/` source layout
-and that checkout has `pyproject.toml`. An installed wheel therefore uses the
-application model library for TTS and installed STT entries; it does not infer
-a model catalog from unrelated parent directories. This guards path discovery
-but does not yet constitute a portable release: optional speech runtimes,
-model acquisition, and desktop integration still need packaging and an
-installed-environment acceptance test.
-
-On this machine, the standard XDG application paths point to `local-data/`
-through symlinks. See [local storage](../app/LOCAL_DATA_STORAGE.md). Portable
-product code derives platform paths; it must not hard-code this mount path.
+The Qt entry point discovers the development catalog only when its module
+is physically inside a source checkout with the expected `src/kyrin/app/qt/`
+layout and `pyproject.toml`. A wheel installation uses the application model
+library instead of inferring a checkout from its parent directories. Model
+acquisition, optional runtime setup and GNOME integration are separate from
+installing the wheel.
 
 ## Where to add future work
 

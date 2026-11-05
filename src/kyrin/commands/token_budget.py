@@ -8,12 +8,21 @@ import json
 import os
 import re
 import shutil
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from urllib.request import urlopen
 
 from kyrin.commands.ollama_models import ollama_model_stores
-from kyrin.operations import remaining, run_process
+from kyrin.operations import check_operation, remaining, run_process
+
+_MAX_COUNT_ENTRIES = 32
+_MAX_COUNT_PROMPT_BYTES = 64 * 1024
+
+
+def _file_identity(path: Path) -> tuple[int, ...]:
+    stat = path.stat()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 def local_tokenizer() -> Path | None:
@@ -74,6 +83,22 @@ class OllamaTokenCounter:
         self._binary: Path | None = None
         self._blob: Path | None = None
         self.rendered_prompt: str | None = None
+        # Counts only: rendering and inference remain fresh. No native model is
+        # kept resident. The cache belongs to this selected counter/session.
+        self._counts: OrderedDict[bytes, int] = OrderedDict()
+        self._count_identity: tuple[tuple[int, ...], tuple[int, ...]] | None = None
+
+    def _vocabulary_identity(
+        self,
+    ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+        if self._binary is None or self._blob is None:
+            return None
+        try:
+            return (_file_identity(self._binary), _file_identity(self._blob))
+        except OSError:
+            # Missing/unobservable files must not reuse an old count. Retain
+            # the original native error path rather than guessing a count.
+            return None
 
     def __call__(self, payload: dict[str, object]) -> int:
         if not self._validated:
@@ -109,6 +134,15 @@ class OllamaTokenCounter:
         ):
             raise ValueError("Ollama did not return an untruncated chat template")
         self.rendered_prompt = prompt
+        check_operation()
+        encoded = prompt.encode("utf-8")
+        identity = self._vocabulary_identity()
+        if identity != self._count_identity:
+            self._counts.clear()
+            self._count_identity = identity
+        if identity is not None and (saved := self._counts.get(encoded)) is not None:
+            self._counts.move_to_end(encoded)
+            return saved
         result = run_process(
             [
                 str(self._binary),
@@ -119,7 +153,7 @@ class OllamaTokenCounter:
                 "--no-escape",
                 "--offline",
             ],
-            input=prompt.encode("utf-8"),
+            input=encoded,
             timeout=10,
         )
         if result.returncode != 0:
@@ -127,4 +161,15 @@ class OllamaTokenCounter:
         ids = json.loads(result.stdout)
         if not isinstance(ids, list) or not all(type(token) is int for token in ids):
             raise ValueError("invalid token counter response")
-        return len(ids)
+        count = len(ids)
+        if (
+            identity is not None
+            and identity == self._vocabulary_identity()
+            and len(encoded) <= _MAX_COUNT_PROMPT_BYTES
+            and count > 0
+        ):
+            self._counts[encoded] = count
+            self._counts.move_to_end(encoded)
+            if len(self._counts) > _MAX_COUNT_ENTRIES:
+                self._counts.popitem(last=False)
+        return count

@@ -7,20 +7,13 @@ text, image coordinates, confidence when available, language, engine, and
 actual compute device. Text visible in an image is untrusted observation, not
 an executable instruction or a stable UI selector.
 
-<div dir="rtl" lang="fa">
-
-فهرست برچسب‌های قابل مشاهده و مکان‌یاب از نرمال‌سازی و سازندهٔ عبارت مشترک
-در `text_targets.py` استفاده می‌کنند. ترتیب خواندن خروجی OCR حفظ می‌شود؛
-عبارت فارسی، انگلیسی و ترکیبی، چه در یک span و چه در چند span، با همان
-قواعد هم‌سطری، فاصله و هم‌پوشانی محدود بررسی می‌شود. متن چندخطی یک برچسب
-تک‌خطی نمی‌سازد. حداقل confidence همهٔ spanهای عبارت حفظ می‌شود؛ وجود حتی
-یک مقدار ناموجود، confidence کل عبارت را نامعلوم می‌کند. پالایش پس از
-ساخت عبارت انجام می‌شود تا کلمهٔ کم‌اطمینان حذف و همسایه‌هایش به هم وصل
-نشوند. تکرارهای OCR با همین نرمال‌سازی از فهرست انتخاب یکتا حذف می‌شوند.
-انتخاب زبان هدف و آستانهٔ فعلی ۰٫۶۵ تغییر نکرده‌اند؛ این آستانه ادعای
-کالیبراسیون مشترک میان موتورهای OCR نیست. آزمون زندهٔ این تغییر انجام نشده است.
-
-</div>
+The visible-label list and locator share phrase assembly in
+`text_targets.py`. It preserves OCR read order and applies the same line,
+spacing and overlap bounds to English, Persian and mixed-script spans.
+A phrase uses the lowest constituent confidence. Missing confidence remains
+unknown. Filtering runs after assembly so rejecting one word cannot join
+its neighbors. The 0.65 threshold is a policy setting without demonstrated
+cross-engine calibration.
 
 ## Ubuntu acquisition
 
@@ -191,8 +184,8 @@ contains Persian script and `fas.traineddata` is installed beside
 It uses Tesseract page segmentation mode 3 for Persian and preserves mode 11
 for English-only reads. A missing Persian model stops the chat match without
 clicking. Both the language data and the optional runtime stay in the local
-project data on the owner's AI-Projects drive. This does not translate a
-misheard chat name or guarantee OCR accuracy on the owner's Telegram theme.
+project data. Chat name matching keeps the original script and depends on
+recognition quality and the application's visible layout.
 This read-only path does not send OCR text to the command interpreter, click
 anything, or treat image text as an instruction. Action targeting needs a
 separate design and a fresh identity/target check at execution time.
@@ -234,37 +227,14 @@ The default output reports only engine, device, and word count. Add
 in terminal output. The diagnostic requests a window through the system
 picker every time and never launches an application.
 
-<div dir="rtl" lang="fa">
+Model admission and residency follow the [shared resource policy](../app/MODEL_RESOURCE_POLICY.md).
+The application keeps device selection and capability checks separate. Native
+latency and memory behavior still require measurement.
 
-**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
-[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
-تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
-سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
-
-</div>
-
-<div dir="rtl" lang="fa">
-
-**بخش محدود F22، ۲۰۲۶/۱۰/۲۴:** ساخت snapshot از تصویر و نتیجهٔ OCR در
-`IdentifiedWindowText.from_capture` مشترک است؛ مسیر مستقل و Qt اندازهٔ PNG،
-مستطیل‌ها و هندسه را از همان capture منتقل می‌کنند. Qt ابتدا مختصات OCR را
-به تصویر اصلی برمی‌گرداند؛ سازنده فقط منشأ برش/بزرگ‌نمایی را ثبت می‌کند و
-مختصات را تغییر نمی‌دهد. ابعاد ناموجود یا خارج از محدوده همچنان نامعلوم
-می‌مانند و مجوز ساخت هدف ایجاد نمی‌کنند. سازندهٔ مستقیم و فیلدهای اختیاری
-برای فراخواننده‌های موجود حفظ شده‌اند. این استخراج فقط مسئولیت ساخت observation
-را پوشش می‌دهد؛ شکستن سایر توابع بزرگ، استخراج validator/handler/lifecycle،
-نام‌گذاری عمومی و قالب‌بندی فایل‌های دیگرِ F22 باقی مانده‌اند؛ از جمله
-`DemoCommandInterpreter.interpret`، `UbuntuSessionFactory.__call__`،
-`CommandCoordinator.observe` و `ModelAssistedInterpreter.interpret`.
-
-دو حالت رگرسیون پیش از اصلاح با نبود اندازه شکست خوردند؛ پس از اصلاح
-۲۲۴ آزمون مرتبط موفق شدند. بررسی نوعِ سه فایل Python تغییرکرده، lint و
-قالب‌بندی دامنه موفق‌اند. بررسی‌گر کامل با `PYTHONPATH=src` و محیط موقت،
-خارج از sandbox محدود، هر ۲۱۷۶ آزمون را موفق اجرا کرد؛ نحو و lint نیز موفق‌اند،
-اما ۴۲۵ خطای نوع در ۵۷ فایل مانع موفقیت کلی است. گزارش‌ها در
-`local-data/quality-f22-unrestricted/` نگه داشته شده‌اند. اجرای داخل sandbox
-۱۸۵ شکست و سه آزمون ردشده داشت؛ زنجیرهٔ هندسه با برداشتن محدودیت محیط
-موفق شد. قرارداد آزمون برای عبور از این شکست‌ها تغییر نکرد.
-آزمون زندهٔ GNOME و OCR واقعی برای این تغییر انجام نشده است.
-
-</div>
+The standalone reader and Qt share `IdentifiedWindowText.from_capture`.
+The constructor binds the source image size, rectangles and geometry from
+that capture. Qt maps scaled/cropped OCR coordinates to source pixels first.
+The constructor records crop provenance without applying the transform again.
+Invalid or missing dimensions leave target geometry unknown. Deterministic
+tests cover the transform and binding. Native capture and OCR acceptance
+remain separate.

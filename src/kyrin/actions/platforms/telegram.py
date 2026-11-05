@@ -2,13 +2,17 @@
 
 import json
 import logging
+import os
 import subprocess
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from time import monotonic, sleep
 from typing import Protocol
+from uuid import uuid4
 
 from kyrin.actions.cancellation import ActionCancelled, execute_with_budget
 from kyrin.actions.desktop_input import DesktopInputBroker
@@ -16,15 +20,19 @@ from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.models import ActionOutcome, ActionRequest, ActionResult
 from kyrin.actions.platforms.desktop_scroll import SCROLL_HELPER
 from kyrin.actions.platforms.input_session import run_input_helper as run_process
+from kyrin.actions.platforms.telegram_accessibility import MENU_TRACE_STAGES
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
 from kyrin.actions.visible_control import VisibleControlTarget, VisibleTextOption
 from kyrin.backend_protocol import BackendStatus, BackendUnavailable
 from kyrin.commands.models import CommandIntent, CommandKind
 from kyrin.commands.telegram_settings import SETTING_SECTIONS
+from kyrin.desktop.platforms.gnome import read_active_window_token
+from kyrin.desktop.window_observation import WindowObservation
 from kyrin.operations import OperationStopped, budget, check_operation
 from kyrin.text_normalization import fold_case
 from kyrin.timing import timed_stage
+from kyrin.vision.capture_geometry import MAX_CAPTURE_AGE_S
 
 TELEGRAM_PORTAL_HELPER = Path(__file__).with_name("telegram_portal_helper.py")
 _SAVED_MESSAGES_TARGETS = frozenset(
@@ -131,35 +139,57 @@ class ChatVerifier(Protocol):
         self, app_id: str, pid: int, label: str
     ) -> VisibleControlTarget | None: ...
 
+    # Telegram reads take the operation's window token. Evidence captured
+    # from any other window, including a same-process replacement, is
+    # treated as absent.
     def find_search_result(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None: ...
 
     def find_search_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None: ...
 
     def find_visible_chat_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None: ...
 
     def choice_status(self) -> str: ...
 
-    def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool: ...
+    def verify(
+        self,
+        app_id: str,
+        pid: int,
+        target: str = "Saved Messages",
+        *,
+        window_token: str | None = None,
+    ) -> bool: ...
 
     def find_left_label(
-        self, app_id: str, pid: int, label: str, *, menu: bool = False
+        self,
+        app_id: str,
+        pid: int,
+        label: str,
+        *,
+        menu: bool = False,
+        window_token: str | None = None,
     ) -> ChatSearchMatch | None: ...
 
     def find_settings_item(
-        self, app_id: str, pid: int, label: str
+        self, app_id: str, pid: int, label: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None: ...
 
-    def settings_page_header(self, app_id: str, pid: int) -> str | None: ...
+    def settings_page_header(
+        self, app_id: str, pid: int, *, window_token: str | None = None
+    ) -> str | None: ...
 
-    def has_view_title(self, app_id: str, pid: int, title: str) -> bool: ...
+    def has_view_title(
+        self, app_id: str, pid: int, title: str, *, window_token: str | None = None
+    ) -> bool: ...
 
-    def has_search_query(self, app_id: str, pid: int, query: str) -> bool: ...
+    def has_search_query(
+        self, app_id: str, pid: int, query: str, *, window_token: str | None = None
+    ) -> bool: ...
 
 
 class TelegramSavedMessagesExecutor:
@@ -177,6 +207,7 @@ class TelegramSavedMessagesExecutor:
         system_python: str = "/usr/bin/python3",
         helper_path: Path = TELEGRAM_PORTAL_HELPER,
         input_broker: DesktopInputBroker | None = None,
+        token_reader: Callable[[], str | None] | None = None,
     ) -> None:
         self._delegate = delegate
         self._telegram_desktop_id = telegram_desktop_id
@@ -188,6 +219,10 @@ class TelegramSavedMessagesExecutor:
         self._choice_status = "not_requested"
         self._system_python = system_python
         self._helper_path = helper_path
+        self._token_reader = token_reader or read_active_window_token
+        # The window token of the input operation now running; see
+        # ``_bound_window``. None outside an operation.
+        self._operation_window: str | None = None
         self.backend_status = BackendStatus(False, "not_probed")
 
     def execute(self, request: ActionRequest) -> ActionResult:
@@ -238,6 +273,48 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code="telegram_control_setup_required",
             )
+        # Read the token after the identity, then re-read the identity: both
+        # must describe one window before it becomes this operation's target.
+        window_token = self._token_reader()
+        if not window_token or self._identity_reader() != identity:
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="telegram_not_active"
+            )
+        with self._bound_window(window_token):
+            return self._execute_in_window(request, identity)
+
+    @contextmanager
+    def _bound_window(self, window_token: str) -> Iterator[None]:
+        """Bind one whole input operation to the window it started in.
+
+        Every helper, OCR read and postcondition of the operation requires
+        this token, so a same-process replacement window is never its target.
+        The input broker admits one operation at a time, so operations never
+        share this state.
+        """
+        previous = self._operation_window
+        self._operation_window = window_token
+        try:
+            yield
+        finally:
+            self._operation_window = previous
+
+    @property
+    def _window(self) -> str:
+        if not self._operation_window:
+            raise RuntimeError("Telegram input requires an operation-bound window")
+        return self._operation_window
+
+    def _in_operation_window(self, identity: tuple[str, int]) -> bool:
+        return (
+            self._identity_reader() == identity
+            and self._token_reader() == self._window
+        )
+
+    def _execute_in_window(
+        self, request: ActionRequest, identity: tuple[str, int]
+    ) -> ActionResult:
+        intent = request.intent
         if intent.kind is CommandKind.TELEGRAM_VIEW:
             return self._open_telegram_view(request, identity)
         if intent.kind is CommandKind.TELEGRAM_SETTINGS:
@@ -331,7 +408,7 @@ class TelegramSavedMessagesExecutor:
             self._wait_postcondition(
                 identity,
                 lambda: self._verifier.has_search_query(
-                    *identity, request.intent.target
+                    *identity, request.intent.target, window_token=self._window
                 ),
             )
         ):
@@ -344,14 +421,18 @@ class TelegramSavedMessagesExecutor:
     def _wait_postcondition(
         self, identity: tuple[str, int], observed: Callable[[], bool]
     ) -> bool:
-        """Read only; every attempt shares the operation's cancellation/deadline."""
+        """Read only; every attempt shares the operation's cancellation/deadline.
+
+        Identity and window token bracket each read, and the read itself only
+        accepts evidence captured from the operation's window.
+        """
         for attempt in range(3):
             check_operation()
-            if self._identity_reader() != identity:
+            if not self._in_operation_window(identity):
                 return False
             confirmed = observed()
             check_operation()
-            if self._identity_reader() != identity:
+            if not self._in_operation_window(identity):
                 return False
             if confirmed:
                 return True
@@ -387,7 +468,9 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code="telegram_setting_requires_value",
             )
-        if contextual and not self._verifier.has_view_title(*identity, "Settings"):
+        if contextual and not self._verifier.has_view_title(
+            *identity, "Settings", window_token=self._window
+        ):
             return ActionResult(
                 request.key,
                 ActionOutcome.FAILED,
@@ -395,7 +478,9 @@ class TelegramSavedMessagesExecutor:
             )
         match = self._stable_settings_item(identity, label)
         if match is None and not contextual:
-            header = self._verifier.settings_page_header(*identity)
+            header = self._verifier.settings_page_header(
+                *identity, window_token=self._window
+            )
             for _ in range(3):
                 if header is None or header == "settings":
                     break
@@ -407,7 +492,9 @@ class TelegramSavedMessagesExecutor:
                 ):
                     return self._telegram_input_result(request, returned)
                 previous_header = header
-                header = self._verifier.settings_page_header(*identity)
+                header = self._verifier.settings_page_header(
+                    *identity, window_token=self._window
+                )
                 if header is None or header == previous_header:
                     return ActionResult(
                         request.key,
@@ -424,7 +511,9 @@ class TelegramSavedMessagesExecutor:
         if (
             match is None
             and not contextual
-            and not self._verifier.has_view_title(*identity, "Settings")
+            and not self._verifier.has_view_title(
+                *identity, "Settings", window_token=self._window
+            )
         ):
             settings_request = replace(
                 request,
@@ -481,7 +570,9 @@ class TelegramSavedMessagesExecutor:
         ):
             return self._telegram_input_result(request, clicked)
         if self._wait_postcondition(
-            identity, lambda: self._verifier.has_view_title(*identity, label)
+            identity, lambda: self._verifier.has_view_title(
+                *identity, label, window_token=self._window
+            )
         ):
             return ActionResult(
                 request.key, ActionOutcome.CONFIRMED, observed_active_app="telegram"
@@ -494,7 +585,9 @@ class TelegramSavedMessagesExecutor:
         previous: ChatSearchMatch | None = None
         for _ in range(3):
             check_operation()
-            current = self._verifier.find_settings_item(*identity, label)
+            current = self._verifier.find_settings_item(
+                *identity, label, window_token=self._window
+            )
             check_operation()
             if current is not None and previous is not None:
                 if _same_search_box(previous, current):
@@ -503,7 +596,23 @@ class TelegramSavedMessagesExecutor:
             sleep(0.15)
         return None
 
+    def _scroll_evidence(self, identity: tuple[str, int]) -> str | None:
+        """Window evidence for a scroll helper, only while the bound window holds.
+
+        The helper refuses the scroll if focus has moved to another window,
+        including a same-process replacement, before it sends input.
+        """
+        now = monotonic()
+        if not self._in_operation_window(identity):
+            return None
+        return WindowObservation(
+            *identity, self._window, uuid4().hex, now, now + MAX_CAPTURE_AGE_S
+        ).to_json()
+
     def _scroll_settings(self, identity: tuple[str, int]) -> bool:
+        evidence = self._scroll_evidence(identity)
+        if evidence is None:
+            return False
         try:
             result = run_process(
                 [
@@ -514,6 +623,7 @@ class TelegramSavedMessagesExecutor:
                     "down",
                     "2",
                     "right",
+                    evidence,
                     "telegram-control",
                 ],
                 helper=True,
@@ -556,23 +666,37 @@ class TelegramSavedMessagesExecutor:
             marker = "VIEW_SHORTCUT_DISPATCHED"
         else:
             menu_label = headings[destination]
-            match = self._stable_menu_item(identity, menu_label, fast_missing=True)
-            if match is None:
-                opened = self._run_helper(identity, "menu")
-                if (
-                    opened is None
-                    or opened.returncode != 0
-                    or "MENU_CLICKED" not in opened.stdout
-                ):
-                    return self._telegram_input_result(request, opened)
-                match = self._stable_menu_item(identity, menu_label)
+            opened = self._run_helper(identity, "menu", menu_label)
+            if opened is None or opened.returncode != 0:
+                return self._telegram_input_result(request, opened)
+            markers = set(opened.stdout.splitlines())
+            if "MENU_ITEM_DISPATCHED" in markers:
+                return self._view_postcondition(request, identity, destination)
+            if "MENU_NEEDS_VISUAL" in markers:
+                # No input happened. Preserve the legacy read-before-toggle path.
+                match = self._stable_menu_item(identity, menu_label, fast_missing=True)
+                if match is None:
+                    opened = self._run_helper(identity, "menu")
+                    if (
+                        opened is None or opened.returncode != 0
+                        or "MENU_CLICKED" not in opened.stdout.splitlines()
+                    ):
+                        return self._telegram_input_result(request, opened)
+                    match = self._stable_menu_item(
+                        identity, menu_label, fast_missing=True
+                    )
+            elif "MENU_CLICKED" in markers:
+                match = self._stable_menu_item(identity, menu_label, fast_missing=True)
+            else:
+                return self._telegram_input_result(request, opened)
             if match is None:
                 # The button can also return from Archive. Missing OCR evidence
                 # proves neither that transition nor a harmless no-op: do not
                 # blindly click it again. A new command starts with a fresh read.
                 return ActionResult(
                     request.key,
-                    ActionOutcome.DISPATCHED_UNVERIFIED,
+                    ActionOutcome.FAILED,
+                    error_code="telegram_menu_uncertain",
                 )
             completed = self._run_helper(
                 identity,
@@ -606,13 +730,27 @@ class TelegramSavedMessagesExecutor:
             or marker not in completed.stdout
         ):
             return self._telegram_input_result(request, completed)
+        return self._view_postcondition(request, identity, destination)
+
+    def _view_postcondition(
+        self, request: ActionRequest, identity: tuple[str, int], destination: str,
+    ) -> ActionResult:
+        headings = {
+            "archive": "Archived Chats", "contacts": "Contacts", "settings": "Settings",
+            "profile": "My Profile", "calls": "Calls", "new_group": "New Group",
+            "new_channel": "New Channel",
+        }
         destination_visible = self._wait_postcondition(
             identity,
             lambda: (
-                self._verifier.find_left_label(*identity, headings[destination])
+                self._verifier.find_left_label(
+                    *identity, headings[destination], window_token=self._window
+                )
                 is not None
                 if destination in {"archive", "contacts"}
-                else self._verifier.has_view_title(*identity, headings[destination])
+                else self._verifier.has_view_title(
+                    *identity, headings[destination], window_token=self._window
+                )
             ),
         )
         if not destination_visible:
@@ -633,7 +771,9 @@ class TelegramSavedMessagesExecutor:
         previous: ChatSearchMatch | None = None
         for _ in range(3):
             check_operation()
-            current = self._verifier.find_left_label(*identity, label, menu=True)
+            current = self._verifier.find_left_label(
+                *identity, label, menu=True, window_token=self._window
+            )
             check_operation()
             if current is None and fast_missing:
                 return None
@@ -654,12 +794,20 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code="telegram_control_setup_required",
             )
-        if completed is not None and completed.returncode == 2:
-            return ActionResult(
-                request.key,
-                ActionOutcome.FAILED,
-                error_code="telegram_focus_changed",
-            )
+        if completed is not None:
+            markers = set(completed.stdout.splitlines())
+            for returncode, marker, error in (
+                (2, "FOCUS_CHANGED", "telegram_focus_changed"),
+                (2, "TARGET_CHANGED", "telegram_target_changed"),
+                # Specific capability evidence before the generic marker.
+                (4, "MENU_ACTION_UNAVAILABLE", "telegram_menu_action_unavailable"),
+                (4, "CONTROL_UNAVAILABLE", "telegram_accessibility_unavailable"),
+                (4, "MENU_ITEM_UNAVAILABLE", "telegram_menu_uncertain"),
+            ):
+                if completed.returncode == returncode and marker in markers:
+                    return ActionResult(
+                        request.key, ActionOutcome.FAILED, error_code=error
+                    )
         return ActionResult(
             request.key,
             ActionOutcome.UNKNOWN,
@@ -669,6 +817,7 @@ class TelegramSavedMessagesExecutor:
     def _run_helper(
         self, identity: tuple[str, int], *args: str
     ) -> subprocess.CompletedProcess[str] | None:
+        started = monotonic()
         try:
             result = run_process(
                 [
@@ -677,6 +826,7 @@ class TelegramSavedMessagesExecutor:
                     identity[0],
                     str(identity[1]),
                     *args,
+                    "window=" + self._window,
                 ],
                 helper=True,
                 helper_capabilities={"telegram_portal-v1"},
@@ -685,6 +835,28 @@ class TelegramSavedMessagesExecutor:
                 check=False,
                 timeout=65,
             )
+            if os.environ.get("KYRIN_TELEGRAM_MENU_TRACE") == "1" and args[:1] == (
+                "menu",
+            ):
+                # Only our fixed technical markers; never helper arguments,
+                # arbitrary stderr, transcript, targets or window identifiers.
+                allowed = {
+                    "MENU_ITEM_DISPATCHED", "MENU_CLICKED", "MENU_NEEDS_VISUAL",
+                    "MENU_ITEM_UNAVAILABLE", "CONTROL_UNAVAILABLE", "TARGET_CHANGED",
+                    "FOCUS_CHANGED", "CONTROL_SETUP_REQUIRED",
+                    "MENU_ACTION_UNAVAILABLE",
+                }
+                for line in result.stdout.splitlines():
+                    if line in allowed or (
+                        line.startswith("MENU_TRACE ")
+                        and line.removeprefix("MENU_TRACE ") in MENU_TRACE_STAGES
+                    ):
+                        print("telegram_menu: " + line, file=sys.stderr, flush=True)
+                elapsed_ms = max(0, round((monotonic() - started) * 1000))
+                print(
+                    f"telegram_menu: helper_ms={elapsed_ms}",
+                    file=sys.stderr, flush=True,
+                )
             if result.stdout.startswith("BACKEND_UNAVAILABLE:"):
                 self.backend_status = BackendStatus(
                     False, result.stdout.strip().partition(":")[2]
@@ -705,9 +877,7 @@ class TelegramSavedMessagesExecutor:
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
         if completed.returncode == 2:
-            return ActionResult(
-                request.key, ActionOutcome.FAILED, error_code="telegram_focus_changed"
-            )
+            return self._telegram_input_result(request, completed)
         if "CONTROL_SETUP_REQUIRED" in completed.stdout:
             return ActionResult(
                 request.key,
@@ -719,7 +889,9 @@ class TelegramSavedMessagesExecutor:
                 request.key, ActionOutcome.UNKNOWN, error_code="chat_input_unknown"
             )
         if not self._wait_postcondition(
-            identity, lambda: self._verifier.verify(*identity, "Saved Messages")
+            identity, lambda: self._verifier.verify(
+                *identity, "Saved Messages", window_token=self._window
+            )
         ):
             return ActionResult(request.key, ActionOutcome.DISPATCHED_UNVERIFIED)
         return ActionResult(
@@ -806,6 +978,33 @@ class TelegramSavedMessagesExecutor:
             return None
         if cancellation.is_set() or self._identity_reader() != identity:
             return None
+        window_token = self._shown_window(shown)
+        if window_token is None:
+            return None
+        with self._bound_window(window_token):
+            return self._next_page_in_window(identity, target, shown)
+
+    def _shown_window(self, shown: ChatSearchChoices) -> str | None:
+        """Return the token of the window that showed these rows, if still focused.
+
+        Rows from a token-bound read carry their window's token. Rows without
+        geometry come only from legacy capture, which a token-bound read never
+        returns; they bind to the currently focused window.
+        """
+        current = self._token_reader()
+        if not current:
+            return None
+        recorded = {
+            None if match.geometry is None else match.geometry.window_token
+            for match in shown.selectable_results
+        }
+        if recorded and recorded != {current} and recorded != {None}:
+            return None
+        return current
+
+    def _next_page_in_window(
+        self, identity: tuple[str, int], target: str, shown: ChatSearchChoices
+    ) -> ChatSearchChoices | None:
         fresh = self._settled_search_choices(identity, target)
         if fresh is not None:
             fresh = _keep_global_scope(shown, fresh)
@@ -839,6 +1038,9 @@ class TelegramSavedMessagesExecutor:
         return next_choices
 
     def _scroll_search_results(self, identity: tuple[str, int]) -> bool:
+        evidence = self._scroll_evidence(identity)
+        if evidence is None:
+            return False
         try:
             result = run_process(
                 [
@@ -849,6 +1051,7 @@ class TelegramSavedMessagesExecutor:
                     "down",
                     "3",
                     "left",
+                    evidence,
                     "telegram-control",
                 ],
                 helper=True,
@@ -875,6 +1078,9 @@ class TelegramSavedMessagesExecutor:
 
     def _scroll_visible_list(self, identity: tuple[str, int]) -> bool:
         """Expose one already recognized, clipped bottom row before rereading."""
+        evidence = self._scroll_evidence(identity)
+        if evidence is None:
+            return False
         try:
             result = run_process(
                 [
@@ -885,6 +1091,7 @@ class TelegramSavedMessagesExecutor:
                     "down",
                     "1",
                     "left",
+                    evidence,
                     "telegram-control",
                 ],
                 helper=True,
@@ -981,7 +1188,9 @@ class TelegramSavedMessagesExecutor:
         # the destination before recovery; never send another click here.
         header_started = monotonic()
         header_visible = self._wait_postcondition(
-            identity, lambda: self._verifier.verify(*identity, target)
+            identity, lambda: self._verifier.verify(
+                *identity, target, window_token=self._window
+            )
         )
         if not dispatched and not (header_visible and unique_identity):
             return ActionResult(
@@ -1047,12 +1256,27 @@ class TelegramSavedMessagesExecutor:
                 ActionOutcome.FAILED,
                 error_code="chat_selection_cancelled",
             )
-        if self._identity_reader() != identity:
+        window_token = self._shown_window(shown)
+        if window_token is None or self._identity_reader() != identity:
             return ActionResult(
                 request.key,
                 ActionOutcome.FAILED,
                 error_code="telegram_focus_changed",
             )
+        with self._bound_window(window_token):
+            return self._select_in_window(
+                request, identity, target, shown, number, cancellation
+            )
+
+    def _select_in_window(
+        self,
+        request: ActionRequest,
+        identity: tuple[str, int],
+        target: str,
+        shown: ChatSearchChoices,
+        number: int | None,
+        cancellation: Event,
+    ) -> ActionResult:
         fresh = (
             self._settled_visible_choices(identity, target)
             if shown.source == "visible"
@@ -1118,7 +1342,9 @@ class TelegramSavedMessagesExecutor:
             saw_choices = False
             while monotonic() < deadline:
                 check_operation()
-                current = self._verifier.find_search_choices(*identity, target)
+                current = self._verifier.find_search_choices(
+                    *identity, target, window_token=self._window
+                )
                 if monotonic() >= deadline:
                     return None
                 check_operation()
@@ -1152,7 +1378,9 @@ class TelegramSavedMessagesExecutor:
             while monotonic() < deadline:
                 reads += 1
                 check_operation()
-                current = self._verifier.find_visible_chat_choices(*identity, target)
+                current = self._verifier.find_visible_chat_choices(
+                    *identity, target, window_token=self._window
+                )
                 if monotonic() >= deadline:
                     return None
                 check_operation()
@@ -1192,7 +1420,9 @@ class TelegramSavedMessagesExecutor:
             previous: ChatSearchMatch | None = None
             while monotonic() < deadline:
                 check_operation()
-                current = self._verifier.find_search_result(*identity, target)
+                current = self._verifier.find_search_result(
+                    *identity, target, window_token=self._window
+                )
                 if monotonic() >= deadline:
                     return None
                 check_operation()

@@ -3,8 +3,11 @@
 import re
 from collections.abc import Sequence
 from difflib import SequenceMatcher
+from time import monotonic
+from uuid import uuid4
 
 from kyrin.commands.app_names import AppNameResolver, SpokenAppCandidate
+from kyrin.commands.bulk_close import bulk_close_target, has_bulk_close_prefix
 from kyrin.commands.chat_command_catalog import match_english_chat_command
 from kyrin.commands.choice_numbers import choice_index
 from kyrin.commands.context_resolver import (
@@ -78,12 +81,14 @@ _BRING_TO_FRONT_EN = re.compile(r"^(?:please )?bring (?:the )?(.+?) to (?:the )?
 _SMALLER_EN = re.compile(r"^(?:please )?make (?:the )?(.+?) smaller(?: than now)?$")
 _SMALLER_FA = re.compile(r"^(.+?) (?:را|رو) کوچک تر کن$")
 _SIZE_COMMAND_EN = re.compile(
-    r"^(maximize|unmaximize|fullscreen|exit fullscreen on) (?:the )?(.+?)(?: window)?$"
+    r"^(maximize|un[ -]?maximize|full[ -]?screen|exit full[ -]?screen(?: on)?)"
+    r"(?:,\s*|\s+)(?:the )?(.+?)(?: window)?$"
 )
 _MAKE_FULLSCREEN_EN = re.compile(r"^make (?:the )?(.+?) fullscreen$")
 _SIZE_COMMAND_FA = re.compile(
     r"^(.+?) را (بزرگ کن|به اندازه عادی برگردان|تمام صفحه کن|از تمام صفحه خارج کن)$"
 )
+_APP_WINDOWS_EN = re.compile(r"^(?:please )?show (?:the )?(.+?) windows$")
 _OPEN_APP_CLAUSE_EN = re.compile(r"^(?:open|go to) (?:the )?(.+)$")
 _OPEN_CHAT_CLAUSE_EN = re.compile(
     r"^(?:open|go to) (?:the )?(?:chat (.+)|(.+?)(?:'s)? chat)$"
@@ -186,6 +191,7 @@ class DemoCommandInterpreter:
         allowed_close_apps: frozenset[str] = frozenset(),
         window_presence: AppWindowPresence | None = None,
         terminal_app_id: str | None = None,
+        targeted_terminal_tabs: bool = False,
     ) -> None:
         self._context_resolver = ContextResolver(_CHAT_APPS)
         self._app_name_resolver = app_name_resolver
@@ -197,6 +203,9 @@ class DemoCommandInterpreter:
         self._allowed_close_apps = allowed_close_apps
         self._window_presence = window_presence
         self._terminal_app_id = terminal_app_id
+        self._targeted_terminal_tabs = (
+            targeted_terminal_tabs and control_any_focused_app
+        )
         self._wake_prefixes = tuple(
             sorted(
                 {
@@ -226,6 +235,35 @@ class DemoCommandInterpreter:
                 break
         if not phrase:
             return WakeOnly() if addressed else NotACommand()
+
+        if (
+            self._targeted_terminal_tabs
+            and self._terminal_app_id is not None
+            and phrase in {"new tab", "create new tab", "create a new tab"}
+            and (
+                not isinstance(pending, PendingWindowSelection)
+                or pending.tab_selection_id is not None
+            )
+        ):
+            return self._terminal_tab(context)
+
+        if has_bulk_close_prefix(phrase):
+            if not context.is_final_transcript:
+                return IncompleteCommand()
+            name = bulk_close_target(phrase)
+            target = self._exact_app(name) if name else None
+            # A literal app named "All X" must not silently become bulk close X.
+            literal = (
+                self._exact_app("all " + name)
+                if name and "windows of " not in phrase
+                else None
+            )
+            if target not in self._allowed_close_apps or literal is not None:
+                return UnrecognizedCommand()
+            assert target is not None
+            return ReadyCommand(
+                CommandIntent(CommandKind.CLOSE_ALL_APP_WINDOWS, target)
+            )
 
         if context.observed_active_app == "telegram" and pending is None:
             if _TELEGRAM_SEARCH_FOCUS_EN.fullmatch(phrase):
@@ -486,6 +524,28 @@ class DemoCommandInterpreter:
                         CommandKind.HIDE_APP_WINDOWS, pending.app_candidate.app_id
                     )
                 )
+            if pending.tab_selection_id is not None:
+                if (
+                    not context.is_final_transcript
+                    or pending.deadline is None
+                    or monotonic() >= pending.deadline
+                ):
+                    return UnrecognizedCommand()
+                tab_index = choice_index(phrase, pending.count)
+                if tab_index is not None:
+                    return ReadyCommand(
+                        CommandIntent(
+                            CommandKind.NEW_APP_TAB,
+                            pending.app_candidate.app_id,
+                            window_index=tab_index + 1,
+                            tab_selection_id=pending.tab_selection_id,
+                        )
+                    )
+                if phrase.startswith(("open ", "show ", "close ")):
+                    return self.interpret(
+                        text, language=language, context=context, pending=None
+                    )
+                return NeedsClarification(pending)
             close_match = _NUMBERED_CLOSE_EN.fullmatch(phrase)
             if close_match is None:
                 close_match = _NUMBERED_CLOSE_FA.fullmatch(phrase)
@@ -514,6 +574,15 @@ class DemoCommandInterpreter:
                         and len(app_reply.candidates) == 1
                         and app_reply.candidates[0].app_id in self._allowed_window_apps
                     ):
+                        named_picker_app = app_reply.candidates[0].app_id
+                        if (
+                            context.is_final_transcript
+                            and self._window_presence is not None
+                            and (count := self._window_presence.count(named_picker_app))
+                            is not None
+                            and count > 1
+                        ):
+                            return self._show_app_windows(named_picker_app)
                         return ReadyCommand(
                             CommandIntent(
                                 CommandKind.SELECT_OPEN_APP_WINDOW,
@@ -521,7 +590,7 @@ class DemoCommandInterpreter:
                             )
                         )
                 if phrase.startswith(
-                    ("open ", "go to ", "close ", "restore ", "minimize ")
+                    ("open ", "go to ", "close ", "restore ", "minimize ", "show ")
                 ):
                     return self.interpret(
                         text, language=language, context=context, pending=None
@@ -541,6 +610,19 @@ class DemoCommandInterpreter:
             )
 
         if isinstance(pending, PendingOperationClarification):
+            repeat_open = _OPEN_NAMED_APP_EN.fullmatch(phrase)
+            if (
+                context.is_final_transcript
+                and repeat_open is not None
+                and self._exact_app(repeat_open[1]) == pending.app_candidate.app_id
+            ):
+                # A fresh exact request must observe current window availability,
+                # rather than keep an older menu or ask a model to reopen it.
+                return self.interpret(
+                    text, language=language, context=context, pending=None
+                )
+            if re.match(r"^(?:please )?(?:do not|don't|dont|never|no)\b", phrase):
+                return DeclinedClarification()
             if phrase in ("no", "نه", "خیر", "لغو", "cancel"):
                 return DeclinedClarification()
             if phrase in ("yes", "ja", "بله", "آره"):
@@ -568,6 +650,9 @@ class DemoCommandInterpreter:
                     "اندازه عادی": CommandKind.UNMAXIMIZE_APP,
                     "new window": CommandKind.NEW_APP_WINDOW,
                     "new tab": CommandKind.NEW_APP_TAB,
+                    "create new tab": CommandKind.NEW_APP_TAB,
+                    "create a new tab": CommandKind.NEW_APP_TAB,
+                    "preference": CommandKind.APP_PREFERENCES,
                     "preferences": CommandKind.APP_PREFERENCES,
                     "all windows": CommandKind.SHOW_ALL_WINDOWS,
                     "terminal windows": CommandKind.SHOW_APP_WINDOWS,
@@ -575,6 +660,11 @@ class DemoCommandInterpreter:
             )
             if selected_operation not in pending.options:
                 return NeedsClarification(pending)
+            if (
+                selected_operation is CommandKind.NEW_APP_TAB
+                and self._targeted_terminal_tabs
+            ):
+                return self._terminal_tab(context)
             if selected_operation is CommandKind.CLOSE_APP_WINDOW:
                 return NeedsClarification(
                     PendingActionConfirmation(pending.app_candidate, selected_operation)
@@ -683,14 +773,41 @@ class DemoCommandInterpreter:
                 )
             return UnrecognizedCommand()
 
+        app_windows = _APP_WINDOWS_EN.fullmatch(phrase)
+        if app_windows is not None:
+            if not context.is_final_transcript:
+                return IncompleteCommand()
+            name = app_windows[1]
+            spellings = (name, name[:-2]) if name.endswith("'s") else (name,)
+            preview_candidates = {
+                preview_target: SpokenAppCandidate(preview_target, spelling)
+                for spelling in spellings
+                if (preview_target := self._exact_app(spelling)) is not None
+                and preview_target in self._allowed_window_apps
+            }
+            if len(preview_candidates) > 1:
+                return NeedsClarification(
+                    PendingAppClarification(
+                        tuple(preview_candidates.values()),
+                        confirmation=False,
+                        operation=CommandKind.SHOW_APP_WINDOWS,
+                    )
+                )
+            if preview_candidates:
+                return self._show_app_windows(next(iter(preview_candidates)))
+            return UnrecognizedCommand()
+
         size_match = _SIZE_COMMAND_EN.fullmatch(phrase)
         if size_match is not None:
             operation, name = size_match.groups()
+            # Canonicalize only the explicit operation; preserve the name slot.
+            operation = operation.replace(" ", "").replace("-", "")
             kind = {
                 "maximize": CommandKind.MAXIMIZE_APP,
                 "unmaximize": CommandKind.UNMAXIMIZE_APP,
                 "fullscreen": CommandKind.FULLSCREEN_APP,
-                "exit fullscreen on": CommandKind.UNFULLSCREEN_APP,
+                "exitfullscreen": CommandKind.UNFULLSCREEN_APP,
+                "exitfullscreenon": CommandKind.UNFULLSCREEN_APP,
             }[operation]
             target = self._exact_app(name)
             return (
@@ -796,6 +913,11 @@ class DemoCommandInterpreter:
             return self._interpret_english_plan(phrase, source=text)
 
         english_chat = match_english_chat_command(phrase)
+        english_chat_app = None
+        if english_chat is not None and english_chat.spoken_app is not None:
+            english_chat_app = self._exact_app(english_chat.spoken_app)
+            if english_chat_app not in _CHAT_APPS:
+                return UnrecognizedCommand()
         if self._app_name_resolver is not None:
             app_match = _OPEN_NAMED_APP_FA.fullmatch(
                 phrase
@@ -821,7 +943,7 @@ class DemoCommandInterpreter:
                     chat_app = (
                         _APPS[explicit_chat_match[2]]
                         if explicit_chat_match is not None
-                        else None
+                        else english_chat_app
                     )
                     return NeedsClarification(
                         PendingIntentClarification(
@@ -832,6 +954,8 @@ class DemoCommandInterpreter:
                     )
 
         if english_chat is not None and english_chat.scope == "visible":
+            if english_chat_app not in {None, "telegram"}:
+                return UnrecognizedCommand()
             return ReadyCommand(
                 CommandIntent(
                     CommandKind.OPEN_CHAT,
@@ -850,7 +974,9 @@ class DemoCommandInterpreter:
             return self._chat_command(source_spelling(text, match[1].strip()), context)
         if english_chat is not None:
             return self._chat_command(
-                source_spelling(text, english_chat.spoken_target), context
+                source_spelling(text, english_chat.spoken_target),
+                context,
+                english_chat_app,
             )
 
         if self._app_name_resolver is not None:
@@ -1070,14 +1196,83 @@ class DemoCommandInterpreter:
             else []
         )
         options.append(CommandKind.NEW_APP_WINDOW)
-        if count == 1:
+        if count == 1 or self._targeted_terminal_tabs:
             options.append(CommandKind.NEW_APP_TAB)
         options.append(CommandKind.APP_PREFERENCES)
         return NeedsClarification(
             PendingOperationClarification(candidate, tuple(options))
         )
 
+    def _terminal_tab(self, context: CommandContext) -> Interpretation:
+        """Use independent focus, or retain the tab request through a fresh picker."""
+        target = self._terminal_app_id
+        if target is None or not context.is_final_transcript:
+            return IncompleteCommand()
+        window = context.observed_window
+        if (
+            context.observed_active_app == target
+            and window is not None
+            and window.app_id == "org.gnome.Ptyxis.desktop"
+            and window.app_id == context.observed_scroll_app
+            and window.current(window.window_token, monotonic())
+        ):
+            return ReadyCommand(
+                CommandIntent(
+                    CommandKind.NEW_APP_TAB,
+                    target,
+                    tab_observation=window,
+                )
+            )
+        count = self._window_presence.count(target) if self._window_presence else None
+        if (
+            target not in self._allowed_window_apps
+            or count is None
+            or not 1 <= count <= 32
+        ):
+            return UnrecognizedCommand()
+        selection_id = context.request_id or uuid4().hex
+        return ReadyCommand(
+            CommandIntent(
+                CommandKind.SHOW_APP_WINDOWS, target, tab_selection_id=selection_id
+            ),
+            PendingWindowSelection(
+                SpokenAppCandidate(target, "Terminal"),
+                count,
+                tab_selection_id=selection_id,
+                deadline=monotonic() + 30.0,
+            ),
+        )
+
+    def _show_app_windows(self, target: str) -> Interpretation:
+        if target not in self._allowed_window_apps or self._window_presence is None:
+            return UnrecognizedCommand()
+        count = self._window_presence.count(target)
+        legacy = target == self._terminal_app_id
+        if count is None or count < (2 if legacy else 1):
+            return UnrecognizedCommand()
+        name = target
+        if self._app_name_resolver is not None:
+            name = next(
+                (
+                    option.display_name
+                    for option in self._app_name_resolver.model_options()
+                    if option.app_id == target
+                ),
+                target,
+            )
+        # Non-terminal previews share the existing Shell snapshot/close namespace.
+        # Only its filtered, freshly displayed numbers may be selected afterward.
+        return ReadyCommand(
+            CommandIntent(CommandKind.SHOW_APP_WINDOWS, target),
+            PendingWindowSelection(
+                SpokenAppCandidate(target if legacy else "desktop", name),
+                count if legacy else min(count, 99),
+            ),
+        )
+
     def _review_window_action(self, kind: CommandKind, target: str) -> Interpretation:
+        if kind is CommandKind.SHOW_APP_WINDOWS:
+            return self._show_app_windows(target)
         if kind is CommandKind.CLOSE_APP_WINDOW and target == self._terminal_app_id:
             return NeedsClarification(
                 PendingActionConfirmation(SpokenAppCandidate(target, "Terminal"), kind)
@@ -1088,6 +1283,16 @@ class DemoCommandInterpreter:
         self, intent: CommandIntent, context: CommandContext
     ) -> Interpretation:
         """Keep model-proposed Terminal actions on the same safety path."""
+        if (
+            intent.kind is CommandKind.NEW_APP_TAB
+            and intent.target == self._terminal_app_id
+            and self._targeted_terminal_tabs
+        ):
+            return self._terminal_tab(context)
+        if intent.kind is CommandKind.SHOW_APP_WINDOWS:
+            if not context.is_final_transcript:
+                return IncompleteCommand()
+            return self._show_app_windows(intent.target)
         if intent.kind is CommandKind.SHOW_ALL_WINDOWS:
             if intent.target != "desktop" or not self._allowed_window_apps:
                 return UnrecognizedCommand()

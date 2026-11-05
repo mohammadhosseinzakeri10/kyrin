@@ -53,6 +53,7 @@ class SpeechSessionEnded:
     error: Exception | None
     retry_delay_s: float | None = None
     session_id: str = field(default="", compare=False)
+    generation: int = field(default=0, compare=False)
 
 
 SpeechRuntimeEvent = LiveSpeechEvent | SpeechSessionEnded

@@ -18,6 +18,7 @@ from kyrin.app.qt.chat_verifier import QtChatVerifier
 from kyrin.app.qt.screen_access import ScreenAccess
 from kyrin.app.qt.screen_text_reader import ScreenTextReader
 from kyrin.operations import Operation
+from kyrin.vision.capture_geometry import CaptureGeometry
 from kyrin.vision.ocr.contracts import (
     OcrDevice,
     OcrOptions,
@@ -697,3 +698,78 @@ def test_caller_timeout_cancels_carried_budget_and_clears_pending(
     assert verifier._pending is None
     verifier._completed(_observation())
     assert len(carried) == 1
+
+
+def _with_window(window_token: str) -> IdentifiedWindowText:
+    from dataclasses import replace
+
+    return replace(
+        _observation(),
+        geometry=CaptureGeometry(
+            "logical_desktop",
+            0,
+            (0, 0, 1600, 900),
+            (1600, 900),
+            1,
+            1,
+            (0, 0, 0, 0),
+            (0, 0),
+            (1, 1),
+            window_token,
+            "capture-1",
+            100.0,
+        ),
+    )
+
+
+def test_operation_window_token_rejects_same_process_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    reader = Reader(_with_window("window-7"))
+    reads: list[str | None] = []
+    original_read = reader.read
+
+    def counted(
+        options: OcrOptions | None = None, *, region: str | None = None
+    ) -> bool:
+        reads.append(region)
+        return original_read(options, region=region)
+
+    reader.read = counted  # type: ignore[method-assign]
+    verifier = QtChatVerifier(
+        cast(ScreenAccess, Access()), cast(ScreenTextReader, reader)
+    )
+
+    def header(window_token: str | None) -> bool:
+        return _call_from_worker(
+            app,
+            lambda: verifier.verify(
+                "telegram.desktop", 123, window_token=window_token
+            ),
+        )
+
+    assert header("window-7")
+    assert not header("window-8")
+    # Without an operation token, process-level identity behaves as before.
+    assert header(None)
+    # A capture without a window token cannot be bound to the operation.
+    reader.observation = _observation()
+    assert not header("window-7")
+
+    reader.observation = _with_window("window-8")
+    reads.clear()
+    assert (
+        _call_from_worker(
+            app,
+            lambda: verifier.find_visible_chat_choices(
+                "telegram.desktop", 123, "Saved Messages", window_token="window-7"
+            ),
+        )
+        is None
+    )
+    assert verifier.choice_status() == "window_changed"
+    # The other window's text never starts a fallback read.
+    assert reads == ["left_chat_list_fast"]

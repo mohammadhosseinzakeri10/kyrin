@@ -4,6 +4,7 @@ from dataclasses import replace
 from time import monotonic, perf_counter_ns
 
 from kyrin.commands.app_names import SpokenAppCandidate
+from kyrin.commands.diagnostics import trace
 from kyrin.commands.interpreter import (
     CommandInterpreter,
     Interpretation,
@@ -20,7 +21,9 @@ from kyrin.commands.models import (
     CommandPlan,
     PendingAppClarification,
     PendingCommandClarification,
+    PendingNumberedCloseConfirmation,
     PendingOperationClarification,
+    PendingWindowSelection,
     RecoveryTrace,
 )
 from kyrin.commands.recovery_candidates import (
@@ -259,6 +262,7 @@ class SpeechRecoveryInterpreter:
             )
         audio = context.retained_audio
         try:
+            trace("guard", "started")
             elapsed = (
                 max(
                     0.0,
@@ -271,6 +275,7 @@ class SpeechRecoveryInterpreter:
                 direct = self.recovery.rules.interpret(
                     text, language=language, context=context, pending=pending
                 )
+                trace("rules", type(direct).__name__)
                 if (
                     pending is None
                     and isinstance(direct, NotACommand)
@@ -302,6 +307,10 @@ class SpeechRecoveryInterpreter:
                 if audio is not None:
                     audio.close()
                 check_operation()
+                trace(
+                    "alternatives",
+                    str(min(len(evidence.alternatives), 8)) if evidence else "0",
+                )
                 # A contrary or uninterpretable real hypothesis cannot be
                 # outvoted. Unknown scores never become intent confidence.
                 for hypothesis in evidence.alternatives if evidence else ():
@@ -311,6 +320,37 @@ class SpeechRecoveryInterpreter:
                         context=context,
                         pending=pending,
                     )
+                    trace("hypothesis", type(other).__name__)
+                    if (
+                        isinstance(pending, (
+                            PendingWindowSelection, PendingOperationClarification
+                        ))
+                        and isinstance(direct, NeedsClarification)
+                        and isinstance(other, NeedsClarification)
+                        and direct.pending == other.pending
+                        and (
+                            direct.pending == pending
+                            or (
+                                isinstance(pending, PendingWindowSelection)
+                                and isinstance(
+                                    direct.pending, PendingNumberedCloseConfirmation
+                                )
+                                and (
+                                    direct.pending.app_candidate
+                                    == pending.app_candidate
+                                )
+                                and direct.pending.count == pending.count
+                                and direct.pending.all_apps == pending.all_apps
+                            )
+                        )
+                    ):
+                        # Both hypotheses retain the same picker question or
+                        # advance that same picker to the identical close number.
+                        # This grants no authority: the coordinator still checks
+                        # saved consent, and the executor checks the live target.
+                        # Conflicting numbers/operations remain non-executable.
+                        trace("guard", "agreeing_question")
+                        continue
                     expected = _intents(direct) or (
                         candidates[0].steps if candidates else ()
                     )
@@ -323,6 +363,7 @@ class SpeechRecoveryInterpreter:
                             or not alternative_candidates
                             or alternative_candidates[0].steps != expected
                         ):
+                            trace("guard", "hypothesis_conflict")
                             return self.recovery.clarify(expected + _intents(other))
                 context = replace(
                     context,
@@ -334,8 +375,10 @@ class SpeechRecoveryInterpreter:
                     text, language=language, context=context, pending=pending
                 )
                 check_operation()
+                trace("guard", "completed")
                 return result
         except OperationStopped:
+            trace("guard", "operation_stopped")
             return UnrecognizedCommand()
         finally:
             if audio is not None:

@@ -4,7 +4,9 @@ from collections.abc import Callable, Sequence
 from copy import copy
 from dataclasses import replace
 from time import monotonic
+from uuid import uuid4
 
+from kyrin.commands.diagnostics import trace
 from kyrin.commands.fragments import CommandFragmentBuffer
 from kyrin.commands.interpreter import (
     CommandInterpreter,
@@ -70,8 +72,18 @@ class CommandCoordinator:
         self._emitted_candidate: CommandIntent | None = None
         self._pending: PendingCommandClarification | None = None
         self._last_referenced_app: str | None = None
+        # Target, kind, steps, area, recorded time and the window evidence the
+        # scroll was bound to. "More" may reuse it only for that same window.
         self._last_scroll: (
-            tuple[str, CommandKind, int | None, str | None, float] | None
+            tuple[
+                str,
+                CommandKind,
+                int | None,
+                str | None,
+                float,
+                WindowObservation | None,
+            ]
+            | None
         ) = None
         self._telegram_settings_context_at: float | None = None
 
@@ -188,14 +200,6 @@ class CommandCoordinator:
         recent_scroll_steps: int | None = None
         recent_scroll_area: str | None = None
         current_scroll_app = observed_scroll_app or observed_active_app
-        if self._last_scroll is not None and current_scroll_app is not None:
-            scroll_app, scroll_kind, scroll_steps, scroll_area, recorded_at = (
-                self._last_scroll
-            )
-            if scroll_app == current_scroll_app and monotonic() - recorded_at <= 30:
-                recent_scroll_kind = scroll_kind
-                recent_scroll_steps = scroll_steps
-                recent_scroll_area = scroll_area
         initial_window = (
             self._window_observer()
             if self._window_observer is not None
@@ -203,6 +207,34 @@ class CommandCoordinator:
             and current_scroll_app is not None
             else None
         )
+        if self._last_scroll is not None and current_scroll_app is not None:
+            (
+                scroll_app,
+                scroll_kind,
+                scroll_steps,
+                scroll_area,
+                recorded_at,
+                scroll_window,
+            ) = self._last_scroll
+            # With window evidence available, history belongs to one window:
+            # another window of the same app or process cannot inherit it.
+            same_window = self._window_observer is None or (
+                scroll_window is not None
+                and initial_window is not None
+                and initial_window.identity == scroll_window.identity
+                and initial_window.window_token == scroll_window.window_token
+            )
+            if (
+                scroll_app == current_scroll_app
+                and monotonic() - recorded_at <= 30
+                and same_window
+            ):
+                recent_scroll_kind = scroll_kind
+                recent_scroll_steps = scroll_steps
+                recent_scroll_area = scroll_area
+        if update.status is TranscriptStatus.FINAL:
+            trace("build", "numbered_close_trace_v1")
+            trace("pending", type(self._pending).__name__)
         interpretation = self.interpreter.interpret(
             interpreted_text,
             language=update.language,
@@ -225,9 +257,13 @@ class CommandCoordinator:
                 speech_evidence=update.evidence,
                 retained_audio=update.retained_audio,
                 transcript_emitted_ns=update.emitted_ns,
+                observed_window=initial_window,
+                request_id=uuid4().hex,
             ),
             pending=self._pending,
         )
+        if update.status is TranscriptStatus.FINAL:
+            trace("result", type(interpretation).__name__)
         # A concrete operation/number already identifies the target. Persistent
         # consent replaces only its redundant approval; name and target choices
         # remain clarifications. Candidates never gain execution authority.
@@ -248,8 +284,11 @@ class CommandCoordinator:
                     pending_action.app_candidate.app_id,
                     window_index=pending_action.window_index,
                 )
-            if known_action is not None and self._action_authorizer(known_action):
-                interpretation = ReadyCommand(known_action)
+            if known_action is not None:
+                allowed = self._action_authorizer(known_action)
+                trace("authorization", "allowed" if allowed else "denied")
+                if allowed:
+                    interpretation = ReadyCommand(known_action)
         if (
             self._window_observer is not None
             and update.status is TranscriptStatus.FINAL
@@ -275,6 +314,28 @@ class CommandCoordinator:
                     interpretation,
                     intent=replace(
                         interpretation.intent, control_observation=initial_window
+                    ),
+                )
+        if (
+            self._window_observer is not None
+            and update.status is TranscriptStatus.FINAL
+            and isinstance(interpretation, ReadyCommand)
+            and interpretation.intent.kind
+            in (CommandKind.SCROLL_UP, CommandKind.SCROLL_DOWN)
+        ):
+            # Bind the window observed before interpretation. Its age is that
+            # of the spoken request; a later read never renews it.
+            if (
+                initial_window is None
+                or not initial_window.current(initial_window.window_token, monotonic())
+                or initial_window.app_id != current_scroll_app
+            ):
+                interpretation = UnrecognizedCommand()
+            else:
+                interpretation = replace(
+                    interpretation,
+                    intent=replace(
+                        interpretation.intent, scroll_observation=initial_window
                     ),
                 )
         if update.status is TranscriptStatus.PARTIAL:
@@ -352,6 +413,7 @@ class CommandCoordinator:
                         item.scroll_steps,
                         item.scroll_area,
                         monotonic(),
+                        item.scroll_observation,
                     )
                 else:
                     self._last_scroll = None
@@ -370,10 +432,15 @@ class CommandCoordinator:
                     ResponseRequest(
                         update.segment_id,
                         ResponseKind.CHOOSE_WINDOW,
-                        ResponseChannel.TEXT_ONLY,
+                        ResponseChannel.TEXT_AND_VOICE
+                        if self._pending.tab_selection_id is not None
+                        else ResponseChannel.TEXT_ONLY,
                         stream_id=self._stream_id,
                         target=self._pending.app_candidate.display_name,
                         window_count=self._pending.count,
+                        operation_candidates=(CommandKind.NEW_APP_TAB,)
+                        if self._pending.tab_selection_id is not None
+                        else (),
                         language=update.language,
                     )
                 )
@@ -469,10 +536,15 @@ class CommandCoordinator:
                     ResponseRequest(
                         update.segment_id,
                         ResponseKind.CHOOSE_WINDOW,
-                        ResponseChannel.TEXT_ONLY,
+                        ResponseChannel.TEXT_AND_VOICE
+                        if interpretation.pending.tab_selection_id is not None
+                        else ResponseChannel.TEXT_ONLY,
                         stream_id=self._stream_id,
                         target=interpretation.pending.app_candidate.display_name,
                         window_count=interpretation.pending.count,
+                        operation_candidates=(CommandKind.NEW_APP_TAB,)
+                        if interpretation.pending.tab_selection_id is not None
+                        else (),
                         language=update.language,
                     )
                 )

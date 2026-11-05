@@ -72,6 +72,17 @@ const INTERFACE_XML = `<node>
       <arg name="number" type="u" direction="in"/>
       <arg name="status" type="s" direction="out"/>
     </method>
+    <method name="ShowAppWindowsForTab">
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="reply" type="s" direction="out"/>
+    </method>
+    <method name="ActivateAppWindowForTab">
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="number" type="u" direction="in"/>
+      <arg name="reply" type="s" direction="out"/>
+    </method>
     <method name="CloseShownAppWindow">
       <arg name="app_id" type="s" direction="in"/>
       <arg name="number" type="u" direction="in"/>
@@ -89,6 +100,23 @@ const INTERFACE_XML = `<node>
       <arg name="app_id" type="s" direction="in"/>
       <arg name="number" type="u" direction="in"/>
       <arg name="observation" type="s" direction="out"/>
+    </method>
+    <method name="PrepareAppWindowsClose">
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="observation" type="s" direction="out"/>
+    </method>
+    <method name="ConfirmAppWindowsClose">
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="language" type="s" direction="in"/>
+      <arg name="decision" type="s" direction="out"/>
+    </method>
+    <method name="CloseConfirmedAppWindows">
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="status" type="s" direction="out"/>
+    </method>
+    <method name="CloseAuthorizedAppWindows">
+      <arg name="generation" type="s" direction="in"/>
+      <arg name="status" type="s" direction="out"/>
     </method>
     <method name="CloseAuthorizedWindow">
       <arg type="s" direction="in" name="generation"/>
@@ -120,17 +148,19 @@ const INTERFACE_XML = `<node>
 export default class KyrinActiveAppExtension extends Extension {
     // This literal belongs to the loaded module; metadata on disk may be newer.
     GetCapabilities() {
-        return JSON.stringify({"protocol_version": 1, "build_id": "active-app@kyrin.local-2026-10-25-persistent-permissions", "capabilities": ["GetActiveApp", "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer", "HasAppWindow", "CountAppWindows", "ShowAllWindows", "ShowOpenWindows", "ActivateShownOpenWindow", "CloseShownOpenWindow", "ActivateShownOpenApp", "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow", "CloseShownAppWindow", "HideAppWindows", "ActivateExistingApp", "PrepareWindowClose", "ConfirmWindowClose", "CloseConfirmedWindow", "CloseAuthorizedWindow", "ControlAppWindow", "GetAppWindowState"]});
+        return JSON.stringify({"protocol_version": 1, "build_id": "active-app@kyrin.local-2026-10-29-terminal-tab-target", "capabilities": ["ShowAppWindowsForTab", "ActivateAppWindowForTab", "CloseAuthorizedAppWindows", "PrepareAppWindowsClose", "ConfirmAppWindowsClose", "CloseConfirmedAppWindows", "GetActiveApp", "GetActiveWindow", "GetActiveWindowToken", "GetActiveWindowAndPointer", "HasAppWindow", "CountAppWindows", "ShowAllWindows", "ShowOpenWindows", "ActivateShownOpenWindow", "CloseShownOpenWindow", "ActivateShownOpenApp", "HideOpenWindows", "ShowAppWindows", "ActivateShownAppWindow", "CloseShownAppWindow", "HideAppWindows", "ActivateExistingApp", "PrepareWindowClose", "ConfirmWindowClose", "CloseConfirmedWindow", "CloseAuthorizedWindow", "ControlAppWindow", "GetAppWindowState"]});
     }
 
     enable() {
         this._pendingClose = null;
+        this._pendingGroupClose = null;
         this._closeDialog = null;
         this._picker = null;
         this._shownWindows = null;
         this._shownOpen = null;
         this._closeFocusSignal = global.display.connect('notify::focus-window', () => {
             this._pendingClose = null;
+            this._pendingGroupClose = null;
             this._closeDialog?.cancel();
         });
         this._dbusObject = Gio.DBusExportedObject.wrapJSObject(INTERFACE_XML, this);
@@ -202,7 +232,9 @@ export default class KyrinActiveAppExtension extends Extension {
     }
 
     _clearPicker() {
+        this._tabSelection = null;
         this._pendingClose = null;
+        this._pendingGroupClose = null;
         this._closeDialog?.cancel();
         this._picker?.destroy();
         this._picker = null;
@@ -282,13 +314,17 @@ export default class KyrinActiveAppExtension extends Extension {
     }
 
     ShowAppWindows(appId) {
+        return this._showAppWindows(appId, 2);
+    }
+
+    _showAppWindows(appId, minimum) {
         this._clearPicker();
         // V1 has one reviewed terminal binding; do not expose other apps in
         // this new preview surface merely because a local D-Bus caller asks.
         if (appId !== 'org.gnome.Ptyxis.desktop')
             return 'unknown';
         const windows = this._appWindows(appId);
-        if (windows === null || windows.length < 2)
+        if (windows === null || windows.length < minimum || windows.length > 32)
             return 'no_window';
         this._shownWindows = windows.map(window => String(window.get_stable_sequence()));
         this._picker = new WindowPicker(
@@ -300,6 +336,49 @@ export default class KyrinActiveAppExtension extends Extension {
             return 'unavailable';
         }
         return 'requested';
+    }
+
+    ShowAppWindowsForTab(appId, generation) {
+        if (!/^[a-f0-9]{32}$/.test(generation))
+            return JSON.stringify({status: 'stale'});
+        const status = this._showAppWindows(appId, 1);
+        if (status !== 'requested')
+            return JSON.stringify({status});
+        const windows = this._appWindows(appId);
+        if (!windows || windows.length !== this._shownWindows.length ||
+            windows.some((w, i) => String(w.get_stable_sequence()) !== this._shownWindows[i])) {
+            this._clearPicker();
+            return JSON.stringify({status: 'stale'});
+        }
+        this._tabSelection = {
+            generation, windows: [...windows], pids: windows.map(w => w.get_pid()),
+            deadline: GLib.get_monotonic_time() + 30 * 1000000,
+        };
+        return JSON.stringify({status: 'requested', generation, count: windows.length});
+    }
+
+    ActivateAppWindowForTab(appId, generation, number) {
+        const selection = this._tabSelection;
+        const windows = this._appWindows(appId);
+        if (appId !== 'org.gnome.Ptyxis.desktop' || !selection ||
+            selection.generation !== generation || !Number.isInteger(number) ||
+            number < 1 || number > selection.windows.length ||
+            GLib.get_monotonic_time() >= selection.deadline || !this._shownWindows ||
+            !windows || windows.length !== selection.windows.length ||
+            selection.windows.some((w, i) => !windows.includes(w) ||
+                w.get_pid() <= 0 || w.get_pid() !== selection.pids[i] ||
+                String(w.get_stable_sequence()) !== this._shownWindows[i])) {
+            this._clearPicker();
+            return JSON.stringify({status: 'stale'});
+        }
+        const window = selection.windows[number - 1];
+        const reply = {
+            status: 'requested', generation, app_id: appId,
+            process_id: window.get_pid(), window_token: String(window.get_stable_sequence()),
+        };
+        this._clearPicker();
+        Main.activateWindow(window, global.display.get_current_time_roundtrip());
+        return JSON.stringify(reply);
     }
 
     ActivateShownAppWindow(appId, number) {
@@ -400,6 +479,7 @@ export default class KyrinActiveAppExtension extends Extension {
     PrepareWindowClose(appId, number) {
         this._closeDialog?.cancel();
         this._pendingClose = null;
+        this._pendingGroupClose = null;
         if (!Number.isInteger(number) || number < 0 || number > 99)
             return '';
         const candidate = this._closeCandidate(appId, number);
@@ -424,6 +504,106 @@ export default class KyrinActiveAppExtension extends Extension {
             snapshot: appId === '' ? this._shownOpen : this._shownWindows,
         };
         return JSON.stringify(observation);
+    }
+
+    PrepareAppWindowsClose(appId) {
+        this._clearPicker();
+        const windows = this._appWindows(appId);
+        // Refuse the whole request if any target is unavailable or the group
+        // exceeds the bounded contract. Never silently close a subset.
+        if (!windows?.length || windows.length > 32 ||
+            windows.some(window => !window.can_close() || window.get_pid() <= 0))
+            return '';
+        const observed = GLib.get_monotonic_time() / 1000000;
+        const observation = {
+            app_id: appId, generation: GLib.uuid_string_random(),
+            observed_at: observed, deadline: observed + 10,
+            windows: windows.map(window => ({
+                window_token: String(window.get_stable_sequence()),
+                process_id: window.get_pid(),
+            })),
+        };
+        if (new Set(observation.windows.map(item => item.window_token)).size !== windows.length)
+            return '';
+        this._pendingGroupClose = {
+            observation, windows: [...windows], focus: global.display.get_focus_window(),
+        };
+        return JSON.stringify(observation);
+    }
+
+    _groupCloseCurrent(pending) {
+        if (!pending || GLib.get_monotonic_time() / 1000000 >= pending.observation.deadline ||
+            global.display.get_focus_window() !== pending.focus)
+            return false;
+        const windows = this._appWindows(pending.observation.app_id);
+        return windows?.length === pending.windows.length &&
+            pending.windows.every((window, index) => windows.includes(window) &&
+                window.can_close() &&
+                window.get_pid() === pending.observation.windows[index].process_id &&
+                String(window.get_stable_sequence()) ===
+                    pending.observation.windows[index].window_token);
+    }
+
+    ConfirmAppWindowsCloseAsync([generation, language], invocation) {
+        const pending = this._pendingGroupClose;
+        const reply = value => invocation.return_value(new GLib.Variant('(s)', [value]));
+        if (!this._groupCloseCurrent(pending) || pending.approved || this._closeDialog ||
+            generation !== pending.observation.generation) {
+            reply('declined');
+            return;
+        }
+        let watch = null;
+        const dialog = new WindowCloseConfirmation(approved => {
+            if (watch !== null)
+                Gio.bus_unwatch_name(watch);
+            if (this._closeDialog === dialog)
+                this._closeDialog = null;
+            const accepted = approved && this._pendingGroupClose === pending &&
+                this._groupCloseCurrent(pending);
+            pending.approved = accepted;
+            if (!accepted && this._pendingGroupClose === pending)
+                this._pendingGroupClose = null;
+            reply(accepted ? 'approved' : 'declined');
+        });
+        this._closeDialog = dialog;
+        watch = Gio.bus_watch_name_on_connection(invocation.get_connection(),
+            invocation.get_sender(), Gio.BusNameWatcherFlags.NONE,
+            null, () => dialog.cancel());
+        dialog.show(pending.observation, language);
+    }
+
+    CloseConfirmedAppWindows(generation) {
+        return this._commitAppWindowsClose(generation, true);
+    }
+
+    CloseAuthorizedAppWindows(generation) {
+        // KYRIN owns the saved opt-in; Shell still binds exact app membership.
+        return this._commitAppWindowsClose(generation, false);
+    }
+
+    _commitAppWindowsClose(generation, requireConfirmation) {
+        const pending = this._pendingGroupClose;
+        this._pendingGroupClose = null; // Every commit attempt burns the binding.
+        this._closeDialog?.cancel();
+        if (!this._groupCloseCurrent(pending) ||
+            generation !== pending.observation.generation)
+            return 'stale';
+        if (requireConfirmation && !pending.approved)
+            return 'confirmation_required';
+        const timestamp = global.display.get_current_time_roundtrip();
+        this._clearPicker();
+        let dispatched = 0;
+        for (const window of pending.windows) {
+            if (GLib.get_monotonic_time() / 1000000 >= pending.observation.deadline)
+                return dispatched ? 'partial' : 'stale';
+            try {
+                window.delete(timestamp); // Normal close; never kill or answer Save.
+                dispatched++;
+            } catch (_error) {
+                return dispatched ? 'partial' : 'unavailable';
+            }
+        }
+        return 'requested';
     }
 
     ConfirmWindowCloseAsync([generation, language], invocation) {

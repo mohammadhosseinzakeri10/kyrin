@@ -8,6 +8,7 @@ for Ubuntu's Gio bindings. The application owner retains the live session.
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +37,11 @@ from kyrin.actions.platforms.helper_lifecycle import (  # noqa: E402
     shared_session,
 )
 from kyrin.actions.platforms.telegram_accessibility import (  # noqa: E402
+    MENU_ITEM_LABELS,
+    MenuItemMissing,
+    MenuNotOpen,
     TelegramControl,
+    failure_code,
     locate_control,
 )
 from kyrin.app.permission_token import (  # noqa: E402
@@ -68,6 +73,7 @@ ESCAPE = 0xFF1B
 ZERO = ord("0")
 NINE = ord("9")
 J_KEY = ord("j")
+SPACE = ord(" ")
 LEFT_BUTTON = 0x110
 CONTROL_TOKEN_PATH = permission_token_path("telegram-control")
 
@@ -320,6 +326,29 @@ def _press(connection: Gio.DBusConnection, session: str, symbol: int) -> None:
         _key(connection, session, symbol, False)
 
 
+def _check_window(
+    connection: HelperLifetime, expected: tuple[str, int], token: str | None,
+) -> None:
+    connection.check(input_event=True)
+    if not token or _focused_identity() != expected:
+        raise ControlUnavailable("Telegram focus changed before input")
+    if _focused_window_token() != token:
+        raise ControlUnavailable("Telegram window changed before input")
+
+
+def _shortcut(
+    connection: HelperLifetime, session: str, expected: tuple[str, int],
+    token: str | None, symbol: int,
+) -> None:
+    _check_window(connection, expected, token)
+    _key(connection, session, CONTROL, True)
+    try:
+        _check_window(connection, expected, token)
+        _press(connection, session, symbol)
+    finally:
+        _key(connection, session, CONTROL, False)
+
+
 def _atspi() -> Any:
     import gi  # type: ignore[import-not-found]
 
@@ -350,34 +379,30 @@ class _LiveControl:
             raise ControlUnavailable("Telegram window identity unavailable")
         self.atspi = _atspi()
         self.control = locate_control(self.atspi, expected[1], self.frame[2:6], kind)
-        self.resolve()
+        self._check_shell_window()
+
+    def _check_shell_window(self) -> tuple[int, int, int, int]:
+        """Bracket a traversal without doing another complete traversal."""
+        if (
+            _focused_identity() != self.expected
+            or _focused_window_token() != self.token
+            or (frame := _window_and_pointer()) is None
+            or self.frame is None or frame[:6] != self.frame[:6]
+        ):
+            raise ControlUnavailable("Telegram window changed during resolution")
+        return frame[2:6]
 
     def resolve(self, *, focused: bool = False) -> TelegramControl:
-        if _focused_identity() != self.expected:
-            raise ControlUnavailable("Telegram focus changed")
-        frame = _window_and_pointer()
-        if (
-            frame is None
-            or self.frame is None
-            or frame[:6] != self.frame[:6]
-            or _focused_window_token() != self.token
-        ):
-            raise ControlUnavailable("Telegram window changed")
-        fresh = locate_control(self.atspi, self.expected[1], frame[2:6], self.kind)
+        frame = self._check_shell_window()
+        fresh = locate_control(self.atspi, self.expected[1], frame, self.kind)
         if fresh != self.control:
             raise ControlUnavailable("Telegram field identity or layout changed")
         if focused and not fresh.node.get_state_set().contains(
             self.atspi.StateType.FOCUSED
         ):
-            raise ControlUnavailable("Telegram search lost focus")
+            raise ControlUnavailable("Telegram control lost focus")
         # Bracket AT-SPI traversal with independent Shell identity observations.
-        if (
-            _focused_identity() != self.expected
-            or _focused_window_token() != self.token
-            or (after := _window_and_pointer()) is None
-            or after[:6] != frame[:6]
-        ):
-            raise ControlUnavailable("Telegram window changed during resolution")
+        self._check_shell_window()
         return fresh
 
 
@@ -408,7 +433,9 @@ def _type_search_target(
     for offset in range(0, len(target), 4):
         connection.check(input_event=True)
         node = field.resolve(focused=True).node
-        if node.get_text_iface().get_text(0, -1) != target[:offset]:
+        # GI's Accessible proxy also has get_text(), a deprecated zero-argument
+        # interface getter. Dispatch through Text explicitly to read contents.
+        if field.atspi.Text.get_text(node, 0, -1) != target[:offset]:
             raise ControlUnavailable("Telegram search contents changed")
         chunk = target[offset : offset + 4]
         connection.check(input_event=True)
@@ -418,7 +445,7 @@ def _type_search_target(
             raise ControlUnavailable("Telegram search insert failed")
     connection.check()
     node = field.resolve(focused=True).node
-    if node.get_text_iface().get_text(0, -1) != target:
+    if field.atspi.Text.get_text(node, 0, -1) != target:
         raise ControlUnavailable("Telegram search text unverified")
 
 
@@ -437,9 +464,7 @@ def _focus_search(
     if not token:
         raise ControlUnavailable("Telegram window identity unavailable")
     for _ in range(2):
-        connection.check(input_event=True)
-        if _focused_identity() != expected or _focused_window_token() != token:
-            raise ControlUnavailable("Telegram focus changed before search")
+        _check_window(connection, expected, token)
         _press(connection, session, ESCAPE)
         sleep(0.15)
     field = _LiveControl(expected, "search", token)
@@ -459,17 +484,100 @@ def _open_menu(
     expected: tuple[str, int],
     *,
     window_token: str | None = None,
+    session: str | None = None,
 ) -> bool:
     control = _LiveControl(expected, "menu", window_token)
+    return _activate_control(connection, control, session)
+
+
+def _activate_control(
+    connection: HelperLifetime, control: _LiveControl, session: str | None,
+) -> bool:
     connection.check(input_event=True)
     node = control.resolve().node
+    interface = node.get_action_iface()
+    if (
+        control.control.qt_window_local and session is not None
+        and interface is not None and interface.get_n_actions() == 1
+        and interface.get_action_name(0).casefold() == "setfocus"
+    ):
+        # Qt exposes focus, not press, on this Telegram custom button. Its
+        # AbstractButton implements one Space press/release as activation.
+        # Never reinterpret setFocus as a click or permit coordinate fallback.
+        if control.kind == "menu":
+            _menu_trace("opener_focus_route")
+        control.resolve()
+        connection.check(input_event=True)
+        if not interface.do_action(0):
+            raise ControlUnavailable("Telegram menu focus rejected")
+        connection.check(input_event=True)
+        control.resolve(focused=True)
+        connection.check(input_event=True)
+        _press(connection, session, SPACE)
+        return True
+    if control.kind == "menu":
+        _menu_trace("opener_action_route")
     action = action_index(node, None)
     if action is None:
+        if (
+            control.kind == "menu" and control.control.qt_window_local
+            and (interface is None or interface.get_n_actions() == 0)
+        ):
+            # The unique, valid Qt Main menu advertises no action at all.
+            # Unknown or ambiguous actions raise in action_index instead.
+            raise MenuActionUnavailable("Telegram menu has no supported action")
         raise ControlUnavailable("Telegram menu has no supported action")
-    connection.check(input_event=True)
     control.resolve()
     connection.check(input_event=True)
     return bool(action[0].do_action(action[1]))
+
+
+class _VisualMenuRequired(ControlUnavailable):
+    """No semantic rows on an unprofiled provider; do not toggle its menu."""
+
+
+class MenuActionUnavailable(ControlUnavailable):
+    """The validated Qt Main menu exposes no AT-SPI action; nothing was sent."""
+
+
+def _menu_trace(stage: str) -> None:
+    if os.environ.get("KYRIN_TELEGRAM_MENU_TRACE") == "1":
+        print(f"MENU_TRACE {stage}", flush=True)
+
+
+def _menu_destination(
+    connection: HelperLifetime, session: str, expected: tuple[str, int],
+    token: str | None, label: str,
+) -> bool:
+    """One original window, one opener at most, then an exact semantic row."""
+    try:
+        control = _LiveControl(expected, "menu-item:" + label, token)
+    except MenuNotOpen:
+        _menu_trace("rows_absent_before_open")
+        opener = _LiveControl(expected, "menu", token)
+        _menu_trace("opener_located")
+        if not opener.control.qt_window_local:
+            raise _VisualMenuRequired("visual menu observation required") from None
+        if not _activate_control(connection, opener, session):
+            raise ControlUnavailable("Telegram menu opening rejected") from None
+        _menu_trace("opener_dispatched")
+        for attempt in range(4):
+            if attempt:
+                sleep(0.1)
+            _check_window(connection, expected, token)
+            try:
+                control = _LiveControl(expected, "menu-item:" + label, token)
+                break
+            except (MenuNotOpen, MenuItemMissing):
+                _menu_trace("rows_not_ready")
+        else:
+            _menu_trace("visual_fallback_required")
+            return False
+    _menu_trace("destination_verified")
+    if not _activate_control(connection, control, session):
+        raise ControlUnavailable("Telegram menu destination activation rejected")
+    _menu_trace("destination_dispatched")
+    return True
 
 
 def _click_verified_box(
@@ -614,6 +722,15 @@ def main() -> int:
             raise ValueError("invalid capture evidence")
         evidence_regions = tuple(tuple(rect) for rect in data)
         argv = [value for value in argv if value != evidence_args[0]]
+    # The executor appends the window token bound at the start of its
+    # operation. Only the final argument is read, so a search text can
+    # never be taken for it.
+    operation_window: str | None = None
+    if len(argv) > 1 and argv[-1].startswith("window="):
+        operation_window = argv[-1].removeprefix("window=")
+        if not operation_window:
+            raise ValueError("invalid operation window")
+        argv = argv[:-1]
     grant_control = argv[1:] == ["grant-control"]
     if grant_control:
         mode = "grant-control"
@@ -649,7 +766,11 @@ def main() -> int:
             mode == "view"
             and (len(argv) != 5 or argv[4] not in {"archive", "contacts"})
         )
-        or (mode in {"menu", "escape"} and len(argv) != 4)
+        or (mode == "escape" and len(argv) != 4)
+        or (mode == "menu" and (
+            len(argv) not in {4, 5}
+            or (len(argv) == 5 and argv[4].casefold() not in MENU_ITEM_LABELS)
+        ))
     ):
         raise ValueError("invalid chat input arguments")
     if expected is not None:
@@ -658,8 +779,16 @@ def main() -> int:
         if _focused_identity() != expected:
             print("FOCUS_CHANGED", flush=True)
             return 2
-    bound_mode = mode in {"menu", "search", "focus-search"}
-    initial_window_token = _focused_window_token() if bound_mode else None
+        if operation_window is not None and (
+            _focused_window_token() != operation_window
+        ):
+            # A same-process replacement is not the operation's window.
+            print("TARGET_CHANGED", flush=True)
+            return 2
+    bound_mode = mode in {"menu", "search", "focus-search", "saved", "view", "escape"}
+    initial_window_token = (
+        (operation_window or _focused_window_token()) if bound_mode else None
+    )
     acquired = shared_session(3)
     if acquired is None:
         print("CONTROL_SETUP_REQUIRED", flush=True)
@@ -675,12 +804,10 @@ def main() -> int:
         if not _wait_for_expected_focus(expected):
             print("FOCUS_CHANGED", flush=True)
             return 2
+        if bound_mode:
+            _check_window(connection, expected, initial_window_token)
         if mode == "saved":
-            _key(connection, session, CONTROL, True)
-            try:
-                _press(connection, session, ZERO)
-            finally:
-                _key(connection, session, CONTROL, False)
+            _shortcut(connection, session, expected, initial_window_token, ZERO)
             print("SHORTCUT_DISPATCHED", flush=True)
         elif mode == "search":
             _type_search_target(
@@ -697,20 +824,27 @@ def main() -> int:
             )
             print("SEARCH_FOCUSED", flush=True)
         elif mode == "view":
-            _key(connection, session, CONTROL, True)
-            try:
-                _press(connection, session, NINE if argv[4] == "archive" else J_KEY)
-            finally:
-                _key(connection, session, CONTROL, False)
+            _shortcut(
+                connection, session, expected, initial_window_token,
+                NINE if argv[4] == "archive" else J_KEY,
+            )
             print("VIEW_SHORTCUT_DISPATCHED", flush=True)
         elif mode == "escape":
-            if _focused_identity() != expected:
-                print("FOCUS_CHANGED", flush=True)
-                return 2
+            _check_window(connection, expected, initial_window_token)
             _press(connection, session, ESCAPE)
             print("ESCAPE_DISPATCHED", flush=True)
         elif mode == "menu":
-            if not _open_menu(connection, expected, window_token=initial_window_token):
+            if len(argv) == 5 and _menu_destination(
+                connection, session, expected, initial_window_token, argv[4].casefold()
+            ):
+                print("MENU_ITEM_DISPATCHED", flush=True)
+                return 0
+            if len(argv) == 5:
+                print("MENU_CLICKED", flush=True)
+                return 0
+            if not _open_menu(
+                connection, expected, window_token=initial_window_token, session=session
+            ):
                 print("TARGET_CHANGED", flush=True)
                 return 2
             print("MENU_CLICKED", flush=True)
@@ -722,6 +856,13 @@ def main() -> int:
             )
             if len(argv) == 11 and geometry is None:
                 raise ValueError("invalid capture geometry")
+            if operation_window is not None and (
+                geometry is None
+                or geometry.window_token != operation_window
+                or _focused_window_token() != operation_window
+            ):
+                print("TARGET_CHANGED", flush=True)
+                return 2
             box = (
                 int(argv[4]),
                 int(argv[5]),
@@ -749,9 +890,29 @@ def main() -> int:
             )
             print(marker, flush=True)
         return 0
-    except ControlUnavailable:
-        print("TARGET_CHANGED", flush=True)
-        return 2
+    except _VisualMenuRequired:
+        print("MENU_NEEDS_VISUAL", flush=True)
+        return 0
+    except MenuItemMissing:
+        print("MENU_ITEM_UNAVAILABLE", flush=True)
+        return 4
+    except ControlUnavailable as error:
+        # Missing AT-SPI semantics do not prove that the owner changed windows.
+        # Recheck only identity here; no retry, input or private exception text.
+        if mode == "menu":
+            # Opt-in fixed code only; the message itself is never printed.
+            _menu_trace("failure_" + failure_code(error))
+        if _focused_identity() != expected:
+            print("FOCUS_CHANGED", flush=True)
+            return 2
+        if bound_mode and _focused_window_token() != initial_window_token:
+            print("TARGET_CHANGED", flush=True)
+            return 2
+        if mode == "menu" and isinstance(error, MenuActionUnavailable):
+            # Fixed capability marker for user guidance; still exit 4.
+            print("MENU_ACTION_UNAVAILABLE", flush=True)
+        print("CONTROL_UNAVAILABLE", flush=True)
+        return 4
     finally:
         connection.close()
 

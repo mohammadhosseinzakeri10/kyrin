@@ -31,6 +31,11 @@ from kyrin.commands.models import (
     ResponseKind,
     ResponseRequest,
 )
+from kyrin.commands.ollama_device import (
+    DeviceObservation,
+    ModelPlacement,
+    ModelPresence,
+)
 from kyrin.commands.ollama_engine import CommandModelError, OllamaCommandEngine
 from kyrin.commands.understanding import (
     ConfirmationDecision,
@@ -366,9 +371,7 @@ def test_model_scroll_requires_explicit_affirmative_request(
             context=CommandContext(observed_scroll_app="example.desktop"),
             pending=None,
         ),
-        NotACommand
-        if utterance == "Please do not scroll down"
-        else UnrecognizedCommand,
+        NotACommand,
     )
 
 
@@ -504,9 +507,7 @@ def test_model_visible_control_requires_explicit_affirmative_request(
             context=CommandContext(observed_scroll_app="example.desktop"),
             pending=None,
         ),
-        NotACommand
-        if utterance == "Please do not click Search"
-        else UnrecognizedCommand,
+        NotACommand,
     )
 
 
@@ -1195,9 +1196,11 @@ def test_ollama_device_options_and_probe() -> None:
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
         if url.endswith("/api/generate"):
-            return {"done": True, "done_reason": "unload"}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
         requests.append(payload)
         return {
+            "model": "qwen3.5:4b",
+            "done": True,
             "prompt_eval_count": 1000,
             "message": {"content": '{"route":"no_action","steps":[]}'},
         }
@@ -1208,8 +1211,15 @@ def test_ollama_device_options_and_probe() -> None:
         (DevicePreference.AUTO, None),
     ):
 
-        def probe(url: str, model: str, selected: DevicePreference = device) -> int:
-            return 0 if selected is DevicePreference.CPU else 1024
+        def probe(
+            url: str, model: str, timeout: float, selected: DevicePreference = device
+        ) -> DeviceObservation:
+            return DeviceObservation(
+                ModelPlacement.CPU
+                if selected is DevicePreference.CPU
+                else ModelPlacement.GPU,
+                ModelPresence.LOADED,
+            )
 
         engine = OllamaCommandEngine(
             "http://127.0.0.1:11435",
@@ -1239,9 +1249,11 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
         if url.endswith("/api/generate"):
-            return {"done": True, "done_reason": "unload"}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
         request.update(payload)
         return {
+            "model": "qwen3.5:4b",
+            "done": True,
             "prompt_eval_count": 1000,
             "message": {
                 "content": json.dumps(
@@ -1263,6 +1275,7 @@ def test_ollama_receives_current_screen_options_and_supported_actions() -> None:
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        device_probe=lambda *args: DeviceObservation(),
         resources=ModelResources(memory=lambda: MemorySnapshot()),
         token_counter=lambda payload: 1000,
         transport=transport,
@@ -1300,9 +1313,11 @@ def test_ollama_can_request_control_discovery_without_screen_options() -> None:
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
         if url.endswith("/api/generate"):
-            return {"done": True, "done_reason": "unload"}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
         sent.update(payload)
         return {
+            "model": "qwen3.5:4b",
+            "done": True,
             "prompt_eval_count": 1000,
             "message": {"content": '{"route":"no_action","steps":[]}'},
         }
@@ -1311,6 +1326,7 @@ def test_ollama_can_request_control_discovery_without_screen_options() -> None:
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        device_probe=lambda *args: DeviceObservation(),
         resources=ModelResources(memory=lambda: MemorySnapshot()),
         token_counter=lambda payload: 1000,
         transport=transport,
@@ -1333,14 +1349,18 @@ def test_explicit_gpu_without_gpu_memory_does_not_claim_success() -> None:
         resources=ModelResources(memory=lambda: MemorySnapshot()),
         token_counter=lambda payload: 1000,
         transport=lambda url, payload, timeout: (
-            {"done": True, "done_reason": "unload"}
+            {"model": payload["model"], "done": True, "done_reason": "unload"}
             if url.endswith("/api/generate")
             else {
+                "model": "qwen3.5:4b",
+                "done": True,
                 "prompt_eval_count": 1000,
                 "message": {"content": '{"route":"no_action","steps":[]}'},
             }
         ),
-        device_probe=lambda url, model: 0,
+        device_probe=lambda url, model, timeout: DeviceObservation(
+            ModelPlacement.CPU, ModelPresence.LOADED
+        ),
     )
     with pytest.raises(CommandModelError, match="device"):
         engine.understand(UnderstandingInput("hello", "en"), context=CommandContext())
@@ -1365,9 +1385,11 @@ def test_ollama_confirmation_requires_the_complete_spoken_reply(
 
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
         if url.endswith("/api/generate"):
-            return {"done": True, "done_reason": "unload"}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
         requests.append(payload)
         return {
+            "model": "qwen3.5:4b",
+            "done": True,
             "prompt_eval_count": 1000,
             "message": {
                 "content": json.dumps(
@@ -1380,6 +1402,7 @@ def test_ollama_confirmation_requires_the_complete_spoken_reply(
         "http://127.0.0.1:11435",
         "qwen3.5:4b",
         DevicePreference.AUTO,
+        device_probe=lambda *args: DeviceObservation(),
         resources=ModelResources(memory=lambda: MemorySnapshot()),
         token_counter=lambda payload: 1000,
         transport=transport,
@@ -1575,3 +1598,27 @@ def test_model_inference_records_producer_timing_without_source_text(
     assert [event.at_ns for event in events] == [1_000_000_000, 1_100_000_000]
     assert all(event.key == ActionKey(2, 3) for event in events)
     assert "Telegram" not in repr(events)
+
+
+def test_model_failure_emits_observable_failure_without_authorizing_an_action(
+    tmp_path: Path,
+) -> None:
+    from kyrin.actions.models import ActionKey
+    from kyrin.timing import TimingEvent, TimingScope, timing_scope
+
+    interpreter = _interpreter(tmp_path, FakeModel(CommandModelError("private detail")))
+    events: list[TimingEvent] = []
+    with timing_scope(TimingScope("session", ActionKey(2, 3), events.append)):
+        result = interpreter.interpret(
+            "Por favor abre Telegram",
+            language="es",
+            context=CommandContext(),
+            pending=None,
+        )
+    assert not isinstance(result, ReadyCommand)
+    assert [event.stage for event in events] == [
+        "inference_started",
+        "inference_finished",
+        "model_failed",
+    ]
+    assert "private detail" not in repr(events)

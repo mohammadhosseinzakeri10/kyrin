@@ -1,0 +1,37 @@
+id,path,language,reference,group,split
+l04-open,recordings/l04-open.wav,en,Please open Browser.,launch-window,evaluation
+l04-restore,recordings/l04-restore.wav,en,Restore Browser.,launch-window,evaluation
+l04-minimize,recordings/l04-minimize.wav,en,Minimize Browser.,launch-window,evaluation
+l04-maximize,recordings/l04-maximize.wav,en,Maximize Browser.,launch-window,evaluation
+l04-unmaximize,recordings/l04-unmaximize.wav,en,Unmaximize Browser.,launch-window,evaluation
+l04-fullscreen,recordings/l04-fullscreen.wav,en,Fullscreen Browser.,launch-window,evaluation
+l04-unfullscreen,recordings/l04-unfullscreen.wav,en,Exit fullscreen on Browser.,launch-window,evaluation
+l04-close,recordings/l04-close.wav,en,Close Browser.,launch-window,evaluation
+l04-show-all,recordings/l04-show-all.wav,en,Show all open windows.,picker,evaluation
+l04-show-app,recordings/l04-show-app.wav,en,Show Browser windows.,picker,evaluation
+l04-hide,recordings/l04-hide.wav,en,Hide Browser windows.,picker,evaluation
+l04-select-app,recordings/l04-select-app.wav,en,Select Browser.,picker,evaluation
+l04-select-number,recordings/l04-select-number.wav,en,Select number two.,picker,evaluation
+l04-close-number,recordings/l04-close-number.wav,en,Close number two.,picker,evaluation
+l04-terminal,recordings/l04-terminal.wav,en,Terminal.,app-menu,evaluation
+l04-new-window,recordings/l04-new-window.wav,en,New window.,app-menu,evaluation
+l04-new-tab,recordings/l04-new-tab.wav,en,New tab.,app-menu,evaluation
+l04-preferences,recordings/l04-preferences.wav,en,Preferences.,app-menu,evaluation
+l04-up,recordings/l04-up.wav,en,Scroll up.,direction,evaluation
+l04-down,recordings/l04-down.wav,en,Scroll down.,direction,evaluation
+l04-more,recordings/l04-more.wav,en,More.,direction,evaluation
+l04-chat,recordings/l04-chat.wav,en,Open chat Alex Test in Telegram.,free-content,evaluation
+l04-view,recordings/l04-view.wav,en,Open Telegram archive.,telegram-navigation,evaluation
+l04-settings,recordings/l04-settings.wav,en,Open Telegram settings privacy.,telegram-navigation,evaluation
+l04-search-focus,recordings/l04-search-focus.wav,en,Open Telegram search.,telegram-navigation,evaluation
+l04-search,recordings/l04-search.wav,en,Search for Do not open Telegram.,free-content,evaluation
+l04-click,recordings/l04-click.wav,en,Click Test button.,visible,evaluation
+l04-enable,recordings/l04-enable.wav,en,Enable Test option.,visible,evaluation
+l04-disable,recordings/l04-disable.wav,en,Disable Test option.,visible,evaluation
+l04-plan,recordings/l04-plan.wav,en,Open Browser then minimize Telegram.,ordered-plan,evaluation
+l04-negated,recordings/l04-negated.wav,en,Do not open Browser.,negative,evaluation
+l04-quoted,recordings/l04-quoted.wav,en,What does scroll up mean?,content,evaluation
+l04-ordinary,recordings/l04-ordinary.wav,en,The school is down the road.,content,evaluation
+l04-unknown,recordings/l04-unknown.wav,en,Open L04 Unknown Application.,ambiguous-target,evaluation
+l04-no-direction,recordings/l04-no-direction.wav,en,Scroll.,ambiguous-direction,evaluation
+l04-cancel,recordings/l04-cancel.wav,en,Cancel.,picker,evaluation

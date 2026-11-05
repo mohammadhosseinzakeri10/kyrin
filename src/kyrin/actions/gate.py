@@ -145,6 +145,7 @@ class ActionGate:
                 CommandKind.RESTORE_APP,
                 CommandKind.MINIMIZE_APP,
                 CommandKind.CLOSE_APP_WINDOW,
+                CommandKind.CLOSE_ALL_APP_WINDOWS,
                 CommandKind.CLOSE_SHOWN_WINDOW,
                 CommandKind.MAXIMIZE_APP,
                 CommandKind.UNMAXIMIZE_APP,
@@ -222,7 +223,9 @@ class ActionGate:
             CommandKind.UNFULLSCREEN_APP,
         ):
             return intent.target in self.policy.allowed_window_apps
-        if intent.kind is CommandKind.CLOSE_APP_WINDOW:
+        if intent.kind in (
+            CommandKind.CLOSE_APP_WINDOW, CommandKind.CLOSE_ALL_APP_WINDOWS
+        ):
             return intent.target in self.policy.allowed_close_apps
         if intent.kind is CommandKind.OPEN_CHAT:
             return intent.app in self.policy.allowed_chat_apps

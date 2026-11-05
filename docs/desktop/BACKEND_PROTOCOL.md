@@ -1,80 +1,101 @@
-<div dir="rtl" lang="fa">
+# Extension and helper protocol
 
-**قرارداد افزونه و helper — ۲۰۲۶/۱۰/۲۴، F20**
+(English migration of a previously Persian-only note; the original is preserved
+in the private migration pre-images and in Git history. Identifiers checked in
+`src/kyrin/backend_protocol.py` and `src/kyrin/app/qt/screen_access.py`.)
 
-هر سه افزونهٔ GNOME روش فقط‌خواندنی `GetCapabilities` دارند. پاسخ، یک رشتهٔ
-JSON شامل `protocol_version` برابر ۱، `build_id` ثابتِ کد بارشده و فهرست
-`capabilities` است. نسخهٔ نصب‌شده روی دیسک، موفقیت نصب و introspection
-اثبات نسخهٔ بارشده نیستند. شناسهٔ ساخت، شناسهٔ انتشار قرارداد است و hash فایل نیست؛
-با تغییر ناسازگار قرارداد باید نسخه افزایش یابد. افزونهٔ قدیمی بدون handshake رد می‌شود.
+## Handshake contract (F20)
 
-مصرف‌کننده پیش از فراخوانی، نسخه و قابلیت موردنیاز را بررسی می‌کند. کنترل
-پنجره پیش از تغییر، قابلیت خواندن پس‌شرط را نیز می‌خواهد؛ آماده‌سازی بستن،
-قابلیت بستنِ تأییدشده را هم می‌خواهد. مجوز تصویر، ثبت تصویر و اعتبارسنجی مناطق
-قابلیت‌های جدا دارند. probe تصویر مجوز نمی‌گیرد و screenshot تولید نمی‌کند.
-این قرارداد جای مجوز کاربر، هویت پنجره، تازگی مشاهده یا بررسی پیش از ورودی را نمی‌گیرد.
+All three GNOME extensions expose the read-only method `GetCapabilities`. The
+reply is a JSON string with `protocol_version` equal to 1 (`PROTOCOL_VERSION`),
+a fixed `build_id` of the loaded code, and a `capabilities` list. The version
+installed on disk, an install success message and introspection do not prove the
+loaded version. The build id identifies a contract release and is not a file
+hash; an incompatible contract change must increase the version. An older
+extension without the handshake is rejected.
 
-در نشست GNOME مبدل‌ها با نبود موقت سرویس حذف نمی‌شوند. هر probe حداکثر سه
-تلاش با مهلت ۵۰۰ میلی‌ثانیه و فاصلهٔ ۵۰ میلی‌ثانیه دارد؛ فقط نبود/تأخیر سرویس
-تکرار می‌شود. ناسازگاری نسخه، پاسخ نامعتبر، نبود handshake، رد دسترسی یا
-قابلیت ناقص تکرار نمی‌شوند. درخواست بعدی از نو probe می‌کند؛ نتیجهٔ موفق
-برای همیشه cache نمی‌شود. خود عملِ فعال‌سازی، بستن، کلیک یا تایپ با این سازوکار
-تکرار نمی‌شود. مهلت و لغو مشترک عملیات در مسیرهای دارای بودجه همچنان حاکم‌اند.
+The consumer checks the version and required capability before calling. Window
+control also requires the postcondition-reading capability before changing
+anything; close preparation additionally requires the verified-close capability.
+Screen permission, screen capture and region validation are separate
+capabilities. A screen probe takes no permission and produces no screenshot. This
+contract does not replace user permission, window identity, observation freshness
+or checks before input.
 
-`BackendStatus` علت، نسخه، شناسهٔ ساخت و قابلیت‌های پاسخ‌دهنده را نگه می‌دارد.
-علت‌ها شامل `protocol_mismatch`، `handshake_missing`، `malformed_handshake`،
-`missing_capabilities:…`، `service_unavailable`، `service_timeout` و خطاهای
-مشخص انتقال/دسترسی هستند. خطای اجرای helper در مرز عمل با `backend:…`
-حفظ می‌شود. رابط تصویر نیز علت probe را نمایش می‌دهد. در `ScreenAccess`،
-`transport_available` فقط مالکیت اتصال محلی است و `available` به پاسخ سازگار
-نیاز دارد؛ داشتن token ذخیره‌شده نیز آماده‌بودن افزونه را ثابت نمی‌کند.
+In a GNOME session adapters are not dropped because a service is temporarily
+absent. Each probe makes at most three attempts with a 500 ms timeout and 50 ms
+delay; only an absent or late service is retried. A version mismatch, invalid
+reply, missing handshake, access denial or incomplete capability set is not
+retried. The next request probes anew; a successful result is not cached forever.
+The act of activating, closing, clicking or typing is never repeated by this
+mechanism. Shared operation deadline and cancellation still govern budgeted
+paths.
 
-پاسخ‌های سه‌عضوی/یازده‌عضوی تصویر به‌صورت پیش‌فرض پذیرفته نمی‌شوند.
-فقط ساخت صریح `ScreenAccess(allow_legacy_capture=True)` مسیر سازگاری را
-فعال می‌کند. این گزینه فقط نبود handshake و قالب‌های legacy را پوشش می‌دهد؛
-ناسازگاری نسخهٔ اعلام‌شده یا فرادادهٔ دوازده‌عضوی نامعتبر را مجاز نمی‌کند.
-ترکیب عادی برنامه این گزینه را فعال نمی‌کند. مسیر سازگاری نیز محدودیت‌های
-پیشینِ هندسه و مجوز را حفظ می‌کند و آمادگی پروتکل جاری ادعا نمی‌کند.
+`BackendStatus` holds the reason, version, build id and capabilities of the
+responder. Reasons include `protocol_mismatch`, `handshake_missing`,
+`malformed_handshake`, `missing_capabilities:...`, `service_unavailable`,
+`service_timeout` and specific transport or access errors. A helper execution
+error at the action boundary is kept as `backend:...`. The screen UI also shows
+the probe reason. In `ScreenAccess`, `transport_available` only means local
+connection ownership while `available` requires a compatible reply; a stored
+token does not prove the extension is ready.
 
-در L03، ورودی عادی از helperهای بسته‌بندی‌شدهٔ همان نصب در یک فرایند مالک
-مشترک استفاده می‌کند؛ probe و فرایند ورودی جدا برای هر عمل ساخته نمی‌شوند.
-پیام‌های ارتباط خصوصی، نسخهٔ ۱، ساخت `desktop-input-owner-2026-10-25-l03`،
-شناسهٔ درخواست و مهلت دارند. پاسخ نهایی باید قابلیت `shared-input-session-v1`
-و بدنهٔ معتبر داشته باشد؛ پاسخ ناسازگار یا دیررس باعث قطع مالک می‌شود و عمل
-دوباره ارسال نمی‌شود. helperها همچنان افزونهٔ واقعاً بارشده را پیش از عمل بررسی می‌کنند.
+Three-member or eleven-member legacy screen replies are rejected by default.
+Only constructing `ScreenAccess(allow_legacy_capture=True)` enables the
+compatibility path, which covers only a missing handshake and the legacy formats;
+it does not allow a declared version mismatch or invalid twelve-member metadata.
+The normal application composition does not enable it. The compatibility path
+keeps the earlier geometry and permission limits and claims no current-protocol
+readiness.
 
-probe مستقل `--capabilities` پیش از import GI خارج می‌شود و پورتال یا توکن
-را تغییر نمی‌دهد. قراردادهای `desktop_control-v1`، `desktop_scroll-v1` و
-`telegram_portal-v1` حفظ شده‌اند؛ ساخت probeهای ورودی پسوند `2026-10-25-l03`
-و قابلیت مشترک بالا را دارد. وضعیت مالک شامل فرستندهٔ D-Bus، شناسهٔ فرایند،
-شمار Start، نسخهٔ پورتال و app_id ثبت‌شده یا null است؛ این اطلاعات مجوز نیستند.
-[قرارداد کامل نشست](../actions/SHARED_INPUT_SESSION_FA.md).
+## Shared input owner (L03)
 
-آزمون‌های قطعی، backend قدیمی، قابلیت ناقص، بارگذاری دیررس، بازیابی، پاسخ
-legacy، روش‌های واقعی GJS بدون `enable` و اجرای probe واقعی helper را پوشش
-می‌دهند. GNOME زنده لازم نیست. آزمون‌های موجود تصویر از پردازشگر PNG و D-Bus
-موقت جداگانه استفاده می‌کنند و ممکن است در sandbox محدود شوند.
-نصب/بارگذاری افزونه روی نشست مالک و آزمون زنده در این کارت انجام نشده است.
+Normal input uses the packaged helpers of the same install inside one shared
+owner process; a separate probe and input process per action are not created.
+Private messages carry version 1, build `desktop-input-owner-2026-10-25-l03`, a
+request id and a deadline. The final reply must carry the
+`shared-input-session-v1` capability and a valid body; an incompatible or late
+reply disconnects the owner and the action is not resent. Helpers still check the
+really loaded extension before acting.
 
-مرجع انتقال، [راهنمای رسمی D-Bus در GJS](https://gjs.guide/guides/gio/dbus.html)
-و [مستند رسمی زمان‌سنج Qt](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QTimer.html)
-هستند؛ schema و نسخهٔ بالا قرارداد داخلی KYRIN هستند.
+The standalone `--capabilities` probe exits before importing GI and changes
+neither portal nor token. The contracts `desktop_control-v1`,
+`desktop_scroll-v1` and `telegram_portal-v1` are kept; input probes carry the
+build suffix `2026-10-25-l03` and the shared capability. Owner status includes
+the D-Bus sender, process id, Start count, portal version and the registered
+app_id or null; none of this is permission. Full session contract:
+[Shared input session](../actions/SHARED_INPUT_SESSION.md).
 
+## Tests
 
-**مجوز ماندگار بستن، ۲۰۲۶/۱۰/۲۵:** قرارداد رضایت قبلی با انتخاب ذخیره‌شدهٔ
-کاربر در `PermissionPolicy` جایگزین شد. پیش از `PrepareWindowClose`، قابلیت
-`CloseAuthorizedWindow` و `GetAppWindowState` لازم است. روش جدید یک رشتهٔ نسل
-می‌گیرد، همان اتصال آماده‌شده را یک‌بار مصرف می‌کند و فقط پس از بررسی دوبارهٔ
-مهلت، تمرکز، snapshot، برنامه/PID/token و قابلیت بستن، `requested` برمی‌گرداند.
-این روش دیالوگ ندارد؛ رضایت در KYRIN اعمال می‌شود. روش‌های قدیمی تأیید برای
-سازگاری باقی‌اند و در مسیر اصلی استفاده نمی‌شوند.
+Deterministic tests cover an old backend, an incomplete capability set, late
+loading, recovery, a legacy reply, real GJS methods without `enable`, and running
+the real helper probe. Live GNOME is not needed. Existing screen tests use the PNG
+processor and a separate temporary D-Bus and may be limited in a restricted
+sandbox. Installation/loading of the extension in the owner's session and a live
+test were not done in this card.
 
-ساخت جاری `active-app@kyrin.local-2026-10-25-persistent-permissions` و نسخهٔ
-پروتکل ۱ است. افزونهٔ قبلی با
-`missing_capabilities:CloseAuthorizedWindow` متوقف می‌شود. نصب بسته، اثبات
-بارشدن کد نیست؛ بررسی `GetCapabilities` لازم است. آزمون واقعیِ نشست جداگانهٔ
-GNOME/Wayland با Python/Busctl و پنجرهٔ ساختگی، بستن بدون دیالوگ را تأیید کرد؛
-نشست مالک جایگزین نشده است. [قرارداد](../actions/PERSISTENT_PERMISSIONS_FA.md)
-و [گزارش نصب و آزمون](../development/PERSISTENT_PERMISSIONS_2026-10-25_FA.md).
+Transport references: the official
+[D-Bus guide for GJS](https://gjs.guide/guides/gio/dbus.html) and the official
+[Qt timer documentation](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QTimer.html);
+the schema and version above are KYRIN's internal contract.
 
-</div>
+## Persistent close permission (2026-10-25)
+
+The earlier consent contract was replaced by the user's stored selection in
+`PermissionPolicy`. Before `PrepareWindowClose`, the capabilities
+`CloseAuthorizedWindow` and `GetAppWindowState` are required. The new method
+takes a generation string, consumes the prepared connection once and returns
+`requested` only after rechecking the deadline, focus, snapshot,
+application/PID/token and close capability. It shows no dialog; consent is
+applied in KYRIN. Older confirmation methods remain for compatibility and are
+not used in the main path.
+
+The current build is `active-app@kyrin.local-2026-10-25-persistent-permissions`
+with protocol version 1. The previous extension stops with
+`missing_capabilities:CloseAuthorizedWindow`. Installing the package does not
+prove the code is loaded; a `GetCapabilities` check is required. A real separate
+GNOME/Wayland session with Python/busctl and a fake window confirmed dialog-free
+closing; the owner's session was not replaced. See the
+[persistent permissions contract](../actions/PERSISTENT_PERMISSIONS.md) and the
+installation and test report (`PERSISTENT_PERMISSIONS_2026-10-25_FA.md`, source repository only).

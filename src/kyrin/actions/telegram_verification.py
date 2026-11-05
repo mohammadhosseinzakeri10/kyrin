@@ -298,6 +298,24 @@ def _same_window(
     )
 
 
+def same_operation_window(
+    observation: IdentifiedWindowText,
+    expected_app_id: str,
+    expected_pid: int,
+    window_token: str,
+) -> bool:
+    """Bind OCR evidence to the operation's original window, not only its process.
+
+    A same-process replacement window shares app ID and PID. Only the capture's
+    window token distinguishes it, so evidence without that token is rejected.
+    """
+    return (
+        _same_window(observation, expected_app_id, expected_pid)
+        and observation.geometry is not None
+        and observation.geometry.window_token == window_token
+    )
+
+
 def search_choices(
     observation: IdentifiedWindowText,
     expected_app_id: str,

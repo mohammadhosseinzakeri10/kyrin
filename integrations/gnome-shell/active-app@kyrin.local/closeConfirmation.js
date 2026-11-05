@@ -20,7 +20,13 @@ export class WindowCloseConfirmation {
             this.cancel();
             return;
         }
-        const persian = language.split('-')[0] === 'fa';
+        const locale = language.trim().replace(/_/g, '-');
+        const persian = locale.split('-')[0].toLowerCase() === 'fa';
+        const group = Array.isArray(observation.windows);
+        const target = group
+            ? (persian ? `همهٔ ${observation.windows.length} پنجرهٔ برنامه`
+                : `All ${observation.windows.length} windows of this app`)
+            : observation.window_token;
         const dialog = new ModalDialog.ModalDialog({
             shouldFadeIn: false,
             shouldFadeOut: false,
@@ -28,10 +34,10 @@ export class WindowCloseConfirmation {
         this._dialog = dialog;
         dialog.set_text_direction(persian ? Clutter.TextDirection.RTL : Clutter.TextDirection.LTR);
         const text = persian
-            ? `بستن معمول پنجره\nبرنامه: ${observation.app_id}\nپنجره: ${observation.window_token}\n`
+            ? `بستن معمول پنجره\nبرنامه: ${observation.app_id}\nپنجره: ${target}\n`
                 + 'ممکن است کار ذخیره‌نشده یا فرایند در حال اجرا از دست برود. '
                 + 'پرسش ذخیره‌سازی خود برنامه پاسخ داده نمی‌شود. فقط همین عمل را تأیید می‌کنید.'
-            : `Normal window close\nApp: ${observation.app_id}\nWindow: ${observation.window_token}\n`
+            : `Normal window close\nApp: ${observation.app_id}\nWindow: ${target}\n`
                 + "Unsaved work or running jobs may be lost. The application's own save dialog "
                 + 'will not be answered. Approve only this operation, once.';
         const label = new St.Label({text, style: 'max-width: 620px;'});

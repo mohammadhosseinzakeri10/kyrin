@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
-from kyrin.app.qt.translations import UiTranslations  # noqa: E402
+from kyrin.app.qt.translations import UiPreferences, UiTranslations  # noqa: E402
 from kyrin.app.qt.tts_page import TtsPage, _VoiceEditor  # noqa: E402
 from kyrin.app.settings import TtsSelection  # noqa: E402
 
@@ -177,6 +177,49 @@ def test_language_voice_can_be_added_without_changing_default(
     assert page.has_unsaved_changes(TtsSelection())
     page.close()
     assert app is not None
+
+
+@pytest.mark.parametrize("ui_locale", ["en", "fa"])
+@pytest.mark.parametrize(
+    ("language", "sample"),
+    [
+        ("en", "Hello. This is KYRIN."),
+        ("en-US", "Hello. This is KYRIN."),
+        ("fa", "سلام، من کایرین هستم."),
+        ("fa-IR", "سلام، من کایرین هستم."),
+    ],
+)
+def test_voice_preview_sample_uses_voice_language_and_preserves_custom_text(
+    tmp_path: Path, ui_locale: str, language: str, sample: str
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    translations = UiTranslations(tmp_path / "ui")
+    translations.save(UiPreferences(ui_locale))
+    previews: list[tuple[str, str, TtsSelection]] = []
+
+    def preview(text: str, locale: str, selection: TtsSelection) -> bool:
+        previews.append((text, locale, selection))
+        return True
+
+    page = TtsPage(translations, TtsSelection(), model_root=tmp_path, preview=preview)
+    try:
+        if language != "en":
+            page.add_language(language)
+        editor = page._editors[language]
+        assert editor.sample.text() == sample
+        editor.preview_button.click()
+        assert previews == [(sample, language, TtsSelection())]
+        editor.sample.setText("Custom متن")
+        translations.save(UiPreferences("fa" if ui_locale == "en" else "en"))
+        page.translate()
+        assert editor.sample.text() == "Custom متن"
+        editor.preview_button.click()
+        assert previews[-1] == ("Custom متن", language, TtsSelection())
+        assert page.selection() == TtsSelection()
+    finally:
+        page.close()
+        page.deleteLater()
+        app.processEvents()
 
 
 def test_persian_piper_package_appears_in_language_tab(

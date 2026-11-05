@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
+from http.client import HTTPException
 from pathlib import Path
 from subprocess import SubprocessError
 from time import perf_counter
@@ -14,6 +15,15 @@ from urllib.request import Request, urlopen
 
 from kyrin.commands.app_names import ModelAppOption
 from kyrin.commands.models import CommandContext
+from kyrin.commands.ollama_device import (
+    CleanupState,
+    CommandDeviceReport,
+    DeviceObservation,
+    InferenceState,
+    ModelPlacement,
+    ModelPresence,
+    running_device,
+)
 from kyrin.commands.token_budget import OllamaTokenCounter
 from kyrin.commands.understanding import (
     ConfirmationDecision,
@@ -28,7 +38,7 @@ from kyrin.model_resources import (
     ResourceUnavailable,
     Workload,
 )
-from kyrin.operations import budget, remaining
+from kyrin.operations import OperationStopped, budget, check_operation, remaining
 from kyrin.stt.device import DevicePreference
 from kyrin.text_normalization import fold_case
 
@@ -179,6 +189,9 @@ _SYSTEM = (
     "is show_all_windows. Never put an operation name in the route field. "
     "Examples of that meaning include 'show all open apps' and 'show every "
     "running program'; these request a chooser, not opening each app. "
+    "show_app_windows instead opens a chooser restricted to the explicitly "
+    "named app: 'Show Telegram windows' means show_app_windows with target "
+    "Telegram, never show_all_windows. Preserve this app scope. "
     "open_chat is only for an explicit chat or conversation inside an app; "
     "never use open_chat for a request to open the app itself. "
     "visible_control means activating one named control in the currently focused "
@@ -284,16 +297,6 @@ def _post_json(url: str, payload: dict[str, object], timeout: float) -> object:
         return json.load(response)
 
 
-def _running_vram(url: str, model: str) -> int | None:
-    with urlopen(f"{url}/api/ps", timeout=3) as response:
-        document = json.load(response)
-    for item in document.get("models", []):
-        if isinstance(item, dict) and item.get("name") == model:
-            size = item.get("size_vram")
-            return size if isinstance(size, int) else None
-    return None
-
-
 @dataclass(frozen=True)
 class CommandTokenBudget:
     context_tokens: int = 4096
@@ -319,7 +322,8 @@ class OllamaCommandEngine:
         device: DevicePreference,
         *,
         transport: Callable[[str, dict[str, object], float], object] = _post_json,
-        device_probe: Callable[[str, str], int | None] = _running_vram,
+        device_probe: Callable[[str, str, float], DeviceObservation] = running_device,
+        on_device_report: Callable[[CommandDeviceReport], None] = lambda report: None,
         resources: ModelResources = MODEL_RESOURCES,
         model_store: Path | None = None,
         token_counter: Callable[[dict[str, object]], int] | None = None,
@@ -332,6 +336,7 @@ class OllamaCommandEngine:
         self._device = device
         self._transport = transport
         self._device_probe = device_probe
+        self._on_device_report = on_device_report
         self._resources = resources
         self._token_budget = token_budget or CommandTokenBudget()
         self._count_tokens = token_counter or OllamaTokenCounter(
@@ -596,13 +601,40 @@ class OllamaCommandEngine:
                     Workload.COMMAND,
                     f"command:{self._model}:{self._device.value}:{self._token_budget.context_tokens}",
                 ):
+                    attempted = False
+                    state = InferenceState.FAILED
+                    observation = DeviceObservation()
+                    cleanup_state = CleanupState.NOT_REQUESTED
+                    reason = "inference_failed"
+
+                    def observed(value: DeviceObservation) -> None:
+                        nonlocal observation
+                        observation = value
+
                     try:
                         self._pack(payload, text)
-                        return self._invoke(payload)
+                        check_operation()
+                        attempted = True
+                        self._on_device_report(
+                            CommandDeviceReport(
+                                self._model, self._device, InferenceState.RUNNING
+                            )
+                        )
+                        result = self._invoke(payload, observed)
+                        state = InferenceState.COMPLETED
+                        reason = "completed"
+                        return result
+                    except CommandModelError as exc:
+                        reason = exc.category
+                        raise
+                    except OperationStopped:
+                        reason = "operation_stopped"
+                        raise
                     finally:
                         # Rendering may load the runner too; unload even on packing,
                         # malformed response, timeout or OOM, before admission ends.
                         try:
+                            cleanup_state = CleanupState.UNCONFIRMED
                             unloaded = self._transport(
                                 f"{self._base_url}/api/generate",
                                 {
@@ -614,23 +646,47 @@ class OllamaCommandEngine:
                             )
                             if (
                                 not isinstance(unloaded, dict)
+                                or unloaded.get("model") != self._model
                                 or unloaded.get("done") is not True
                                 or unloaded.get("done_reason") != "unload"
                             ):
                                 raise CommandModelError(
                                     "command model unload is unconfirmed"
                                 )
-                        except (OSError, ValueError, RuntimeError) as exc:
+                            cleanup_state = CleanupState.ACKNOWLEDGED
+                        except (
+                            OSError,
+                            ValueError,
+                            RuntimeError,
+                            HTTPException,
+                        ) as exc:
+                            state = InferenceState.FAILED
+                            reason = "cleanup_failed"
                             self._resources.block()
                             raise CommandModelError(
                                 "command model cleanup failed; restart required"
                             ) from exc
+                        finally:
+                            if attempted:
+                                self._on_device_report(
+                                    CommandDeviceReport(
+                                        self._model,
+                                        self._device,
+                                        state,
+                                        observation,
+                                        ModelPresence.UNKNOWN,
+                                        reason,
+                                        cleanup_state,
+                                    )
+                                )
         except (OSError, ValueError, ResourceUnavailable, SubprocessError) as exc:
             raise CommandModelError(
                 "command model resource/token budget unavailable"
             ) from exc
 
-    def _invoke(self, payload: dict[str, object]) -> object:
+    def _invoke(
+        self, payload: dict[str, object], observed: Callable[[DeviceObservation], None]
+    ) -> object:
         timeout = remaining(120.0 if self._device is DevicePreference.CPU else 60.0)
         try:
             started = perf_counter()
@@ -658,20 +714,51 @@ class OllamaCommandEngine:
             elapsed = perf_counter() - started
             if elapsed >= 2.0:
                 _LOGGER.warning("Command model inference took %.1fs", elapsed)
-            if self._device is not DevicePreference.AUTO:
-                vram = self._device_probe(self._base_url, self._model)
-                if vram is None or (self._device is DevicePreference.GPU) != (vram > 0):
-                    raise CommandModelError(
-                        "selected command compute device was not used"
-                    )
+            check_operation()
             if not isinstance(result, dict):
                 raise ValueError("model reply is not an object")
+            if result.get("model") != self._model:
+                raise CommandModelError(
+                    "command response model identity is unconfirmed",
+                    category="identity",
+                )
+            if result.get("done") is not True or result.get("done_reason") in {
+                "load",
+                "unload",
+            }:
+                raise CommandModelError("non-streaming model reply is incomplete")
+            # A complete fresh reply from this endpoint ties this snapshot to
+            # the attempt. Never reuse another model's or a previous snapshot.
+            try:
+                observation = self._device_probe(
+                    self._base_url, self._model, remaining(3.0)
+                )
+                check_operation()
+            except OSError, ValueError, HTTPException:
+                check_operation()
+                observation = DeviceObservation(reason="probe_failed")
+            observed(observation)
+            placement = observation.placement
+            if (
+                self._device is DevicePreference.CPU
+                and placement is not ModelPlacement.CPU
+            ) or (
+                self._device is DevicePreference.GPU
+                and placement
+                not in {
+                    ModelPlacement.GPU,
+                    ModelPlacement.MIXED,
+                    ModelPlacement.GPU_PARTICIPATION,
+                }
+            ):
+                raise CommandModelError(
+                    "selected command compute device was not used",
+                    category="device_policy",
+                )
             if result.get("done_reason") == "length":
                 raise CommandModelError(
                     "command output token budget exhausted", category="output_limit"
                 )
-            if result.get("done") is False:
-                raise CommandModelError("non-streaming model reply is incomplete")
             actual_tokens = result.get("prompt_eval_count")
             if (
                 type(actual_tokens) is not int
@@ -694,6 +781,7 @@ class OllamaCommandEngine:
                 ) from exc
             return decoded
         except (
+            HTTPException,
             HTTPError,
             URLError,
             TimeoutError,

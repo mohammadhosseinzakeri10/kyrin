@@ -1,5 +1,8 @@
 # Response language and process notices
 
+English is the primary V1 command/acceptance language; the existing Persian
+catalog remains available. See the [language policy](../LANGUAGE_POLICY.md).
+
 ## Language flow
 
 `TranscriptUpdate.language` describes the language attributed by the STT
@@ -28,6 +31,32 @@ output, a separately selected offline TTS voice. This work does not add a
 translation service or claim automatic detection or recognition of all
 languages.
 
+## Interface, captions and literal targets
+
+The Qt interface has its own saved language preference and starts in English
+on a fresh installation. A Persian interface does not force an English
+command's response into Persian. Conversely, the status character follows
+its configured visual language, including the numbered-window selection
+prompt; transcript language must not change it. The current desktop composition
+defaults that visual preference to English.
+
+Built-in Telegram selection questions supply reviewed alternatives through
+`ResponseRequest.message_translations`. The same prompt can therefore remain
+Persian in the text/voice response and English in the character caption, or the
+reverse. This explicit local catalog uses the selected supported language;
+genuine model replies leave it empty and preserve their original text/language.
+
+Targets, labels and titles remain in their original script. An English
+response may contain a Persian target without changing its message language.
+Voice routing receives `PresentedResponse.language`; retaining a target does
+not establish that a selected English voice can pronounce it correctly.
+
+The Qt and GNOME control-confirmation dialogs use the request language.
+They recognize regional Persian tags such as `fa-IR` and `fa_IR`, ignoring
+case and surrounding whitespace; unsupported languages fall back to English.
+This only selects wording and writing direction. Explicit consent, deadlines,
+target identity, cancellation and single-use approval remain unchanged.
+
 ## Process notices
 
 `SystemNotice` is a structured user-facing status. `notice_for_backlog` turns
@@ -41,7 +70,9 @@ The live microphone diagnostic prints localized notices. In `commands` mode,
 events requesting `TEXT_AND_VOICE` also use the optional local Speech Dispatcher
 output; `--no-voice-responses` keeps it text-only. Desktop actions are a dry
 run by default, but explicitly allowlisted app launch can be enabled with
-`--execute-actions` and `--launch-app`. No product UI exists yet.
+`--execute-actions` and `--launch-app`. The Qt control center separately
+composes this response layer with saved permissions, selected local TTS and
+visual status. Diagnostic flags do not configure the product UI.
 Speech playback and microphone echo suppression are described in
 `docs/responses/OFFLINE_SPEECH_OUTPUT.md`. The diagnostic loads `sounddevice`
 only after parsing arguments, so help works without an audio server.

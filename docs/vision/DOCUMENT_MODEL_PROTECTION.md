@@ -1,75 +1,92 @@
-# حفاظت اجرای مدل سند
+# Document-model execution protection
 
-<div dir="rtl" lang="fa">
+(English migration of a previously Persian-only note; the original is preserved
+in the private migration pre-images and in Git history. Identifiers checked in
+`src/kyrin/vision/ocr/backends/{document_trust,document_sandbox}.py`.)
 
-این قرارداد فقط مسیر آزمایشی مدل سند را پوشش می‌دهد. متن خروجی همچنان وارد
-مسیر کلیک یا اجرای فرمان نمی‌شود. گزینهٔ `local_files_only` و متغیرهای آفلاین
-محدودیت دانلود کتابخانه هستند و جداسازی امنیتی ایجاد نمی‌کنند.
+This contract covers only the experimental document-model path. Output text still
+does not enter the click or command-execution path. The `local_files_only`
+option and offline environment variables limit library downloads; they create no
+security isolation.
 
-## منشأ و manifest
+## Provenance and manifest
 
-فهرست مستقل `APPROVED_MODELS` در `document_trust.py` مرجع تصمیم اعتماد است؛
-manifest کنار مدل، متغیر محیطی یا hash محاسبه‌شده از فایل نصب‌شده مجوز نیست.
-هر ورودی بازبینی‌شده، نشانی HTTPS منبع، شناسهٔ ثابت چهل‌رقمی revision، مرجع
-بازبینی و فهرست کامل مسیر نسبی/هش SHA-256 را ثبت می‌کند. پیش از افزودن ورودی،
-باید منشأ واقعی، کد اجرایی و hash مورد انتظار از دریافت مستقل همان revision
-بررسی شوند. ثبت رشتهٔ منبع به‌تنهایی اصالت یا بی‌خطربودن کد را اثبات نمی‌کند؛
-ریشهٔ اعتماد، بازبینی و توزیع معتبر خود برنامه است. این سازوکار امضای ناشر ندارد.
+The independent `APPROVED_MODELS` registry in `document_trust.py` is the
+trust-decision authority. A manifest next to the model, an environment variable
+or a hash computed from the installed files is not authorization. Each reviewed
+entry records an HTTPS source URL, a fixed forty-character revision id, a review
+reference and the complete list of relative paths with SHA-256 hashes. Before an
+entry is added, the real provenance, the executable code and the expected hashes
+must be checked against an independent download of the same revision. Recording a
+source string alone does not prove authenticity or harmlessness of the code; the
+root of trust is review and the application's own trusted distribution. There is
+no publisher signature.
 
-فعلاً هیچ مدل سندی تأیید نشده و فهرست عمداً خالی است؛ مدل‌های نصب‌شده به‌صرف
-داشتن نام فایل‌های لازم در رابط عرضه نمی‌شوند. پیکربندی نامعتبر، ارجاع کد به
-مخزن دیگر، فایل اضافه/کم‌شده، پیوند نمادین، فایل ویژه یا اختلاف hash رد می‌شود.
-هنگام اجرا، همان بایت‌های hashشده به پوشهٔ خصوصی موقت کپی و فقط همان کپی
-به worker داده می‌شود؛ تغییر معمول فایل اصلی پس از بررسی، ورودی اجرا را
-عوض نمی‌کند. این کپی ممکن است به‌اندازهٔ مدل فضای دیسک و زمان لازم داشته باشد.
-پوشه زیر runtimeهای پروژه روی درایو داده ساخته و پس از پایان/خطا پاک می‌شود.
+Currently **no document model is approved** and the registry is intentionally
+empty (`APPROVED_MODELS = {}`); installed models are not offered in the UI merely
+because the required file names exist. An invalid configuration, a code reference
+to another repository, an extra or missing file, a symbolic link, a special file
+or a hash mismatch is rejected. At run time the very bytes that were hashed are
+copied into a private temporary directory and only that copy is given to the
+worker, so an ordinary change of the original after verification does not alter
+the run input. The copy may need disk space and time proportional to the model. It
+is created under the project's runtimes on the data drive and removed at the end
+or on error.
 
-## حفاظت قابل اعمال
+## Applicable protection
 
-پروفایل فعلی فقط در لینوکس با `/usr/bin/bwrap` قابل استفاده است. قبل از هر
-اجرا، همان مجموعهٔ محدودیت‌ها با برنامهٔ بی‌خطر سیستم probe می‌شود. نبود ابزار،
-نبود گزینهٔ لازم یا رد namespace/mount موجب توقف است؛ اجرای بدون حفاظت وجود ندارد.
+The current profile works only on Linux with `/usr/bin/bwrap`. Before every run
+the same set of restrictions is probed with a harmless system program. A missing
+tool, a missing option or a refused namespace/mount stops the run; there is no
+unprotected execution.
 
-- فضای نام شبکه، PID، IPC و mount جداست؛ شبکهٔ میزبان، سوکت نشست، خانه و
-  کل پروژه mount نمی‌شوند. فقط `/usr` و مسیرهای کتابخانهٔ سیستم، بخش‌های لازم
-  محیط Python منتخب، کپی مدل و فایل worker، فقط‌خواندنی در دسترس‌اند.
-  cache دائمی runtime، از جمله اطلاعات احراز هویت احتمالی، mount نمی‌شود.
-- محیط ارث نمی‌رسد؛ خانه و cache تازه در فضای موقت با سقف ۲۵۶ مگابایت‌اند.
-  دستگاه‌های میزبان از جمله GPU ارائه نمی‌شوند. حالت خودکار فعلاً CPU است؛
-  درخواست صریح GPU رد می‌شود. مشاهدات GPU قدیمی مجوز این پروفایل نیستند.
-- capabilityها حذف، فضای نام کاربر تودرتو غیرفعال و نشست فرایندی جدا ساخته
-  می‌شود. worker سقف CPU، فایل، توصیفگر و تعداد فرایند/رشته و محدودیت قبلی
-  فضای نشانی CPU دارد. شمارش فرایند سیستم‌عامل به شناسهٔ کاربر وابسته است؛
-  این‌ها سهمیهٔ تجمیعی حافظه یا تضمین جلوگیری از کمبود حافظه نیستند.
-- زمان انتظار worker چهار دقیقه است. خروجی با سقف خواندن دریافت می‌شود؛
-  سقف اندازهٔ فایل worker نوشتن خروجی را نیز محدود می‌کند. پایان، خروج غیرصفر
-  و timeout باعث پاک‌سازی گروه فرایندی می‌شوند؛ namespace و مرگ launcher،
-  فرزندان باقی‌ماندهٔ محیط جدا را خاتمه می‌دهند. خطا متن موفق تولید نمی‌کند.
+- Network, PID, IPC and mount namespaces are separate; the host network, session
+  socket, home and the whole project are not mounted. Only `/usr` and system
+  library paths, needed parts of the selected Python environment, the model copy
+  and the worker file are readable, read-only. The permanent runtime cache,
+  including possible authentication data, is not mounted.
+- The environment is not inherited; home and cache are fresh in a temporary space
+  capped at 256 MB. Host devices including the GPU are not provided; automatic
+  mode is currently CPU and an explicit GPU request is refused. Older GPU
+  observations do not authorize this profile.
+- Capabilities are dropped, nested user namespaces disabled and a separate process
+  session is created. The worker has limits on CPU, file size, descriptors,
+  process/thread count and the earlier CPU address-space limit. The OS process
+  count depends on the user id; these are not an aggregate memory quota or a
+  guarantee against memory exhaustion.
+- The worker wait time is four minutes (`timeout=240` s). Output is read with a
+  size cap, and the worker file-size limit also bounds output writing. Completion,
+  non-zero exit and timeout clean up the process group; the namespace and launcher
+  death terminate remaining children of the isolated environment. An error never
+  produces success text.
 
-محیط Python و کتابخانه‌های سیستم همچنان بخشی از پایهٔ مورد اعتمادند؛ منشأ
-بسته‌های runtime در این کارت امضا/قفل نشده است. خود کد برنامه، هستهٔ سیستم،
-حملهٔ کاربر محلی هم‌هویت، مصرف تجمیعی منابع و آسیب‌پذیری هسته خارج از تضمین‌اند.
-این محدودیت‌ها ادعای اعتماد کامل به کد مدل نیستند. runtime مشکوک نباید دوباره
-اجرا شود؛ پس از توقف worker، محیط اختیاری مربوط را جداگانه قرنطینه/حذف و از
-منبع معتبر بازسازی کنید؛ محیط اصلی برنامه یا دادهٔ کاربر نباید حذف شود.
+The Python environment and system libraries remain part of the trusted base; the
+provenance of runtime packages is not signed or locked in this card. The
+application's own code, the kernel, an attacker of the same local user, aggregate
+resource use and kernel vulnerabilities are outside the guarantee. These limits
+do not claim full trust in model code. A suspicious runtime must not be run again:
+after stopping the worker, quarantine or delete the related optional environment
+separately and rebuild it from a trusted source; the application's main
+environment and user data must not be deleted.
 
-## شواهد و محدودیت آزمون
+## Evidence and test limits
 
-آزمون‌ها از checkpoint و برنامهٔ بی‌خطر استفاده می‌کنند: مدل ناشناس، manifest
-خودساخته، منشأ ناقص، artifact عوض‌شده، مدل نامعتبر، timeout، خروج worker و
-فرزند دیررس بررسی می‌شوند. آزمون قابلیت سیستم در صورت پشتیبانی، منع خواندن
-فایل خارج از فهرست، نوشتن مدل و اتصال شبکه را نیز بررسی می‌کند؛ در صورت رد
-قابلیت، فقط وضعیت «حفاظت در دسترس نیست» تأیید می‌شود.
+Tests use a checkpoint and a harmless program: unknown model, self-made manifest,
+incomplete provenance, a swapped artifact, invalid model, timeout, worker exit and
+a late child are checked. Where supported, the system-capability test also checks
+refusal of reading files outside the list, writing to the model and network
+connection; if the capability is refused, only the state "protection unavailable"
+is confirmed.
 
-در محیط بررسی ۲۰۲۶/۱۰/۲۴، `bubblewrap 0.11.1` نصب بود اما ساخت namespace رد
-شد. بنابراین اجرای موفق محدودشده، مدل واقعی، GPU و نشست زنده آزموده نشده‌اند.
-فعال‌سازی دوباره به تأیید مستقل مدل و آزمون همین پروفایل روی میزبان پشتیبانی‌شده
-نیاز دارد؛ آزمون واحد جای آن را نمی‌گیرد.
+In the 2026-10-24 review environment `bubblewrap 0.11.1` was installed but
+namespace creation was refused. Therefore a successful confined run, a real model,
+the GPU and a live session were **not** tested. Re-enabling needs independent
+approval of a model and a test of this exact profile on a supported host; unit
+tests do not replace it.
 
-رفتار ابزار با [راهنمای رسمی bubblewrap](https://github.com/containers/bubblewrap)
-و [گزینه‌های رسمی آن](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)،
-چرخهٔ فرایند با [مستند Python 3.14](https://docs.python.org/3.14/library/subprocess.html)
-و معنای کد سفارشی با [مستند Transformers](https://huggingface.co/docs/transformers/en/custom_models)
-بررسی شده است.
-
-</div>
+Tool behavior was checked against the official
+[bubblewrap guide](https://github.com/containers/bubblewrap) and its
+[options](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), process
+lifecycle against the [Python 3.14 documentation](https://docs.python.org/3.14/library/subprocess.html),
+and the meaning of custom code against the
+[Transformers documentation](https://huggingface.co/docs/transformers/en/custom_models).

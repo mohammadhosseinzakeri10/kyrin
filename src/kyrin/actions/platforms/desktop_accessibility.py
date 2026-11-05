@@ -1,5 +1,6 @@
 """Limit AT-SPI traversal to one active top-level window in the process."""
 
+import re
 from collections.abc import Callable
 from time import sleep
 from typing import Any
@@ -125,12 +126,16 @@ def _roles(atspi: Any) -> tuple[set[Any], set[Any]]:
     return states, clicks
 
 
-def valid_node(node: Any, atspi: Any, *, interactive: bool = False) -> bool:
+def valid_node(
+    node: Any, atspi: Any, *, interactive: bool = False, gtk4: bool = False
+) -> bool:
     node.clear_cache()
     state = node.get_state_set()
     required = [atspi.StateType.VISIBLE, atspi.StateType.SHOWING]
     if interactive:
-        required += [atspi.StateType.ENABLED, atspi.StateType.SENSITIVE]
+        required.append(atspi.StateType.SENSITIVE)
+        if not gtk4:
+            required.append(atspi.StateType.ENABLED)
     return all(state.contains(item) for item in required) and not any(
         state.contains(item)
         for item in (
@@ -139,6 +144,81 @@ def valid_node(node: Any, atspi: Any, *, interactive: bool = False) -> bool:
             atspi.StateType.INVALID,
         )
     )
+
+
+def _gtk4_provider(window: Any) -> bool:
+    """GTK4 maps DISABLED to absent SENSITIVE; it does not export ENABLED.
+
+    Require independent application and window provider metadata. Unknown/other
+    providers retain the original ENABLED check. This profile only admits
+    semantic actions, never a coordinate fallback for an unenabled control.
+    """
+    application_reader = getattr(window, "get_application", None)
+    if not callable(application_reader):
+        return False
+    app = application_reader()
+    if app is None or app.get_process_id() != window.get_process_id():
+        return False
+    version = app.get_toolkit_version()
+    return (
+        app.get_toolkit_name() == "GTK"
+        and isinstance(version, str)
+        and re.fullmatch(r"4\.\d+\.\d+(?:[-+.]\S+)?", version) is not None
+        and window.get_attributes().get("toolkit") == "GTK"
+    )
+
+
+def _single_menu_widget(controls: list[Control], atspi: Any) -> list[Control]:
+    """Collapse only a no-action GTK wrapper around its one same-named toggle.
+
+    Independent duplicates and invalid candidates remain represented. The child
+    retains every ancestor's validity; collapsing can never revive disabled UI.
+    """
+    groups: dict[str, list[Control]] = {}
+    for item in controls:
+        groups.setdefault(" ".join(item[0].get_name().casefold().split()), []).append(
+            item
+        )
+    omitted: set[AccessibilityTarget] = set()
+    for pair in groups.values():
+        if len(pair) != 2:
+            continue
+        wrapper, child = sorted(pair, key=lambda item: len(item[1].ancestry))
+        outer, inner = wrapper[0], child[0]
+        if (
+            outer.get_role() != atspi.Role.BUTTON
+            or inner.get_role() != atspi.Role.TOGGLE_BUTTON
+            or child[1].ancestry[:-1] != wrapper[1].ancestry
+            or outer.get_child_count() not in (1, 2)
+            or outer.get_child_at_index(0) != inner
+        ):
+            continue
+        if outer.get_child_count() == 2:
+            menu = outer.get_child_at_index(1)
+            if (
+                menu.get_role() != getattr(atspi.Role, "MENU", None)
+                or menu.get_name() != outer.get_name()
+                or not outer.get_state_set().contains(atspi.StateType.EXPANDED)
+            ):
+                continue
+        action = outer.get_action_iface()
+        if action is not None and action.get_n_actions() != 0:
+            continue
+        try:
+            if action_index(inner, None, checked=child[3]) is None:
+                continue
+        except ControlUnavailable:
+            continue
+        components = outer.get_component_iface(), inner.get_component_iface()
+        if any(component is None for component in components):
+            continue
+        rectangles = [
+            component.get_extents(atspi.CoordType.WINDOW) for component in components
+        ]
+        bounds = [(rect.x, rect.y, rect.width, rect.height) for rect in rectangles]
+        if bounds[0] == bounds[1] and min(bounds[0][2:]) > 0:
+            omitted.add(wrapper[1])
+    return [item for item in controls if item[1] not in omitted]
 
 
 def _request_window_export(window: Any, diagnostics: dict[str, int] | None) -> bool:
@@ -179,6 +259,7 @@ def control_snapshot(
     diagnostics: dict[str, int] | None = None,
     geometry: dict[str, object] | None = None,
     child_probe: Callable[[Any, int], dict[str, int]] | None = None,
+    unnamed_menu_items: bool = False,
 ) -> list[Control]:
     """Keep invalid named candidates too, so they cannot authorize OCR fallback.
 
@@ -260,6 +341,9 @@ def control_snapshot(
             geometry["coordinate_binding"] = "window_relative_semantic_only"
     if not fits_frame and not relative_only:
         raise ControlUnavailable("active window outside focused frame")
+    gtk4 = _gtk4_provider(window)
+    if diagnostics is not None:
+        diagnostics["gtk4_sensitive_state_profile"] = int(gtk4)
     state_roles, click_roles = _roles(atspi)
     window_roles = {atspi.Role.FRAME, atspi.Role.WINDOW, atspi.Role.DIALOG}
     path: tuple[tuple[int, str, str], ...] = (
@@ -294,13 +378,26 @@ def control_snapshot(
                 )
         if inspected > 3000 or len(ancestry) > 100:
             raise ControlUnavailable("incomplete accessibility tree")
+        node_valid = valid_node(node, atspi, interactive=True, gtk4=gtk4)
         role, name = node.get_role(), node.get_name()
-        valid = ancestors_valid and valid_node(node, atspi, interactive=True)
+        # The queue may have captured a lazy/cached role or label before this
+        # node was refreshed. Bind ancestry to the same fresh evidence used for
+        # matching, rather than retaining that pre-refresh placeholder.
+        ancestry = (*ancestry[:-1], (ancestry[-1][0], str(role), name))
+        valid = ancestors_valid and node_valid
         if node != window and role in window_roles:
             valid = False
         if node.get_process_id() != pid:
             valid = False
-        if role in click_roles and 1 <= len(name.strip()) <= 80:
+        if role in click_roles and (
+            1 <= len(name.strip()) <= 80
+            or (
+                unnamed_menu_items
+                and gtk4
+                and role == atspi.Role.MENU_ITEM
+                and not name
+            )
+        ):
             state = node.get_state_set()
             checked = (
                 state.contains(atspi.StateType.CHECKED)
@@ -335,11 +432,21 @@ def control_snapshot(
                     point = (x, y)
                 else:
                     valid = False
+            semantic_action = True
+            if gtk4 and not state.contains(atspi.StateType.ENABLED):
+                try:
+                    semantic_action = (
+                        action_index(node, None, checked=checked) is not None
+                    )
+                except ControlUnavailable:
+                    semantic_action = False
             found.append(
                 (
                     node,
                     AccessibilityTarget(ancestry),
-                    valid and valid_node(node, atspi, interactive=True),
+                    valid
+                    and valid_node(node, atspi, interactive=True, gtk4=gtk4)
+                    and semantic_action,
                     checked,
                     point,
                 )
@@ -370,7 +477,7 @@ def control_snapshot(
                     valid,
                 )
             )
-    return found
+    return _single_menu_widget(found, atspi) if gtk4 else found
 
 
 def resolve_control(

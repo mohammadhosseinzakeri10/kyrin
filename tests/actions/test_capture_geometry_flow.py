@@ -96,7 +96,14 @@ def test_both_executors_send_the_same_geometry_to_their_click_helpers(
         def ready(self) -> bool:
             return True
 
-        def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
+        def verify(
+            self,
+            app_id: str,
+            pid: int,
+            target: str = "Saved Messages",
+            *,
+            window_token: str | None = None,
+        ) -> bool:
             return False
 
         def find_visible_control(
@@ -133,28 +140,32 @@ def test_both_executors_send_the_same_geometry_to_their_click_helpers(
         telegram_desktop_id="org.telegram.desktop",
         identity_reader=lambda: ("org.telegram.desktop", 42),
         verifier=Verifier(),
+        token_reader=lambda: "window-7",
     )
-    telegram._click_result(
-        ActionRequest(
-            ActionKey(0, 2),
-            CommandIntent(CommandKind.OPEN_CHAT, "Ali", app="telegram"),
-        ),
-        ("org.telegram.desktop", 42),
-        "Ali",
-        ChatSearchMatch(
-            50,
-            100,
-            100,
-            20,
-            1000,
-            750,
-            geometry,
-            ((50, 100, 100, 20), (300, 100, 40, 15)),
-        ),
-        visible_row=True,
-    )
-    assert sent[0][-1] == sent[1][-1] == "geometry=" + geometry.to_json()
-    assert json.loads(sent[1][-2].removeprefix("evidence=")) == [
+    with telegram._bound_window("window-7"):
+        telegram._click_result(
+            ActionRequest(
+                ActionKey(0, 2),
+                CommandIntent(CommandKind.OPEN_CHAT, "Ali", app="telegram"),
+            ),
+            ("org.telegram.desktop", 42),
+            "Ali",
+            ChatSearchMatch(
+                50,
+                100,
+                100,
+                20,
+                1000,
+                750,
+                geometry,
+                ((50, 100, 100, 20), (300, 100, 40, 15)),
+            ),
+            visible_row=True,
+        )
+    assert sent[0][-1] == sent[1][-2] == "geometry=" + geometry.to_json()
+    # Telegram also names the operation's window, which the capture came from.
+    assert sent[1][-1] == "window=window-7"
+    assert json.loads(sent[1][-3].removeprefix("evidence=")) == [
         [50, 100, 100, 20],
         [300, 100, 40, 15],
     ]

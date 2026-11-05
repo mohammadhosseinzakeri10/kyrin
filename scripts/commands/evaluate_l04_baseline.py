@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -181,6 +181,11 @@ def load_cases(path: Path) -> tuple[Case, ...]:
         for turn in case.turns:
             if not isinstance(turn["text"], str):
                 raise ValueError("input text must be a string")
+            if (
+                "visible_control_enabled" in turn
+                and type(turn["visible_control_enabled"]) is not bool
+            ):
+                raise ValueError("fixture visible-control capability must be boolean")
             TranscriptStatus(turn.get("status", "final"))
         cases.append(case)
     return tuple(cases)
@@ -238,6 +243,7 @@ class RecordingModel:
                             "target": step.target_phrase,
                             "app": step.app_phrase,
                             "polarity": step.polarity.value,
+                            "control_state": step.control_state,
                         }
                         for step in candidate.steps
                     ]
@@ -274,6 +280,8 @@ def model_disagrees(call: dict[str, object], expected: dict[str, Any]) -> bool:
         for step, intent in zip(candidate, wanted, strict=True):
             if not isinstance(step, dict) or step["operation"] != intent["kind"]:
                 return True
+            if step.get("control_state") != intent.get("control_state"):
+                return True
             for field, reference in (
                 ("target", intent["target"]),
                 ("app", intent.get("app", "")),
@@ -295,12 +303,60 @@ def turn_score(
     model_calls: Sequence[dict[str, object]],
 ) -> dict[str, bool]:
     result = score(expected, actual)
+    selection_ui = "choose_window" in responses and any(
+        intent["kind"] in {"show_all_windows", "show_app_windows"}
+        for intent in actual.get("intents", [])
+    )
     clarification = any(
-        response not in {"conversation", "ready_for_command"} for response in responses
+        response not in {"conversation", "ready_for_command"}
+        and not (selection_ui and response == "choose_window")
+        for response in responses
     )
     wanted = expected.get("intents", [])
     proposed = actual.get("intents", [])
+    paired = list(zip(wanted, proposed, strict=False))
     result.update(
+        wrong_operation=bool(
+            wanted
+            and proposed
+            and [i["kind"] for i in wanted] != [i["kind"] for i in proposed]
+        ),
+        wrong_direction=any(
+            left["kind"] in {"scroll_up", "scroll_down"}
+            and right["kind"] in {"scroll_up", "scroll_down"}
+            and left["kind"] != right["kind"]
+            for left, right in paired
+        ),
+        wrong_state=any(
+            left.get("control_state") != right.get("control_state")
+            for left, right in paired
+        ),
+        wrong_payload=any(
+            left["kind"] == right["kind"]
+            and left["kind"] in {"telegram_search", "open_chat"}
+            and left["target"] != right["target"]
+            for left, right in paired
+        ),
+        wrong_order=bool(
+            len(wanted) > 1
+            and wanted != proposed
+            and sorted(wanted, key=lambda i: json.dumps(i, sort_keys=True))
+            == sorted(proposed, key=lambda i: json.dumps(i, sort_keys=True))
+        ),
+        extra_steps=len(proposed) > len(wanted),
+        wrong_window_index=any(
+            left.get("window_index") != right.get("window_index")
+            for left, right in paired
+        ),
+        wrong_scroll_amount=any(
+            left.get("scroll_steps") != right.get("scroll_steps")
+            or left.get("scroll_area") != right.get("scroll_area")
+            for left, right in paired
+        ),
+        wrong_scope=any(
+            left.get("chat_scope", "search") != right.get("chat_scope", "search")
+            for left, right in paired
+        ),
         wrong_destination=bool(
             wanted
             and proposed
@@ -316,10 +372,12 @@ def turn_score(
         ),
         no_proposal=actual["route"] == "no_command",
         clarification=clarification,
+        selection_ui_response=selection_ui,
         conversational_reply="conversation" in responses,
         repeat_request="repeat_command" in responses,
         unexpected_clarification=clarification and policy == "none",
-        missing_clarification=not clarification and policy == "require",
+        missing_clarification=not (clarification or selection_ui)
+        and policy == "require",
         model_error=any("error" in call for call in model_calls),
         model_proposal_disagrees=any(
             model_disagrees(call, expected) for call in model_calls
@@ -332,7 +390,20 @@ def replay_case(
     case: Case,
     interpreter: CommandInterpreter,
     recorder: RecordingModel | None = None,
+    *,
+    on_events: Callable[[Sequence[CommandEvent]], None] | None = None,
+    transcripts: Sequence[TranscriptUpdate] | None = None,
 ) -> dict[str, Any]:
+    if transcripts is not None and (
+        len(transcripts) != len(case.turns)
+        or any(
+            update.text != turn["text"]
+            or update.status.value != turn.get("status", "final")
+            or update.language != case.language
+            for update, turn in zip(transcripts, case.turns, strict=True)
+        )
+    ):
+        raise ValueError("transcripts must match every frozen case turn")
     coordinator = CommandCoordinator(interpreter)
     actual: dict[str, Any] = {"route": "no_command"}
     responses: list[str] = []
@@ -355,7 +426,9 @@ def replay_case(
                 "kyrin.commands.coordinator.monotonic", return_value=turn.get("at", 0)
             ):
                 events = coordinator.observe(
-                    TranscriptUpdate(
+                    transcripts[index]
+                    if transcripts is not None
+                    else TranscriptUpdate(
                         turn.get("segment", index), text, status, case.language
                     ),
                     observed_active_app=turn.get("active_app"),
@@ -374,6 +447,8 @@ def replay_case(
                 if intents
                 else {"route": "no_command"}
             )
+        if on_events is not None:
+            on_events(events)
         # References are read only after interpretation; never added to input/context.
         reference: dict[str, Any] = (
             case.turn_references[index]
