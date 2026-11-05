@@ -9,7 +9,7 @@ Audit inspection was static only. Prior 3,811-test gate evidence was matched to
 
 - When the owner names an ID, read this file, locate that task, then load only
   its relevant contracts, implementation, direct callers and tests. Start with
-  [project context](../PROJECT_CONTEXT.md) and [agent policy](../AGENTS.md).
+  [project context](../PROJECT_CONTEXT.md) and agent policy (`AGENTS.md`, not published).
 - Inspect the live working tree before editing; preserve all owner changes.
   Reconfirm the finding against current code and explain the proposed change
   and required verification. This queue alone does not authorize implementation.
@@ -134,7 +134,7 @@ result. Hover/double activation is an unproven hypothesis.
 **References:** [latest continuation](actions/TELEGRAM_INTEGRATION_AUDIT_2026-10-30.md);
 [telegram.py](../src/kyrin/actions/platforms/telegram.py), [telegram_portal_helper.py](../src/kyrin/actions/platforms/telegram_portal_helper.py), [telegram_accessibility.py](../src/kyrin/actions/platforms/telegram_accessibility.py);
 [test_telegram_live_controls.py](../tests/actions/test_telegram_live_controls.py), [test_telegram_saved_messages.py](../tests/actions/test_telegram_saved_messages.py);
-[docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md](development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md) §12-f.
+docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md (`L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md`, not published) §12-f.
 
 **Next action / work:** Prepare the existing closed-menu versus pre-opened-menu
 owner protocol with loaded-code proof and fixed-marker-only diagnostics.
@@ -160,7 +160,7 @@ Individual successful listening controls do not prove sustained stability.
 **References:** [accept_l01.py](../scripts/audio/accept_l01.py), [l01_stability.py](../scripts/audio/l01_stability.py);
 [tests/runtime/test_l01_acceptance.py](../tests/runtime/test_l01_acceptance.py);
 [tests/audio/test_live_idle_backpressure.py](../tests/audio/test_live_idle_backpressure.py);
-[live protocol](development/L01_LIVE_ACCEPTANCE_FA.md);
+live protocol (`L01_LIVE_ACCEPTANCE_FA.md`, not published);
 [listening decision](decisions/DR-0010-voice-listening-modes.md).
 
 **Next action / work:** Prepare the existing inert-action pilot; assess it before
@@ -183,7 +183,7 @@ B01–B18 matrix is not fully accepted. In particular, current-source same-app w
 replacement, cancellation while understanding and stale completion across stop/
 restart must not be inferred from successful ordinary navigation.
 
-**References:** [docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md](development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md) §4;
+**References:** docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md (`L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md`, not published) §4;
 [command_runtime.py](../src/kyrin/runtime/command_runtime.py), [command_worker.py](../src/kyrin/runtime/command_worker.py);
 [test_plan_cancellation.py](../tests/runtime/test_plan_cancellation.py), [test_listening_state.py](../tests/runtime/test_listening_state.py);
 [test_l04_content_boundaries.py](../tests/commands/test_l04_content_boundaries.py), [test_control_window_binding.py](../tests/commands/test_control_window_binding.py);
@@ -212,7 +212,7 @@ entire A-family matrix. The remaining Telegram bundle includes creation-screen
 entry, focus-only search and visible/global-result variants; supported route
 coverage must be reconciled with the latest audit before another run.
 
-**References:** [docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md](development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md)
+**References:** docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md (`L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md`, not published)
 §3 and §12-s through §12-f;
 [Telegram route audit](actions/TELEGRAM_INTEGRATION_AUDIT_2026-10-30.md);
 [telegram.py](../src/kyrin/actions/platforms/telegram.py), [telegram_selection.py](../src/kyrin/actions/telegram_selection.py);
@@ -296,7 +296,7 @@ does not prove persistence across an OS reboot.
 [src/kyrin/app/qt/window.py](../src/kyrin/app/qt/window.py);
 [test_input_session.py](../tests/actions/test_input_session.py), [test_input_session_bus.py](../tests/actions/test_input_session_bus.py);
 [tests/app/test_qt_window.py](../tests/app/test_qt_window.py);
-[docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md](development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md) opening status.
+docs/development/L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md (`L04_PHASES_09_12_OWNER_ACCEPTANCE_FA.md`, not published) opening status.
 
 **Next action / work:** Prepare one controlled owner restart handoff, preserving
 saved consent and recording only content-free session/persistence metadata.

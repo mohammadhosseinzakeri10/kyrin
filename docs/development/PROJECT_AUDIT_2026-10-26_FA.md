@@ -166,10 +166,10 @@ GPU، دو حالت تعویض مدل و شروع مجدد، و تغییر مج�
 | L04: تحمل خطای گفتار | 🟠 مسیر آزمایشی، مجموعهٔ ارزیابی و کنترل دیداری پیاده شده‌اند | ماتریس کامل عملیات، لهجه‌ها، کیفیت، تأخیر و منابع هنوز پذیرفته نشده است |
 | زیرمجموعهٔ دیداری L04 | 🟢 کلیک دکمه و توالی روشن، روشن، خاموش، خاموش روی صفحهٔ Chrome پذیرفته شده است | کلیک صریح خودِ گزینه و برنامهٔ غیرمرورگری پذیرش مستقل ندارند |
 
-مراجع: [تحویل مسائل زنده](LIVE_ISSUE_HANDOFF_FA.md)،
-[پذیرش L03](L03_SHARED_INPUT_SESSION_2026-10-25_FA.md)،
-[کنترل دیداری L04](L04_VISIBLE_CONTROL_2026-10-26_FA.md)،
-[راهنمای پذیرش L04](L04_LIVE_ACCEPTANCE_FA.md).
+مراجع: تحویل مسائل زنده (`LIVE_ISSUE_HANDOFF_FA.md`, not published)،
+پذیرش L03 (`L03_SHARED_INPUT_SESSION_2026-10-25_FA.md`, not published)،
+کنترل دیداری L04 (`L04_VISIBLE_CONTROL_2026-10-26_FA.md`, not published)،
+راهنمای پذیرش L04 (`L04_LIVE_ACCEPTANCE_FA.md`, not published).
 
 ## موارد نیازمند اصلاح یا تکمیل
 
@@ -285,7 +285,7 @@ GPU، دو حالت تعویض مدل و شروع مجدد، و تغییر مج�
 - معماری جاری: [OVERVIEW.md](../architecture/OVERVIEW.md).
 - نقشهٔ فایل‌ها: [PROJECT_LAYOUT.md](PROJECT_LAYOUT.md).
 - کیفیت و محدودیت‌ها: [VALIDATION.md](../VALIDATION.md).
-- قرارداد و پذیرش گفتار: [L04](L04_LIVE_ACCEPTANCE_FA.md).
+- قرارداد و پذیرش گفتار: L04 (`L04_LIVE_ACCEPTANCE_FA.md`, not published).
 - قواعد فعلی محصول: [راهنمای فرمان](../commands/USER_COMMAND_GUIDE_FA.md)،
   [مجوز ماندگار](../actions/PERSISTENT_PERMISSIONS_FA.md)،
   [پس‌شرط](../actions/ACTION_POSTCONDITIONS.md).

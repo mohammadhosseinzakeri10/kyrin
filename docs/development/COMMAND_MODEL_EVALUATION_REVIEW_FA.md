@@ -2,7 +2,7 @@
 
 # بازبینی مراحل ۳ تا ۶ — ۲۰۲۶/۱۰/۲۷
 
-مرجع الزام‌ها: [قرارداد مشترک و کارت‌ها](EVALUATION_PHASE_PROMPTS_FA.md).
+مرجع الزام‌ها: قرارداد مشترک و کارت‌ها (`EVALUATION_PHASE_PROMPTS_FA.md`, not published).
 شناسهٔ کارت مشترک مراحل ۴ و ۵، `E45` است؛ کارت مستقلی به نام `E05` در این
 زنجیره تعریف نشده است.
 
@@ -169,7 +169,7 @@ local-data/quality-venv/bin/python scripts/development/check.py \
 هستند. تغییرهای قبلی مالک و مراحل ۱ و ۲ حفظ شدند؛ commit، push و انتشار
 انجام نشدند. گزارش‌های اصلی:
 [E03](COMMAND_MODEL_EVALUATION_E03_FA.md)،
-[E45](COMMAND_MODEL_EVALUATION_E45_FA.md)،
+E45 (`COMMAND_MODEL_EVALUATION_E45_FA.md`, not published)،
 [E06](COMMAND_MODEL_EVALUATION_E06_FA.md).
 
 </div>

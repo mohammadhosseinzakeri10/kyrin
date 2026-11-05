@@ -3,7 +3,7 @@
 # اصلاح محدود تأخیر با شاهد واقعی — E06
 
 تاریخ: ۲۰۲۶/۱۰/۲۷. پیش‌نیاز:
-[گزارش واقعی E45](COMMAND_MODEL_EVALUATION_E45_FA.md).
+گزارش واقعی E45 (`COMMAND_MODEL_EVALUATION_E45_FA.md`, not published).
 این کارت یک اصلاح کوچکِ آماده‌سازی را تکمیل می‌کند؛ تنظیم همهٔ منابع یا
 پذیرش نهایی کیفیت، سرعت، L01 و L04 از آن نتیجه نمی‌شود.
 
@@ -164,7 +164,7 @@ local-data/quality-venv/bin/python scripts/development/check.py \
 <div dir="rtl" lang="fa">
 
 بازاجرای حالت پس از اصلاح، با محیط آزمایشی و tokenizer موجودِ فرمان
-[E45](COMMAND_MODEL_EVALUATION_E45_FA.md)، همان ماژول اندازه‌گیری را با
+E45 (`COMMAND_MODEL_EVALUATION_E45_FA.md`, not published)، همان ماژول اندازه‌گیری را با
 `--plan local-data/command-evaluation/e06-comparison-plan.json` و یک مسیر
 `--output` تازه مصرف کند. برای بازسازی دقیق نسخهٔ پیشین، تنها تغییر همین
 فایل محصول از diff بررسی‌شده در checkout جدا برگردانده شود؛ هرگز تغییرهای
