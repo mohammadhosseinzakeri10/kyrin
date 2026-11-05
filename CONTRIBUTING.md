@@ -27,7 +27,7 @@ and the same development requirements as the
 
 ```bash
 sudo apt-get install -y gjs dbus-daemon systemd python3-gi \
-  gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 bubblewrap
+  gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 bubblewrap libespeak-ng1
 export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
 .venv/bin/python -m pip install -r requirements/dev.txt
 .venv/bin/python -m pip check
