@@ -44,11 +44,9 @@ When persistence is enabled, KYRIN stores only finalized speech text, its report
 language, a UTC time,
 and session/stream/segment identifiers. Partial STT text and audio are not
 saved. The SQLite database is created at the standard XDG data path
-`~/.local/share/kyrin/memory/conversation.sqlite3`. On the owner's Ubuntu
-machine this directory points to
-`/mnt/ai_projects/KYRIN/local-data/kyrin/memory/`, which is excluded from Git.
-Other platforms can supply their own data directory without changing the
-history interface.
+`~/.local/share/kyrin/memory/conversation.sqlite3` by default. The app honors
+`XDG_DATA_HOME`. See [local data locations](../app/LOCAL_DATA_STORAGE.md) for
+the boundary between application data and the source checkout.
 
 By default, the database retains at most 2,000 active finalized turns; archived
 turns are preserved outside that active limit. Both limits and optional ages

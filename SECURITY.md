@@ -22,13 +22,16 @@ channel without vulnerability details.
 
 ## Trust boundaries
 
-- **Microphone and history:** standby pauses commands but may keep capture
-  active. Full microphone shutdown and application quit are separate controls.
-  Optional history stores finalized text locally and is not audio recording.
-  Diagnostic tools can have their own recording/output options.
+- **Microphone and history:** standby pauses commands while capture can
+  remain active. Use full microphone shutdown to stop capture, or quit the
+  application. Optional [history](docs/commands/CONVERSATION_MEMORY.md) stores
+  finalized text and basic session metadata locally. Diagnostic tools have
+  their own recording and output options.
 - **Desktop authority:** action execution is disabled in a fresh configuration.
-  App selection, capability grants and portal consent are distinct. Broad
-  trust and remembered permissions increase the authority of later commands.
+  App selection, capability grants, operating-system consent and the live
+  portal session are separate. A saved restore token can allow a later startup
+  restoration attempt. Revocation and disconnect have different effects.
+  See [shared input sessions](docs/actions/SHARED_INPUT_SESSION_FA.md).
 - **Model output:** recognition can change meaning. Local command models
   propose structured intent; permission checks, target grounding and selected
   confirmations remain independent. These checks do not guarantee that every

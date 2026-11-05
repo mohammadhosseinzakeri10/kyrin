@@ -1,8 +1,8 @@
 # Validation and known limits
 
 This page separates reproducible repository checks from live owner evidence.
-A passing test suite does not establish reliable behavior on every microphone,
-model, GPU, compositor or application.
+The results below are historical evidence for the `v0.1.0` tag. Live
+behavior varies with the microphone, model, GPU, compositor and application.
 
 ## Publication checks — 2026-10-26
 
@@ -21,7 +21,7 @@ corrections.
 | Wheel installation without dependencies | Passed in a separate environment; imports, version and bundled resources checked |
 | Source contents | Model weights, recordings and local settings excluded; bundled Silero VAD retained; only template STT CSV manifests included |
 | Relative links and UI image | Public entry-guide links checked; actual Qt window rendered with isolated synthetic preview dependencies |
-| GitHub Actions | [Live workflow status and logs](https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml); assess the exact published commit separately from the local result |
+| GitHub Actions on the tagged commit | [Run 40365140836](https://github.com/mohammadhosseinzakeri10/kyrin/actions/runs/40365140836) completed successfully. The release notes record 2,576 tests passing, source and wheel builds, and the wheel resource smoke check. |
 
 Checks write ignored local logs under `local-data/publication-review/`.
 The headless gate creates temporary user/XDG directories, removes live desktop
@@ -114,8 +114,9 @@ of a successful voice-command session.
 
 ## Known release limits
 
-- The release is source-first. Runtime acquisition, model licensing, drivers
-  and per-machine desktop integration remain separate setup work.
+- The release provides source and Python build artifacts. Runtime acquisition,
+  model licensing, drivers and per-machine desktop integration remain separate
+  setup work.
 - The application requires Python 3.14+. Optional workers may use different
   isolated Python versions. The GNOME extensions declare Shell 50; support on
   other versions and platforms is not implied by headless CI.

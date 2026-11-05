@@ -3,6 +3,11 @@
 Changes to the published source snapshot are recorded here. Versions identify
 source milestones, not portable binary distributions.
 
+## Unreleased
+
+- Clarify installation, example commands, desktop requirements, local storage,
+  and the evidence behind the published v0.1.0 snapshot.
+
 ## [0.1.0] - 2026-10-26
 
 Initial public portfolio release (alpha).

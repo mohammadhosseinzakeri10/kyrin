@@ -1,15 +1,18 @@
 # Getting started
 
-KYRIN v0.1.0 is an alpha source release. The first goal is to open the control
-center; recognition, voice output and desktop actions are configured separately.
-There is no single download containing every model and runtime.
+KYRIN v0.1.0 is a portfolio alpha. Start by opening the control center, then
+configure recognition, voice output and desktop actions separately. The
+[tagged release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+also provides a wheel, source archive and checksums. The instructions below
+use the tagged Git checkout, including its GNOME extensions.
 
 ## 1. Install the development application
 
 Use Python 3.14 or newer. The reproducible check profile is CPython 3.14.4 on
-Ubuntu 26.04 x86_64. Desktop adapters target Ubuntu/GNOME; owner live validation
-was on Ubuntu 26.04 / GNOME Shell 50. Headless CI uses Ubuntu 26.04; it does not
-establish live desktop integration on the runner. Portal helpers additionally
+Ubuntu 26.04 x86_64. Follow the desktop integration steps from a logged-in
+Ubuntu GNOME Shell 50 Wayland session. Owner observations cover selected
+scenarios on Ubuntu 26.04, and the Ubuntu 26.04 CI runner exercises the
+headless tests. Portal helpers additionally
 require the system `/usr/bin/python3` to support Python 3.14+ and provide GI.
 Installing a separate application Python does not upgrade that interpreter.
 
@@ -20,10 +23,11 @@ sudo apt-get update
 sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatcher
 ```
 
-From a clone of this repository:
+From a directory where you want to keep the source:
 
 ```bash
-git checkout v0.1.0
+git clone --branch v0.1.0 https://github.com/mohammadhosseinzakeri10/kyrin.git
+cd kyrin
 export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
 export HF_HOME="$PWD/local-data/cache/huggingface"
 python3.14 -m venv .venv
@@ -63,8 +67,8 @@ Choose one supported backend rather than installing every engine.
 | Omnilingual | Compatible isolated Python worker/runtime, checkpoint and tokenizer | [Integration (Persian)](stt/OMNILINGUAL_ASR_FA.md) |
 
 Store downloaded models in ignored `models/local/` and runtimes/caches under
-`local-data/`. [Model notes](../models/README.md) describe the owner's catalog
-and upstream references; those installed folders are not present in a clone.
+`local-data/`. [Model notes](../models/README.md) describe development catalog
+examples and upstream references. Populate the needed folders locally.
 Check each model's license before downloading or redistributing it. Download
 and runtime build procedures depend on the chosen engine and are not automated
 by this release.
@@ -160,11 +164,31 @@ not guarantee that the OS will skip consent. Revocation and session disconnect
 remain available. System power has its own capability and should be left off
 for initial tests.
 
+## Example commands
+
+Use a compatible English recognition model. Check the transcript and outcome
+separately. For desktop examples, use a disposable window or test account and
+enable only the relevant capability in **Desktop Actions**.
+
+| Say | Expected route and prerequisites |
+| --- | --- |
+| `Start listening` / `Stop listening` | Enter command mode or return to standby with recognition still available. |
+| `Turn off microphone completely` | Stop capture. Use the app controls to resume after full shutdown. |
+| `Open Calculator` | Launch or activate an installed Calculator app allowed by policy. |
+| `Minimize Calculator` | Request the window operation with window control enabled for the app and a resolvable GNOME target. |
+| `Scroll down` | Request scrolling with the desktop-scroll capability and pointer access. |
+| `Open chat Saved Messages` | Request navigation in a focused Telegram Desktop window with the required Telegram, input and observation permissions. |
+
+The [command guide (Persian)](commands/USER_COMMAND_GUIDE_FA.md) lists more
+phrases and their conditions. Local recognition quality and an application's
+exposed controls vary. An unverified dispatch is a report of input delivery.
+
 ## Settings, shutdown and troubleshooting
 
 - Settings normally use `$XDG_CONFIG_HOME/kyrin/settings.json`, falling back
-  to `~/.config/kyrin/settings.json`. Paths follow XDG; the owner's drive/symlink
-  layout in engineering notes is not required on another computer.
+  to `~/.config/kyrin/settings.json`. See
+  [local data locations](app/LOCAL_DATA_STORAGE.md) for models, history and
+  project-local caches.
 - Closing the window minimizes it. **Quit KYRIN** stops the application.
 - Standby stops commands while capture may continue. **Turn off microphone
   completely** stops capture.
@@ -174,8 +198,5 @@ for initial tests.
   speech runtime are different setup failures. Include the exact error in a
   bug report after removing private paths/content.
 
-For the developer gate, install `gjs`, `dbus-daemon`, `systemd`, `python3-gi`,
-`gir1.2-glib-2.0`, `gir1.2-gdkpixbuf-2.0` and `bubblewrap`, plus the pinned `requirements/dev.txt`, then
-run `scripts/development/check.py`. The gate constructs protected OCR commands
-and uses inert workers; it does not run downloaded model code. See
-[validation](VALIDATION.md) and [quality setup](development/QUALITY_CHECKS.md).
+For the deterministic developer gate and its system prerequisites, see
+[Contributing](../CONTRIBUTING.md) and [validation](VALIDATION.md).

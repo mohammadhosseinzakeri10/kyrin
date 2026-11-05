@@ -20,160 +20,85 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-KYRIN connects continuous speech recognition to bounded command understanding
-and desktop actions. Audio capture, recognition, interpretation, authorization,
-and execution have separate contracts, so replacing a speech engine does not
-require rewriting desktop control.
+KYRIN turns local speech into bounded desktop commands on Ubuntu/GNOME.
+Its speech engines are replaceable, and its command interpreter proposes
+actions that a separate authorization layer can reject. The Qt control
+center configures audio, models, and desktop permissions.
 
-**This is the initial open-source portfolio release, distributed as source.**
-It is an experimental developer project, not a portable installer or a general
-computer-use assistant. Later versions are planned to be developed privately;
-this release remains available under the MIT license. See the
-[release policy](docs/RELEASE_POLICY.md).
-
-## What works today
-
-| Area | Implementation | Limits |
-| --- | --- | --- |
-| Speech input | Continuous microphone pipeline, VAD, local-file replay; Vosk, whisper.cpp and isolated Omnilingual adapters | Recognition requires separately acquired models and compatible runtimes |
-| Command understanding | Deterministic rules, optional local Ollama proposals, bounded speech-error recovery and numbered clarification | Arbitrary requests and universal multilingual control are not supported |
-| Desktop actions | Allowed app launch/activation, window controls, scrolling and named visible controls | Ubuntu/GNOME adapters; some actions need the bundled GNOME extension and portal consent |
-| Observation | AT-SPI accessibility and optional screen/OCR readers | Missing, ambiguous, stale or unsupported observations can block an action |
-| Control center | PySide6 settings, local model library, English/Persian UI, optional local TTS and status character | Optional engines, GPU drivers and model packages need separate setup |
-| Permissions | Per-capability grants, app selection, persistent portal session restoration and revocation | Grants do not establish target correctness; each action performs its own checks |
-
-Live owner checks cover selected application, Telegram and visible-control
-scenarios. They do not establish support for every application, distribution or
-recognizer. The [validation notes](docs/VALIDATION.md) distinguish deterministic
-tests from live desktop evidence and remaining gaps.
-
-## A look at the application
-
-![KYRIN control center](docs/images/control-center.png)
-
-The real Qt control window rendered in an isolated preview with default settings;
-no microphone, personal desktop session or model was used for this image.
-The dashboard also has optional animated CPU/GPU renderers.
+**v0.1.0 is an MIT-licensed portfolio alpha.** The
+[tagged release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+includes source and Python build artifacts. Optional runtimes, speech models,
+and GNOME integration require separate setup. Later development is planned
+for a private repository. See the [release policy](docs/RELEASE_POLICY.md).
 
 ## Try it
 
-### Requirements
+Use Python 3.14 or later on Linux to open the Qt control center. The desktop
+instructions target Ubuntu 26.04 with GNOME Shell 50 on Wayland. Portal
+helpers also require the system Python and GObject Introspection bindings.
+Follow [Getting started](docs/GETTING_STARTED.md) for the pinned installation,
+model setup, and example commands. A fresh configuration opens without
+microphone capture or desktop action authority.
 
-- Python **3.14+**. The pinned development environment uses **3.14.4**.
-- Linux for the development setup; Ubuntu with GNOME for desktop integration.
-  Owner live checks were on Ubuntu 26.04 / GNOME 50. CI uses Ubuntu 26.04
-  without a live desktop session. Windows and macOS adapters are not provided.
-- PortAudio and the Qt system libraries. Model-backed features need additional
-  local files/runtimes; GPU operation is optional.
+![KYRIN control center](docs/images/control-center.png)
 
-On Ubuntu, install the system libraries if they are missing:
+The actual Qt control window rendered in an isolated preview with default
+settings. The image shows the interface before a model or microphone session.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatcher
-```
+## Capabilities in v0.1.0
 
-Clone the source and install the pinned core and Qt environment:
+| Area | What this snapshot implements | What to expect |
+| --- | --- | --- |
+| Speech input | Microphone capture, local-file input, voice activity detection, and Vosk, whisper.cpp, and Omnilingual adapters | Recognition needs a compatible local model and runtime. Start with the documented English examples. |
+| Command understanding | Deterministic phrases, optional loopback Ollama proposals, bounded recovery and numbered clarification | Coverage depends on the recognized text, supported action and target. |
+| Desktop control | App launch and activation, selected window operations, scrolling and named visible controls | Requires explicit permissions. Accessibility, GNOME extensions, portal consent and OCR requirements vary by operation. |
+| Telegram Desktop | Selected navigation, including Saved Messages and guarded chat selection | Coverage depends on the window and readable targets. The chat-opening flow does not send a message. |
+| Feedback | Qt output, English/Persian interface, optional local speech output and GNOME status character | Speech output requires its own runtime and model. UI language and recognition language are separate settings. |
 
-```bash
-git clone https://github.com/mohammadhosseinzakeri10/kyrin.git
-cd kyrin
-git checkout v0.1.0
-export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
-export HF_HOME="$PWD/local-data/cache/huggingface"
-python3.14 -m venv .venv
-.venv/bin/python -m pip install -r requirements/bootstrap.txt
-.venv/bin/python -m pip install -r requirements/core.txt -r requirements/test-ui.txt
-.venv/bin/python -m pip install --no-build-isolation --no-deps -e .
-.venv/bin/kyrin-desktop
-```
-
-This opens the control center for setup. With no selected speech model, KYRIN
-does not start microphone capture. The Qt-only preview does not need optional
-speech engines; using those features does. The `desktop` extra additionally
-installs the Sherpa speech-output runtime; see the
-[installation guide](docs/GETTING_STARTED.md) for the available paths.
-
-For a first speech session, import a supported local STT model through **Model
-Library**, select it in **Speech Recognition**, and choose a microphone in
-**Audio Input**. Start with CPU recognition and desktop actions disabled.
-[Configure desktop integration](docs/GETTING_STARTED.md#desktop-integration)
-only when needed. Weights, recordings, permission tokens and user settings are
-not included in this repository. The small bundled Silero VAD model has its
-own retained [license notice](THIRD_PARTY_NOTICES.md).
-
-Closing the window minimizes it while the application continues running.
-Use **Quit KYRIN** to exit. Spoken standby pauses command handling; **Turn off
-microphone completely** stops capture. See the
-[command guide (Persian)](docs/commands/USER_COMMAND_GUIDE_FA.md).
+See the [supported examples](docs/GETTING_STARTED.md#example-commands) and
+[validation and limits](docs/VALIDATION.md). Selected owner observations cover
+individual scenarios on one desktop. The deterministic suite covers software
+contracts with test doubles and synthetic evidence.
 
 ## Architecture at a glance
 
 ```mermaid
 flowchart LR
-    A[Microphone / audio file] --> B[Audio framing and VAD]
-    B --> C[Replaceable STT backend]
-    C --> D[Bounded command understanding]
-    D --> E[Permission and target checks]
-    E --> F[Ubuntu / GNOME executor]
-    F --> G[Postconditions and response]
+    A[Microphone or audio file] --> B[Audio framing and VAD]
+    B --> C[Replaceable speech recognition]
+    C -->|Partial transcript| H[Qt feedback]
+    C -->|Final transcript| D[Command interpretation]
+    D --> E[Action gate and permissions]
     O[Fresh desktop observations] --> D
     O --> E
-    G --> H[Qt UI / optional local TTS]
+    E -->|Authorized action| F[Ubuntu executor]
+    F --> G[Outcome verification]
+    G --> H
+    G --> I[Optional speech and status feedback]
 ```
 
-The command model proposes meaning; it does not receive unrestricted shell
-execution. Raw microphone acquisition does not contain STT or agent logic.
-Fresh window identity, cancellation and observation deadlines help prevent old
-requests from acting on a replacement target. A dispatched action can still
-have an unverified outcome; the UI preserves that distinction.
+Local model output can propose a target. The action path independently checks
+capability, target identity and operation lifetime. A reported dispatch can
+have an unverified effect. See the [architecture](docs/architecture/OVERVIEW.md),
+[source map](docs/development/PROJECT_LAYOUT.md), [control policy](docs/actions/CONTROL_POLICY.md)
+and [security boundaries](SECURITY.md).
 
-Read the [current architecture](docs/architecture/OVERVIEW.md),
-[source map](docs/development/PROJECT_LAYOUT.md),
-[control policy](docs/actions/CONTROL_POLICY.md) and
-[security boundaries](SECURITY.md).
+## Development and support
 
-## Development and verification
-
-Install the remaining system tools and pinned development dependencies:
-
-```bash
-sudo apt-get install -y gjs dbus-daemon systemd python3-gi gir1.2-glib-2.0 gir1.2-gdkpixbuf-2.0 bubblewrap
-.venv/bin/python -m pip install -r requirements/dev.txt
-.venv/bin/python -m pip check
-.venv/bin/python scripts/development/check.py
-```
-
-The same gate runs in GitHub Actions: syntax checks, Ruff, strict mypy and the
-complete deterministic test suite. It uses an isolated temporary home and
-headless Qt; external speech weights and a personal GNOME session are not
-required. Logs are written to `local-data/quality/`. CI also builds source and
-wheel distributions and checks that the wheel includes required assets.
-
-See [validation](docs/VALIDATION.md) for results and
-[quality setup (Persian)](docs/development/QUALITY_CHECKS.md) for the environment
-history. Deterministic tests are not a replacement for hardware and live-model
-acceptance checks.
-
-## Contributing and support
+[Contributing](CONTRIBUTING.md) describes the pinned development environment
+and how to run the same syntax, Ruff, strict mypy and pytest gate used in CI.
+[Validation](docs/VALIDATION.md) records the tagged commit's results separately
+from live desktop evidence. The [documentation index](docs/README.md)
+distinguishes current guides from historical engineering notes.
 
 Use [issues](https://github.com/mohammadhosseinzakeri10/kyrin/issues) for
-reproducible bugs and focused proposals. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-before changing code. Public-facing entry documentation is in English; many
-engineering and learning notes are in Persian and retain their original
-language. Historical plans are not promises of released features.
-
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-Do not attach personal recordings, screenshots, settings or access tokens to
-public reports. This is a personal project with no guaranteed response or
-maintenance schedule.
+reproducible reports about the public snapshot. Follow [SECURITY.md](SECURITY.md)
+for private vulnerability reporting and [community conduct](CODE_OF_CONDUCT.md)
+for participation expectations.
 
 ## License and attribution
 
-KYRIN source is released under the [MIT License](LICENSE), copyright 2026
-Mohammad Hossein Zakeri. See [third-party notices](THIRD_PARTY_NOTICES.md) for
-bundled material and optional-runtime/model licensing boundaries.
-
-The project was developed with AI assistance. The maintainer directs the
-design and reviews changes; verification claims refer to the checks and
-explicitly bounded live reports documented in this repository.
+KYRIN source is distributed under the [MIT License](LICENSE). The bundled
+Silero VAD model retains its own MIT notice. See [third-party notices](THIRD_PARTY_NOTICES.md)
+for the boundary between project code, dependencies and separately acquired
+models. The project was developed with AI assistance under maintainer direction.

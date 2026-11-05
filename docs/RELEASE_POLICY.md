@@ -4,8 +4,10 @@
 
 KYRIN v0.1.0 is the initial public, open-source portfolio release. It preserves
 the implementation, tests and engineering notes at this milestone under the
-[MIT License](../LICENSE). It is an alpha source release; no signed installer,
-automatic updater or self-contained model bundle is provided.
+[MIT License](../LICENSE). The [GitHub pre-release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+provides a source distribution, a Python wheel and a SHA-256 checksum file.
+Installation uses a developer environment and separately configured runtimes
+and models.
 
 Later versions are planned to be developed privately and are not promised for
 publication in this repository. The public repository may receive corrections
@@ -31,7 +33,13 @@ choices. The repository's license text is the controlling notice for KYRIN.
 
 The public milestone uses tag `v0.1.0`, matching the package version in
 `pyproject.toml`. GitHub marks the release as a pre-release because the
-application is experimental. Future private development should use a separate
-private repository or remote; a public branch is still public. Only reviewed
-publication branches should be pushed to this repository. Avoid `git push
---all` or `git push --mirror` from a private development checkout.
+application is experimental. Use the tag to reproduce the original source
+and the release page to obtain its build artifacts. Public `main` can carry
+reviewed corrections to the snapshot. A documentation correction does not
+change the tag, package version or release assets.
+
+Keep later development in a separate private repository. Prepare public
+corrections from the public base in an isolated checkout, review the changed
+files and the full newly reachable commit range, and obtain maintainer approval
+before sending the exact reviewed branch to GitHub. Use a pull request for
+protected `main`. Every branch or tag in the public repository is public.

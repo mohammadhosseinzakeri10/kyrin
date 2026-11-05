@@ -13,14 +13,16 @@ flowchart TD
     Composition --> Audio[AudioInput: microphone or local file]
     Audio --> Pipeline[Framing, conversion and voice activity]
     Pipeline --> STT[SpeechToTextEngine / session]
-    STT --> Updates[Partial and final transcript updates]
-    Updates --> Runtime[Listening and command runtime]
-    Runtime --> Understanding[Rules / optional local model / bounded recovery]
+    STT -->|Partial transcript| UI
+    STT -->|Final transcript| Runtime[Listening and command runtime]
+    Runtime -->|Command mode and current session| Understanding[Rules / optional local model / bounded recovery]
+    Runtime -->|Listening control and status| UI
     Understanding --> Proposal[Structured command proposal]
     Proposal --> Authorization[Action gate and capability policy]
     Desktop[App catalog and fresh window/control observations] --> Understanding
     Desktop --> Authorization
-    Authorization --> Executor[Platform executor and shared input owner]
+    Authorization -->|Authorized| Executor[Platform executor and shared input owner]
+    Authorization -->|Denied or needs confirmation| Response
     Executor --> Outcome[Postcondition or unverified dispatch]
     Outcome --> Response[Response presenter: Qt / optional TTS / status]
 ```
@@ -83,7 +85,7 @@ source and settings.
 
 Tests mirror component responsibilities and include synthetic portal/D-Bus,
 Qt, permission, cancellation and stale-observation scenarios. They are run by
-the same [quality gate](../development/QUALITY_CHECKS.md) locally and in CI.
+the same [quality gate](../../CONTRIBUTING.md#development-setup) locally and in CI.
 [Validation notes](../VALIDATION.md) distinguish that evidence from owner live
 checks. Cross-platform adapters, a self-contained installer and universal
 natural-language desktop control are not part of this release.

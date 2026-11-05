@@ -1,7 +1,8 @@
 # Documentation
 
 Start with the public guides below. KYRIN v0.1.0 is an experimental source
-release for Ubuntu/GNOME, with local models configured separately.
+release for Ubuntu/GNOME, with local models configured separately. These
+guides describe the tagged source and any documentation corrections to it.
 
 | Guide | Purpose |
 | --- | --- |
@@ -10,6 +11,7 @@ release for Ubuntu/GNOME, with local models configured separately.
 | [Validation](VALIDATION.md) | Deterministic checks, live evidence and known limits |
 | [Release policy](RELEASE_POLICY.md) | Scope of the public snapshot and future private development |
 | [Project layout](development/PROJECT_LAYOUT.md) | Source, tests, scripts, models and local data |
+| [Local data](app/LOCAL_DATA_STORAGE.md) | Settings, installed model library, history and ignored development paths |
 | [Contributing](../CONTRIBUTING.md) | Development and review expectations |
 | [Security](../SECURITY.md) | Trust boundaries and private vulnerability reporting |
 | [Changelog](../CHANGELOG.md) | Published version history |
@@ -18,7 +20,7 @@ release for Ubuntu/GNOME, with local models configured separately.
 
 | Topic | Documents |
 | --- | --- |
-| Commands | [User command guide (Persian)](commands/USER_COMMAND_GUIDE_FA.md), [semantic contract](commands/SEMANTIC_UNDERSTANDING_CONTRACT.md), [local command models](app/COMMAND_MODEL_LIVE_INTEGRATION.md) |
+| Commands | [English examples](GETTING_STARTED.md#example-commands), [User command guide (Persian)](commands/USER_COMMAND_GUIDE_FA.md), [semantic contract](commands/SEMANTIC_UNDERSTANDING_CONTRACT.md), [local command models](app/COMMAND_MODEL_LIVE_INTEGRATION.md) |
 | Speech input | [Live pipeline (Persian)](audio/LIVE_SPEECH_PIPELINE_FA.md), [Whisper adapter](stt/WHISPER_LIVE_ADAPTER.md), [GPU execution](stt/WHISPER_GPU_EXECUTION.md), [local models](../models/README.md) |
 | Desktop actions | [Control policy](actions/CONTROL_POLICY.md), [postconditions](actions/ACTION_POSTCONDITIONS.md), [shared input session (Persian)](actions/SHARED_INPUT_SESSION_FA.md) |
 | Observation | [Active app](desktop/ACTIVE_APP_OBSERVATION.md), [OCR architecture](vision/OCR_ARCHITECTURE.md), [document model protection](vision/DOCUMENT_MODEL_PROTECTION.md) |
