@@ -1,13 +1,8 @@
 # Active App Observation on GNOME
 
-<div dir="rtl" lang="fa">
-
-**به‌روزرسانی F20:** آمادگی از نسخه و قابلیت کد بارشده سنجیده می‌شود؛ مبدل
-نشست GNOME برای سرویس دیررس حفظ می‌شود و probe محدود دارد. نبود سرویس دیگر
-به‌تنهایی موجب انتخاب دائمی launcher هنگام شروع نیست؛ فعال‌سازی نامطمئن
-همچنان اجرای دوم نمی‌فرستد. [قرارداد فعلی](BACKEND_PROTOCOL.md).
-
-</div>
+The adapter probes the capabilities of the loaded extension. Bounded retries
+handle a late service. An uncertain activation is left unresolved. See the
+[backend protocol](BACKEND_PROTOCOL.md).
 
 ## Problem and scope
 
@@ -61,49 +56,24 @@ tests alone cannot establish live visual behavior.
 
 `GnomeAppWindowController` receives an opaque window token and checks the state of that exact window before returning success. A sent request alone is not a confirmed result. The extension returns only state flags and the token, never a window title or content. On an unsupported session or when the updated extension has not loaded yet, the window commands are unavailable. This GNOME-specific adapter sits behind `AppWindowController`, so other platforms can implement the same contract without changing command understanding. The control center exposes separate opt-in checkboxes for non-closing window controls and close, scoped to the selected applications.
 
-<div dir="rtl">
+### Single-window close
 
-**قرارداد جاری بستن پنجره، ۲۰۲۶/۱۰/۲۵:** طبق تصمیم جدید مالک، رضایت بستن از
-مجوز ذخیره‌شده یا اعتماد کلی در `PermissionPolicy` می‌آید. در ترکیب اصلی هیچ
-دکمهٔ Approve یا تأیید گفتاریِ جداگانهٔ عمل لازم نیست. رفع ابهام نام یا انتخاب
-میان پنجره‌ها همچنان مستقل و لازم است. [قرارداد مشترک](../actions/PERSISTENT_PERMISSIONS_FA.md).
+The saved app-scoped grant or applicable trust policy authorizes a resolved
+single-window close. Selection among ambiguous windows is still required.
+`PrepareWindowClose` binds app, PID, token, generation and deadline.
+`CloseAuthorizedWindow` consumes the binding once and rechecks identity,
+focus, capability and the snapshot on the Shell event loop. A changed
+target, expired operation, or cancelled request prevents dispatch. The
+extension must advertise the matching method and build. The old Shell
+confirmation methods remain for compatibility.
 
-`PrepareWindowClose` یک مقصد را با برنامه/PID/token/نسل و مهلت ثابت ده‌ثانیه‌ای
-مشاهده می‌کند؛ picker ورودی انحصاری را آزاد می‌کند. `CloseAuthorizedWindow`
-همان نسل را یک‌بار مصرف و در همان نوبت حلقهٔ Shell، هویت، قابلیت بستن، تمرکز
-و snapshot را دوباره بررسی می‌کند. تعویض پنجره یا PID، تغییر تمرکز حتی با
-بازگشت، تغییر انتخاب، نسل نامنطبق و انقضا مانع اجرا هستند. لغو Python نیز پیش
-از ارسال بررسی می‌شود. روش‌های قدیمی `ConfirmWindowClose` و
-`CloseConfirmedWindow` برای سازگاری باقی‌اند و در مسیر اصلی فراخوانی نمی‌شوند.
-
-فقط close معمولی ارسال می‌شود؛ kill، پاسخ به dialog ذخیره‌سازی و تکرار خودکار
-وجود ندارد. نتیجه پس از بازخوانی همان پنجره گزارش می‌شود. backend باید قابلیت
-`CloseAuthorizedWindow` و ساخت
-`active-app@kyrin.local-2026-10-25-persistent-permissions` را گزارش کند.
-پیش از آماده‌سازی، این قابلیت و `GetAppWindowState` بررسی می‌شوند؛ افزونهٔ قدیمی
-با خطای قابلیت متوقف می‌شود و دیالوگ جایگزین ندارد. روش نصب و نتایج آزمون در
-[گزارش مستقل](../development/PERSISTENT_PERMISSIONS_2026-10-25_FA.md) آمده‌اند.
-مالک موفقیت بستن Chrome با تأیید بومی نسخهٔ قبلی را تأیید کرده است؛ این شاهد
-به معنی آزمودن نسخهٔ تازهٔ بدون دیالوگ روی Chrome نیست.
-
-**سابقهٔ تشخیص مرحلهٔ شکست پیش از مجوز ماندگار، ۲۰۲۶/۱۰/۲۵:** در پیگیری گزارش زندهٔ مالک، نتیجهٔ
-عمومی `window_unverified` برای بستن GNOME کافی نبود. اکنون adapter علت‌های
-ثابتِ `window_close_rejected:<reason>`، `window_close_commit_unknown:<reason>`
-و `window_close_unverified:<reason>` را از هم جدا می‌کند. اولی ردشدن صریح
-backend مانند `stale` است؛ دومی پاسخ مفقود/نامعتبر یا خطای انتقال هنگام
-فراخوانی بستن؛ سومی دریافت `requested` بدون تأیید ناپدیدشدن پنجره است.
-`window_present` یعنی در آخرین بازخوانی همان پنجره دیده شد؛ به معنی تشخیص
-پرسش ذخیره‌سازی نیست. متن خطا، عنوان و محتوای پنجره کپی نمی‌شوند. رابط پیام
-هر مرحله را توضیح می‌دهد. بررسی تمرکز و یک‌بارمصرف‌بودن تأیید حفظ شده‌اند. در پیگیری بعدی،
-`stale` از مالک رسید و گرفتن تمرکز توسط خودِ dialog قدیمی Qt در نشست
-جداگانه بازتولید شد. تأیید بومی Shell یک `Meta.Window` جدید نمی‌سازد؛
-بنابراین به استثناکردن تغییر تمرکز از اعتبارسنجی نیازی نیست. افزونهٔ بارشده
-در قرارداد پیشین باید قابلیت `ConfirmWindowClose` و ساخت
-`active-app@kyrin.local-2026-10-25-close-confirmation` را گزارش کند.
-مشاهدهٔ مهلت در Python نیز با جمع مستقیم مقایسه می‌شود تا خطای گردکردن
-تفاضل دو عدد اعشاری، مهلت دقیق ده‌ثانیه‌ای را نامعتبر نکند.
-
-</div>
+The executor requests normal close and verifies the original window's
+absence. A native save dialog stays under user control. It distinguishes
+explicit rejection, an unknown transport result, and a dispatched request
+whose window remains present. Outcome reasons do not copy window content.
+The earlier observed native modal path is distinct from the current
+saved-permission path. See [persistent permissions](../actions/PERSISTENT_PERMISSIONS.md)
+and [app-scoped group close](../actions/APP_WINDOW_GROUP_CLOSE.md).
 
 ## Components
 
@@ -138,6 +108,12 @@ Use `scripts/desktop/check_active_app.py` to discover the desktop ID on the targ
 ```
 
 ## Manual validation
+
+The additive app-window group close protocol and its native one-time confirmation
+are documented in [App-scoped group close](../actions/APP_WINDOW_GROUP_CLOSE.md).
+It requires the three loaded group-close capabilities; existing single-window
+methods are not a fallback for bulk close. The installation below includes the
+existing picker and confirmation sources needed by both paths.
 
 Build the test package with GNOME's own tool, then install and enable it for the current user:
 

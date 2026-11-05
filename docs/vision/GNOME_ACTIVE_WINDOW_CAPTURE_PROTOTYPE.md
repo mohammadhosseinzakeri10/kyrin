@@ -1,52 +1,31 @@
 # GNOME active-window capture: session-access prototype
 
-<div dir="rtl" lang="fa">
+Before permission or image capture, Qt probes the version and capabilities
+of the loaded extension without taking a screenshot. The
+[backend protocol](../desktop/BACKEND_PROTOCOL.md) defines the bounded retry
+and explicit legacy compatibility path.
 
-**به‌روزرسانی F20:** Qt پیش از مجوز و تصویر، نسخه و قابلیت افزونهٔ بارشده را
-با probe بدون تصویر می‌سنجد. مالکیت اتصال با آمادگی backend جداست؛ retry
-سرویس دیررس محدود است. پاسخ تصویر legacy به‌صورت پیش‌فرض رد می‌شود و فقط
-گزینهٔ صریح سازگاری آن را می‌پذیرد. [قرارداد و خطاها](../desktop/BACKEND_PROTOCOL.md).
+## GNOME 50 capture geometry
 
-</div>
+The Shell screenshot finish result identifies the frame, while the PNG comes
+from the window actor. The producer compares the window buffer rectangle with
+actor bounds and rejects missing or inconsistent geometry, a frame outside
+the buffer, or aspect error beyond one-pixel rounding. The full logical
+buffer is `capture_rect`; `frame_rect` limits interaction. PNG-to-buffer
+ratios determine scale, including asymmetric shadows inside the buffer.
 
-<div dir="rtl" lang="fa">
+Versioned `gnome-buffer-actor-v1` metadata distinguishes logical desktop
+coordinates from source PNG pixels. Qt maps OCR crops and scaling back to the
+source PNG once. The generic and Telegram actuators then map those pixels to
+the logical desktop and revalidate the target before pressing. Legacy
+compatibility requires exact one-to-one mapping.
 
-**قرارداد هندسه — ۲۰۲۶/۱۰/۲۴، F13:** در GNOME 50، مستطیل خروجیِ
-`screenshot_window_finish` قاب پنجره است، ولی PNG از `WindowActor.get_image(NULL)`
-می‌آید. اختلاف ابعاد، تقارن سایه یا برابر بودن مقیاس تصویر و مانیتور را
-اثبات نمی‌کند. اکنون تولیدکننده محدودهٔ منطقی `get_buffer_rect` را با موقعیت
-و اندازهٔ actor تطبیق می‌دهد؛ نبود actor، عدم تطابق، خروج قاب از بافر یا
-اعوجاج نسبت ابعاد بیش از گردکردن یک پیکسل موجب رد تصویر می‌شود.
-
-`capture_rect` محدودهٔ کامل بافر در فضای منطقی دسکتاپ و `frame_rect`
-محدودهٔ مجاز تعامل است. نسبت ابعاد PNG به بافر، `scale_x/scale_y` را
-تعیین می‌کند؛ سایهٔ نامتقارن داخل همین مستطیل است و `padding` صفر می‌ماند.
-بافر و مانیتور در طول ثبت و اعتبارسنجی دوباره بررسی می‌شوند. فراداده،
-فضاهای `logical_desktop` و `source_png_pixels` و منشأ نسخه‌دار
-`gnome-buffer-actor-v1` را اعلام می‌کند؛ Qt فرادادهٔ قدیمی یا ناشناخته
-را رد می‌کند. افزونهٔ جدید باید نصب و در نشست بارگذاری شود.
-
-Qt برش و بزرگ‌نمایی OCR را یک‌بار به پیکسل PNG اصلی برمی‌گرداند؛
-مکان‌یاب عمومی و تلگرام همان جعبه‌ها را حمل می‌کنند و هر دو actuator با
-`image_pixels=True` به مختصات منطقی دسکتاپ می‌روند. بررسی دوبارهٔ نقطه پیش
-از فشردن، خروجی تبدیل نخست را دوباره تبدیل نمی‌کند. مسیر قدیمی فقط نگاشت
-دقیق یک‌به‌یک را می‌پذیرد؛ اختلاف کوچک ابعاد یا سایهٔ متقارن حدس زده نمی‌شود.
-
-آزمون قطعی `test_gnome_geometry_pipeline.py` تولید فراداده در GJS، تجزیهٔ
-Qt، PNG، برش، بزرگ‌نمایی، مکان‌یاب و رویدادهای هر دو actuator را متصل می‌کند:
-سایهٔ نامتقارن، چهار گوشه و مرکز، مقیاس‌های ۱، ۱٫۲۵، ۱٫۵ و ۲، مبدأ مثبت و
-منفی، تفاوت مقیاس تصویر و مانیتور و جابه‌جایی پنجره پیش/پس از حرکت اشاره‌گر.
-ثبت Shell، تشخیص متن و انتقال portal شبیه‌سازی شده‌اند؛ پردازش تصویر و
-منطق مسیر واقعی‌اند. تطبیق actor شرط پذیرش است و پوشش همهٔ انواع آن اثبات
-نشده است. آزمون زندهٔ mixed-DPI، Wayland و XWayland انجام نشده؛ گام بعد،
-بارگذاری افزونه و سنجش نشانگرهای گوشه/مرکز در همین ماتریس است.
-
-منابع رسمی نسخهٔ پشتیبانی‌شده:
-[GNOME Shell 50](https://github.com/GNOME/gnome-shell/blob/50.0/src/shell-screenshot.c)،
-[تصویر actor در Mutter 50](https://github.com/GNOME/mutter/blob/50.0/src/compositor/meta-window-actor.c)،
-[محدودهٔ بافر](https://github.com/GNOME/mutter/blob/50.0/src/core/window.c).
-
-</div>
+`test_gnome_geometry_pipeline.py` covers mocked capture/OCR/portal paths with
+real coordinate transforms, fractional scales and window movement. Live
+mixed-DPI Wayland and XWayland coverage remains open. See the GNOME 50
+[screenshot](https://github.com/GNOME/gnome-shell/blob/50.0/src/shell-screenshot.c)
+and [Mutter actor](https://github.com/GNOME/mutter/blob/50.0/src/compositor/meta-window-actor.c)
+implementations.
 
 ## Why this exists
 

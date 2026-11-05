@@ -1,8 +1,8 @@
 """Optional GNOME Shell visual feedback transport; no UI dependency in core."""
 
 import subprocess
-from queue import Empty, Full, Queue
-from threading import Thread
+from queue import Empty, Queue
+from threading import Lock, Thread
 
 from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.responses.visual_status import VisualPresentation
@@ -19,22 +19,20 @@ class GnomeVisualStatusSink:
 
     def __init__(self) -> None:
         self.backend_status = BackendStatus(False, "not_probed")
-        self._updates: Queue[VisualPresentation] = Queue(maxsize=8)
+        self._updates: Queue[VisualPresentation] = Queue(maxsize=1)
+        self._publish_lock = Lock()
         self._thread = Thread(target=self._run, name="kyrin-visual", daemon=True)
         self._thread.start()
 
     def publish(self, presentation: VisualPresentation) -> None:
-        try:
-            self._updates.put_nowait(presentation)
-        except Full:
+        # A caption is a current state, not an event log. Serialize publishers
+        # so an older producer cannot displace a newer pending presentation.
+        with self._publish_lock:
             try:
                 self._updates.get_nowait()
             except Empty:
                 pass
-            try:
-                self._updates.put_nowait(presentation)
-            except Full:
-                pass
+            self._updates.put_nowait(presentation)
 
     def _run(self) -> None:
         while True:
@@ -44,6 +42,12 @@ class GnomeVisualStatusSink:
             )
             if not self.backend_status.ready:
                 continue
+            # The capability probe may have waited while the runtime advanced.
+            # Use the newest caption before issuing the display call.
+            try:
+                presentation = self._updates.get_nowait()
+            except Empty:
+                pass
             try:
                 subprocess.run(
                     [

@@ -5,13 +5,57 @@ from pathlib import Path
 
 import pytest
 
+from kyrin.actions.models import ActionKey
 from kyrin.audio.audio_errors import AudioQueueOverflowError
+from kyrin.commands.diagnostics import trace
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.listening_diagnostics import ListeningDiagnostics
 from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged, control_phrase
 from kyrin.stt.errors import SpeechToTextError
-from kyrin.stt.transcript import TranscriptStatus, TranscriptUpdate
+from kyrin.stt.transcript import TranscriptStatus, TranscriptTiming, TranscriptUpdate
+from kyrin.timing import TimingEvent, TimingScope, timing_scope
+
+
+@pytest.mark.parametrize("text", ["stop listening", "turn microphone off"])
+@pytest.mark.parametrize(
+    "stamps",
+    [
+        (("capture", 80), ("speech_end", 90)),
+        (("stt_final_call_started", 90),),
+    ],
+)
+def test_speech_finished_before_gui_start_cannot_override_it_after_slow_stt(
+    text: str,
+    stamps: tuple[tuple[str, int], ...],
+) -> None:
+    modes: list[VoiceModeChanged] = []
+    runtime = make_runtime(Source(), modes)
+    runtime.set_commands_active(True)  # Clock = 100; old audio finished at 90.
+    runtime._control_speech(
+        TranscriptUpdate(
+            0,
+            text,
+            TranscriptStatus.FINAL,
+            emitted_ns=200,
+            timing=TranscriptTiming(stamps),
+        )
+    )
+    assert runtime.voice_mode_state().mode is VoiceMode.ACTIVE
+    assert modes == []
+    runtime._control_speech(
+        TranscriptUpdate(
+            1,
+            text,
+            TranscriptStatus.FINAL,
+            emitted_ns=200,
+            timing=TranscriptTiming((("capture", 110), ("speech_end", 120))),
+        )
+    )
+    assert len(modes) == 1
+    assert runtime.voice_mode_state().mode is (
+        VoiceMode.STANDBY if text == "stop listening" else VoiceMode.OFF
+    )
 
 
 class Source:
@@ -151,6 +195,32 @@ def test_off_is_terminal_until_controller_stops_capture() -> None:
     assert [event.mode for event in modes] == [VoiceMode.OFF]
 
 
+@pytest.mark.parametrize(
+    "first,second",
+    [("start listening", "stop listening"), ("stop listening", "start listening")],
+)
+def test_replayed_final_control_cannot_reverse_a_newer_control(
+    first: str,
+    second: str,
+) -> None:
+    modes: list[VoiceModeChanged] = []
+    runtime = make_runtime(
+        Source(
+            tuple(
+                TranscriptUpdate(segment, text, TranscriptStatus.FINAL)
+                for segment, text in ((0, first), (1, second), (0, first))
+            )
+        ),
+        modes,
+        standby=first == "start listening",
+    )
+    runtime.run()
+    assert [event.segment_id for event in modes] == [0, 1]
+    assert runtime.voice_mode_state().mode is (
+        VoiceMode.STANDBY if second == "stop listening" else VoiceMode.ACTIVE
+    )
+
+
 def test_diagnostics_are_bounded_and_do_not_persist(tmp_path: Path) -> None:
     diagnostics = ListeningDiagnostics()
     for index in range(200):
@@ -160,6 +230,43 @@ def test_diagnostics_are_bounded_and_do_not_persist(tmp_path: Path) -> None:
     assert len(report) == 67
     assert "capture=200/age=" in report[-1]
     assert list(tmp_path.iterdir()) == []
+
+
+def test_decision_checkpoint_survives_history_churn_without_private_text() -> None:
+    runtime = make_runtime(Source(), [])
+    with timing_scope(TimingScope(
+        "inert", ActionKey(2, 7), runtime._record_timing,
+    )):
+        trace("guard", "hypothesis_conflict")
+        trace("guard", "private spoken phrase")
+    runtime._record_timing(TimingEvent(
+        "inert", ActionKey(2, 8), "command_diagnostic_guard_private phrase", 1,
+    ))
+    for i in range(100):
+        runtime.listening_diagnostics.state(
+            "stt_call", str(i), reason="test", source="test",
+        )
+    report = "\n".join(runtime.listening_diagnostics.snapshot())
+    assert "command_diagnostic_guard_hypothesis_conflict:segment=7" in report
+    assert "private" not in report
+
+
+def test_diagnostics_distinguish_elapsed_wait_from_actual_progress() -> None:
+    now = [0.0]
+    diagnostics = ListeningDiagnostics(clock=lambda: now[0])
+    diagnostics.state("stt_call", "busy", reason="call_entered", source="stt")
+    diagnostics.pulse("vad_processed")
+    diagnostics.queue("stt_backlog", 40, 5000, "ms_including_active")
+    now[0] = 7200.0  # Logical time only, no two-hour hardware run.
+    report = "\n".join(diagnostics.snapshot())
+    assert "age=7200.000s" in report
+    assert "vad_processed=1/age=7200.0s" in report
+    assert "pending=40 limit=5000" in report
+    assert "stt_call_returned" not in report
+    diagnostics.state(
+        "stt_call", "busy", reason="call_entered", source="stt", generation=1
+    )
+    assert "gen=1" in diagnostics.snapshot()[-3]
 
 
 def test_terminal_stt_error_does_not_become_a_stop_control() -> None:

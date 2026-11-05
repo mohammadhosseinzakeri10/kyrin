@@ -224,3 +224,9 @@ __marimo__/
 
 # Machine-local KYRIN models, optional runtimes, and download tools.
 /local-data/
+
+# Private owner-specific command-evaluation data: ignored by default. Only
+# explicitly reviewed files are re-included by name. This does not replace the
+# MANIFEST.in distribution controls.
+/datasets/commands/evaluation/*
+!/datasets/commands/evaluation/plan.v1.json

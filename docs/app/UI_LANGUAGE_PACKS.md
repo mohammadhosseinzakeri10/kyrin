@@ -1,6 +1,8 @@
 # KYRIN interface language packs
 
-The control center includes English and Persian interface text. Its interface
+The control center defaults to English on a fresh installation and includes
+selectable Persian interface text. Existing saved choices are retained under
+the [V1 language policy](../LANGUAGE_POLICY.md). Its interface
 language is separate from the language used by a speech-recognition model:
 changing the menus does not change STT, command understanding, or the spoken
 response voice. **System language** selects an available matching interface
@@ -17,14 +19,15 @@ A pack is a JSON object with exactly these top-level fields:
 - `locale`: a code such as `fr`, `de`, or `fa`. A local `fa` pack may override
   the built-in Persian strings.
 - `name`: the language name shown in the selector.
-- `strings`: translations for every key in
+- `strings`: translations for known keys in
   `src/kyrin/app/qt/translations.py`'s `ENGLISH` catalog.
 
 The importer validates the pack's fields, translation keys, nonempty strings,
 and format placeholders. A pack may cover only part of the interface: missing
 keys fall back to English. It does not replace the built-in English catalog.
-The built-in Persian catalog also fills in keys without a Persian translation
-when no local `fa` pack overrides it. If a selected local pack is damaged or
+Without a local `fa` override, the built-in Persian catalog is merged over
+English, so any untranslated keys still fall back to English.
+If a selected local pack is damaged or
 missing at startup, the control center opens in English and shows an error;
 the existing preference file is preserved until the user explicitly saves a
 new selection. Right-to-left languages use a right-to-left window layout;

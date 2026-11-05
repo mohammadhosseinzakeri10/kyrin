@@ -60,7 +60,8 @@ class QtControlConfirmation(QObject):
             request.finished.set()
             return
         prompt = request.prompt
-        persian = (prompt.language or "").split("-")[0] == "fa"
+        locale = (prompt.language or "").strip().replace("_", "-")
+        persian = locale.split("-", 1)[0].casefold() == "fa"
         dialog = QDialog()
         self._dialog = dialog
         dialog.setWindowTitle(

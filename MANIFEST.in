@@ -1,19 +1,37 @@
-include *.md LICENSE pyproject.toml
+# Source distribution. Public Markdown guides, deterministic fixtures and
+# development tools accompany the package. Local inputs are excluded below.
+include LICENSE pyproject.toml README.md THIRD_PARTY_NOTICES.md
+include CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md PROJECT_CONTEXT.md
+
 recursive-include requirements *.txt
 recursive-include scripts *.py
 recursive-include tests *.py
 recursive-include docs *.md *.png
-recursive-include datasets *.md *.json *.jsonl .gitignore
-recursive-exclude datasets/stt manifest*.csv
-include datasets/stt/manifest.template.csv
-include datasets/stt/manifest.*.template.csv
-recursive-include models README.md .gitignore
+recursive-include tools/doc-migration *.md *.py
 recursive-include integrations *.js *.json *.svg *.css
 recursive-include assets/brand *.md *.py *.png *.jpg *.svg *.gif *.webp
+recursive-include assets/mascot *.json *.svg
+include models/README.md models/.gitignore
+
+include datasets/commands/README.md datasets/commands/.gitignore
+include datasets/commands/l04_baseline_summary.json
+include datasets/commands/l04_cases.jsonl datasets/commands/l04_followup_cases.jsonl
+include datasets/commands/l04_turn_references.jsonl datasets/commands/semantic_cases.jsonl
+include datasets/stt/README.md datasets/stt/.gitignore
+include datasets/stt/manifest.template.csv datasets/stt/manifest.german.template.csv
+include datasets/stt/manifest.l04.template.csv datasets/stt/manifest.multilingual.template.csv
+include datasets/stt/manifest.neutral.template.csv datasets/stt/manifest.safety.template.csv
+
 prune local-data
+prune downloads
+prune build
 prune models/local
 prune models/archive
+prune datasets/commands/evaluation
+prune datasets/commands/results
 prune datasets/stt/recordings
 prune datasets/stt/results
-prune datasets/commands/results
-global-exclude __pycache__ *.py[cod]
+global-exclude __pycache__ *.py[cod] *_FA.md
+
+# The versioned evaluation plan contains no owner data.
+include datasets/commands/evaluation/plan.v1.json

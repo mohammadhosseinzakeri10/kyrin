@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "status": "prototype_pending_owner_visual_acceptance",
+  "duration_ms": 640,
+  "comparison_durations_ms": [560, 640, 720],
+  "view_box": [0, 0, 96, 120],
+  "ground_y": 115,
+  "hip_y": 83,
+  "thigh_length": 14,
+  "shin_length": 16,
+  "upper_arm_length": 13,
+  "forearm_length": 12,
+  "torso_lean_deg": 6,
+  "head_counter_rotation_deg": -3,
+  "interpolation": "periodic_cubic_hermite",
+  "keyframes": [
+    {
+      "name": "left_contact_right_recovery",
+      "root_y": 1.4,
+      "left_thigh": -32, "left_knee": 20, "left_foot": -5,
+      "right_thigh": 35, "right_knee": 105, "right_foot": 28,
+      "left_shoulder": 26, "left_elbow": -88,
+      "right_shoulder": -42, "right_elbow": -95
+    },
+    {
+      "name": "left_support_right_knee_forward",
+      "root_y": 0.1,
+      "left_thigh": 5, "left_knee": 16, "left_foot": 0,
+      "right_thigh": -15, "right_knee": 100, "right_foot": 12,
+      "left_shoulder": 0, "left_elbow": -90,
+      "right_shoulder": -10, "right_elbow": -95
+    },
+    {
+      "name": "flight_toward_right_contact",
+      "root_y": -2,
+      "left_thigh": 35, "left_knee": 75, "left_foot": 35,
+      "right_thigh": -45, "right_knee": 50, "right_foot": -12,
+      "left_shoulder": -34, "left_elbow": -95,
+      "right_shoulder": 24, "right_elbow": -88
+    },
+    {
+      "name": "right_contact_left_recovery",
+      "root_y": 1.4,
+      "left_thigh": 35, "left_knee": 105, "left_foot": 28,
+      "right_thigh": -32, "right_knee": 20, "right_foot": -5,
+      "left_shoulder": -42, "left_elbow": -95,
+      "right_shoulder": 26, "right_elbow": -88
+    },
+    {
+      "name": "right_support_left_knee_forward",
+      "root_y": 0.1,
+      "left_thigh": -15, "left_knee": 100, "left_foot": 12,
+      "right_thigh": 5, "right_knee": 16, "right_foot": 0,
+      "left_shoulder": -10, "left_elbow": -95,
+      "right_shoulder": 0, "right_elbow": -90
+    },
+    {
+      "name": "flight_toward_left_contact",
+      "root_y": -2,
+      "left_thigh": -45, "left_knee": 50, "left_foot": -12,
+      "right_thigh": 35, "right_knee": 75, "right_foot": 35,
+      "left_shoulder": 24, "left_elbow": -88,
+      "right_shoulder": -34, "right_elbow": -95
+    }
+  ]
+}

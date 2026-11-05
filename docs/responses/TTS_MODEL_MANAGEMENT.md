@@ -25,12 +25,9 @@ Unknown or renamed Kokoro packages retain the numeric control because their
 speaker-name mapping has not been verified. The v1.0 package's additional
 non-English voices are not offered for unsupported language routes.
 
-On the current Ubuntu development machine, the standard user-data directory is
-linked to `local-data/kyrin/` on the AI-Projects drive. TTS model weights in
-this checkout are kept in the catalog above; optional runtimes remain in
-`local-data/kyrin/runtimes/tts/`. See
-[local data storage](../app/LOCAL_DATA_STORAGE.md). This mount-specific layout is
-not required on other machines.
+Use the development catalog for locally managed voice files or the installed
+application's data directory. See [local data storage](../app/LOCAL_DATA_STORAGE.md)
+for model, runtime and cache paths.
 
 ## Supported package families
 

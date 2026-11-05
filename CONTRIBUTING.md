@@ -15,7 +15,7 @@ There is no guaranteed review or maintenance schedule.
    describe experiments that have since been superseded.
 
 Use English for new public issues and pull requests where practical.
-Existing Persian engineering notes do not need wholesale translation.
+Preserve localized catalogs, literal targets and language-sensitive fixtures.
 
 ## Development setup
 

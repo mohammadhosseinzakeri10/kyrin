@@ -21,6 +21,12 @@ def client() -> None:
     from kyrin.actions.platforms.input_session import INPUT_SESSIONS
     from kyrin.app.permissions import PermissionPolicy
     from kyrin.app.settings import AppSettings
+    from kyrin.desktop.window_observation import WindowObservation
+
+    def evidence(app: str, pid: int) -> str:
+        # The synthetic Shell reports the target app ID as its window token.
+        now = monotonic()
+        return WindowObservation(app, pid, app, "synthetic", now, now + 10).to_json()
 
     INPUT_SESSIONS.configure(
         PermissionPolicy(
@@ -65,6 +71,7 @@ def client() -> None:
                     "down",
                     "1",
                     "center",
+                    evidence(app, pid),
                     "desktop-scroll",
                 ],
                 timeout=5,
@@ -80,6 +87,7 @@ def client() -> None:
             "down",
             "1",
             "center",
+            evidence("one.desktop", 11),
             "desktop-scroll",
         ],
         timeout=5,
@@ -106,6 +114,7 @@ def client() -> None:
             "down",
             "1",
             "center",
+            evidence("two.desktop", 22),
             "desktop-scroll",
         ],
         timeout=5,

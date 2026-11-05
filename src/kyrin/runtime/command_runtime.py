@@ -37,6 +37,7 @@ from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.audio.audio_errors import AudioQueueOverflowError
 from kyrin.audio.live_speech_pipeline import LiveSpeechEvent
 from kyrin.commands.coordinator import CommandCoordinator
+from kyrin.commands.diagnostics import DECISION_STAGES
 from kyrin.commands.models import (
     CommandEvent,
     CommandPlanResolution,
@@ -169,6 +170,8 @@ class LiveCommandRuntime:
         history: ConversationHistory | None = None,
         voice_standby: bool = False,
         on_voice_mode: Callable[[VoiceModeChanged], None] | None = None,
+        on_voice_state: Callable[[VoiceModeChanged], None] | None = None,
+        on_stopping: Callable[[], None] | None = None,
         finite_source: bool = False,
         on_timing: Callable[[TimingEvent], None] | None = None,
         clock_ns: Callable[[], int] = perf_counter_ns,
@@ -196,7 +199,9 @@ class LiveCommandRuntime:
         self._timing_temperature = timing_temperature
         self._history_stream_id = 0
         self._voice_lock = Lock()
-        self.listening_diagnostics = ListeningDiagnostics()
+        self.listening_diagnostics = ListeningDiagnostics(
+            clock=lambda: clock_ns() / 1e9
+        )
         self._voice_state = VoiceModeChanged(
             VoiceMode.STANDBY if voice_standby else VoiceMode.ACTIVE,
             source="startup",
@@ -209,10 +214,19 @@ class LiveCommandRuntime:
             reason="configured_initial_mode",
             source="startup",
         )
-        self._last_mode_request_ns = 0
+        self._last_mode_request_ns: int | None = None
+        self._last_final_segment_id = -1
         self._reset_dialogue = False
         self._on_voice_mode = on_voice_mode
+        self._on_voice_state = on_voice_state
+        self._on_stopping = on_stopping
         self._finite_source = finite_source
+        self.listening_diagnostics.state(
+            "timing_session",
+            self._history_session_id,
+            reason="timing_identity",
+            source="runtime",
+        )
         self._stop_requested = Event()
         self._worker = (
             QueuedActionDispatcher(
@@ -236,16 +250,44 @@ class LiveCommandRuntime:
             if coordinator is not None
             else None
         )
+        if self._understanding is not None:
+            self.listening_diagnostics.attach(
+                "understanding_queue", self._understanding.snapshot
+            )
+        if self._worker is not None:
+            self.listening_diagnostics.attach("action_queue", self._worker.snapshot)
 
     def _timing_scope(self, key: ActionKey, route: str = "command") -> TimingScope:
         return TimingScope(
             self._history_session_id,
             key,
-            self._on_timing or (lambda event: None),
+            self._record_timing,
             self._clock_ns,
             ("file/" if self._finite_source else "live/") + route,
             self._timing_temperature,
         )
+
+    def _record_timing(self, event: TimingEvent) -> None:
+        component = DECISION_STAGES.get(event.stage)
+        if component is not None:
+            self.listening_diagnostics.state(
+                component,
+                f"{event.stage}:segment={event.key.segment_id}",
+                reason="decision_checkpoint",
+                source="understanding",
+                generation=event.key.stream_id,
+            )
+        for stage in ("model_resource_wait", "model_resource_run"):
+            if event.stage in (stage + "_started", stage + "_finished"):
+                self.listening_diagnostics.state(
+                    "command_" + stage,
+                    "busy" if event.stage.endswith("_started") else "idle",
+                    reason=event.stage,
+                    source="model_resources",
+                    generation=event.key.stream_id,
+                )
+        if self._on_timing is not None:
+            self._on_timing(event)
 
     def _transcript_timing(self, event: TranscriptUpdate) -> TimingScope | None:
         if self._on_timing is None or event.status is not TranscriptStatus.FINAL:
@@ -328,6 +370,8 @@ class LiveCommandRuntime:
             source="controller",
         )
         self._stop_requested.set()
+        if self._on_stopping is not None:
+            self._on_stopping()
         if self._worker is not None:
             self._worker.invalidate_pending()
         if self._understanding is not None:
@@ -403,6 +447,8 @@ class LiveCommandRuntime:
                 self._worker.invalidate_pending()
             if self._understanding is not None:
                 self._understanding.invalidate()
+        if self._on_voice_state is not None:
+            self._on_voice_state(state)
         return state
 
     def _clear_dialogue_if_requested(self) -> None:
@@ -417,6 +463,13 @@ class LiveCommandRuntime:
             self._system_power.cancel()
 
     def _control_speech(self, event: TranscriptUpdate) -> bool:
+        # Final segments seal monotonically within one speech stream. Controls
+        # bypass the coordinator's duplicate guard, so seal them here as well.
+        if event.status is TranscriptStatus.FINAL:
+            if event.segment_id <= self._last_final_segment_id:
+                self.listening_diagnostics.pulse("stale_final")
+                return True
+            self._last_final_segment_id = event.segment_id
         state = self.voice_mode_state()
         active = state.mode is VoiceMode.ACTIVE
         if state.mode is VoiceMode.OFF:
@@ -427,13 +480,29 @@ class LiveCommandRuntime:
         if mode is None:
             return not active
         with self._voice_lock:
-            if (
-                event.emitted_ns is not None
-                and event.emitted_ns < self._last_mode_request_ns
+            # Inference can return after a newer GUI request even when its
+            # speech finished beforehand. Prefer actual producer attribution;
+            # Call-start attribution also covers an in-flight streaming call;
+            # producers without timing retain the emission-time fallback.
+            timestamps = [event.emitted_ns]
+            if event.timing is not None:
+                timestamps.extend(
+                    at
+                    for stage, at in event.timing.stamps
+                    if stage in {"speech_end", "stt_final_call_started"}
+                )
+            cutoff = self._last_mode_request_ns
+            if cutoff is not None and any(
+                at is not None and at < cutoff for at in timestamps
             ):
                 self.listening_diagnostics.pulse("stale_voice_control")
                 return True
         if mode is state.mode:
+            # A repeated exact control is still an acknowledgement. Restore
+            # the presentation after its VAD/partial transcription events.
+            self._on_live_event(event)
+            if self._on_voice_state is not None:
+                self._on_voice_state(state)
             return True
         changed = self._change_voice_mode(
             mode,
@@ -473,6 +542,8 @@ class LiveCommandRuntime:
             source="controller",
         )
         try:
+            if self._on_voice_state is not None:
+                self._on_voice_state(self.voice_mode_state())
             if worker is not None:
                 worker.start()
             if understanding is not None:
@@ -487,6 +558,7 @@ class LiveCommandRuntime:
                     )
                     self._clear_dialogue_if_requested()
                     if isinstance(event, SpeechSessionEnded):
+                        ended_generation = self._history_stream_id
                         if isinstance(event.error, AudioQueueOverflowError):
                             overflow = event.error
                             self.listening_diagnostics.state(
@@ -527,6 +599,7 @@ class LiveCommandRuntime:
                             replace(
                                 event,
                                 session_id=self.listening_diagnostics.session_id,
+                                generation=ended_generation,
                             )
                         )
                         continue
@@ -738,6 +811,7 @@ class LiveCommandRuntime:
             self._on_action_output(action)
 
     def _end_stream(self) -> None:
+        self._last_final_segment_id = -1
         if self._system_power is not None:
             self._system_power.cancel()
         if self._worker is not None:

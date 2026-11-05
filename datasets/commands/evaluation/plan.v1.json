@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "tool_version": "1",
+  "profiles": [
+    {
+      "id": "gpu-qwen9b",
+      "status": "proposed",
+      "model": {
+        "tag": "qwen3.5:9b",
+        "artifact_sha256": null,
+        "runtime": "ollama",
+        "runtime_version": null
+      },
+      "requested_device": "gpu",
+      "expected_placements": [
+        "gpu",
+        "mixed",
+        "gpu_participation"
+      ],
+      "context_tokens": 4096,
+      "output_tokens": 768,
+      "safety_tokens": 32,
+      "confirmation_tokens": 64,
+      "generation": {
+        "temperature": 0,
+        "think": false,
+        "truncate": false,
+        "shift": false,
+        "keep_alive": "30s",
+        "cleanup_keep_alive": 0
+      },
+      "deadline_seconds": 60,
+      "hardware": {
+        "cpu": null,
+        "ram_bytes": null,
+        "gpu": null,
+        "vram_bytes": null
+      },
+      "composition": {
+        "stt": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "tts": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "silence": true,
+        "shared_resources": "serialized_model_resources"
+      }
+    },
+    {
+      "id": "cpu-qwen4b",
+      "status": "proposed",
+      "model": {
+        "tag": "qwen3.5:4b",
+        "artifact_sha256": null,
+        "runtime": "ollama",
+        "runtime_version": null
+      },
+      "requested_device": "cpu",
+      "expected_placements": [
+        "cpu"
+      ],
+      "context_tokens": 4096,
+      "output_tokens": 768,
+      "safety_tokens": 32,
+      "confirmation_tokens": 64,
+      "generation": {
+        "temperature": 0,
+        "think": false,
+        "truncate": false,
+        "shift": false,
+        "keep_alive": "30s",
+        "cleanup_keep_alive": 0
+      },
+      "deadline_seconds": 120,
+      "hardware": {
+        "cpu": null,
+        "ram_bytes": null,
+        "gpu": null,
+        "vram_bytes": null
+      },
+      "composition": {
+        "stt": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "tts": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "silence": true,
+        "shared_resources": "serialized_model_resources"
+      }
+    },
+    {
+      "id": "cpu-qwen9b-paired",
+      "status": "proposed",
+      "model": {
+        "tag": "qwen3.5:9b",
+        "artifact_sha256": null,
+        "runtime": "ollama",
+        "runtime_version": null
+      },
+      "requested_device": "cpu",
+      "expected_placements": [
+        "cpu"
+      ],
+      "context_tokens": 4096,
+      "output_tokens": 768,
+      "safety_tokens": 32,
+      "confirmation_tokens": 64,
+      "generation": {
+        "temperature": 0,
+        "think": false,
+        "truncate": false,
+        "shift": false,
+        "keep_alive": "30s",
+        "cleanup_keep_alive": 0
+      },
+      "deadline_seconds": 120,
+      "hardware": {
+        "cpu": null,
+        "ram_bytes": null,
+        "gpu": null,
+        "vram_bytes": null
+      },
+      "composition": {
+        "stt": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "tts": {
+          "backend": null,
+          "artifact": null,
+          "requested_device": null,
+          "activity": "off",
+          "residency": "absent"
+        },
+        "silence": true,
+        "shared_resources": "serialized_model_resources"
+      }
+    },
+    {
+      "id": "gpu-qwen9b-speech",
+      "status": "proposed",
+      "model": {
+        "tag": "qwen3.5:9b",
+        "artifact_sha256": null,
+        "runtime": "ollama",
+        "runtime_version": null
+      },
+      "requested_device": "gpu",
+      "expected_placements": [
+        "gpu",
+        "mixed",
+        "gpu_participation"
+      ],
+      "context_tokens": 4096,
+      "output_tokens": 768,
+      "safety_tokens": 32,
+      "confirmation_tokens": 64,
+      "generation": {
+        "temperature": 0,
+        "think": false,
+        "truncate": false,
+        "shift": false,
+        "keep_alive": "30s",
+        "cleanup_keep_alive": 0
+      },
+      "deadline_seconds": 60,
+      "hardware": {
+        "cpu": null,
+        "ram_bytes": null,
+        "gpu": null,
+        "vram_bytes": null
+      },
+      "composition": {
+        "stt": {
+          "backend": "whisper",
+          "artifact": null,
+          "requested_device": "gpu",
+          "activity": "file",
+          "residency": "session"
+        },
+        "tts": {
+          "backend": "kokoro",
+          "artifact": null,
+          "requested_device": "cpu",
+          "activity": "text",
+          "residency": "per_call"
+        },
+        "silence": false,
+        "shared_resources": "serialized_model_resources"
+      }
+    }
+  ],
+  "corpus": {
+    "path": "datasets/commands/l04_cases.jsonl",
+    "sha256": "7bd8c31aeb5c4081870887fc4b4c1cb00c44cb81b94d917b11853681b07a46f1",
+    "references_path": "datasets/commands/l04_turn_references.jsonl",
+    "references_sha256": "0db7c6937b62492569e9651751d04dd2d332e753f81ab82afd13ea230aaea2af",
+    "case_ids": [
+      "open-clean",
+      "open-error",
+      "open-negated",
+      "close-clean",
+      "close-error",
+      "scroll-up-screwl",
+      "scroll-up-quote",
+      "scroll-down-clean",
+      "scroll-down-school",
+      "ordinary-school",
+      "payload-type",
+      "target-school",
+      "visible-clean-clean",
+      "power-off-typo",
+      "more-fresh",
+      "more-expired",
+      "new-window-clean"
+    ]
+  },
+  "protocol": {
+    "profile_order": [
+      "gpu-qwen9b",
+      "cpu-qwen4b"
+    ],
+    "levels": [
+      "adapter",
+      "product_text"
+    ],
+    "repetitions": 2,
+    "pilot_attempts": 4,
+    "max_attempts": 140,
+    "max_seconds": 1800,
+    "min_percentile_samples": 20,
+    "reuse": "fresh_only",
+    "temperature": "unknown",
+    "service_state": "unknown",
+    "executor": "inert"
+  },
+  "memory": {
+    "unit": "bytes",
+    "interval_ms": 100,
+    "scope": "owned_process_tree_and_device",
+    "measures": [
+      "rss",
+      "pss",
+      "process_vram",
+      "device_vram",
+      "idle_residency"
+    ]
+  }
+}

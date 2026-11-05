@@ -1,62 +1,75 @@
-<div dir="rtl" lang="fa">
+# Command latency measurement
 
-# سنجش تأخیر فرمان
+(English migration of a previously Persian-only note; the original is
+preserved in the private migration pre-images and in Git history.)
 
-زمان‌ها در تولیدکننده و با ساعت یکنواخت تزریقی ثبت می‌شوند؛ زمان دریافت در
-رابط Qt مبنای اندازه‌گیری نیست. هویت هر نمونه، شناسهٔ یکتای نشست به‌همراه
-`stream_id` و `segment_id` است؛ هر مرحله نیز `step_index` مستقل دارد.
-نتیجهٔ دیررسِ نشست یا جریان پیشین، قطعهٔ هم‌شمارهٔ جدید را مصرف نمی‌کند.
+Times are recorded at the producer with an injected monotonic clock; the time
+received by the Qt interface is not the measurement basis. A sample's identity
+is a unique session id together with `stream_id` and `segment_id`; each step has
+its own `step_index`. A late result from an earlier session or stream does not
+consume a new segment with the same number.
 
-مرزهای ثبت‌شده عبارت‌اند از:
+## Recorded boundaries
 
-- دریافت صوت پیش از صف capture؛ زمان اولین نمونه از زمان دریافت بسته و طول
-  صوت برآورد می‌شود و زمان سخت‌افزاری ADC نیست. این زمان از تبدیل نرخ و قاب‌بندی
-  عبور می‌کند. آغاز گفتار، نخستین قاب گفتاریِ بازهٔ تأیید VAD است؛ پایان گفتار،
-  پایان آخرین قاب گفتاری است، نه زمان تأیید سکوت.
-- نهایی‌شدن متن در بازگشت فراخوانی STT، انتظار نشانگر پایان گفتار در صف STT،
-  و مدت همان فراخوانی نهایی STT. این مدت شامل پردازش adapter است و زمان خالص
-  اجرای مدل روی GPU محسوب نمی‌شود؛ استنتاج‌های پیش‌نمایش را شامل نمی‌شود.
-- ورود به صف و آغاز/پایان فهم فرمان؛ فراخوانی‌های واقعی مدل فرمان نیز جدا ثبت
-  می‌شوند. مدت فراخوانی‌های تکراری مدل جمع می‌شود و فاصلهٔ بین آن‌ها حذف می‌شود.
-- ورود به صف عمل، آغاز پردازش، ورود/خروج executor برای هر مرحله و تولید feedback.
-  زمان dispatch در این قرارداد، کل فراخوانی executor، شامل پذیرش ورودی و
-  بررسی‌های درونی است؛ زمان خالص ارسال ورودی به سیستم‌عامل نیست.
-- انتظار پس‌شرط در مرزهای موجودِ مشاهدهٔ برنامه و بازخوانی تلگرام، و زمان مشاهدهٔ
-  نتیجهٔ تأییدشده. بررسیِ داخل helper مستقل، فقط در مرز پاسخ helper قابل مشاهده
-  است. زمان پس‌شرط می‌تواند زیرمجموعهٔ زمان dispatch باشد؛ این دو را جمع نزنید.
-- خروج پردازش کل فرمان/طرح، حتی با شکست یا توقف یک مرحله. اولین feedback فقط
-  زمان تولید نخستین نتیجهٔ مرحله است و جای پایان طرح را نمی‌گیرد. پایان پردازش
-  به‌تنهایی ادعای موفقیتِ عمل یا تکمیل انتخاب تعاملیِ بعدی نیست.
+- **Audio acquisition** before the capture queue. The first-sample time is
+  estimated from packet arrival time and audio length; it is not hardware ADC
+  time. It passes through rate conversion and framing. Speech start is the first
+  speech frame of the VAD confirmation window; speech end is the end of the last
+  speech frame, not the time silence was confirmed.
+- **Speech-to-text.** Text finalization at the return of the STT call, the wait
+  for the end-of-speech marker in the STT queue, and the duration of that final
+  STT call. This duration includes adapter processing and is not pure GPU model
+  time; preview inferences are excluded.
+- **Command understanding.** Queue entry and start/end of understanding; real
+  command-model calls are recorded separately. Durations of repeated model calls
+  are summed and the gaps between them are dropped.
+- **Action.** Action-queue entry, processing start, executor entry and exit for
+  each step, and feedback production. In this contract, dispatch time is the
+  whole executor call, including input acceptance and internal checks; it is not
+  the pure time of sending input to the OS.
+- **Postcondition.** Waiting at the existing application-observation and
+  Telegram re-read boundaries, and the time the confirmed result was observed.
+  A check inside an independent helper is visible only at the helper's reply
+  boundary. Postcondition time may be a subset of dispatch time; do not add the
+  two.
+- **Completion.** Exit of processing for the whole command or plan, even after
+  a step fails or stops. First feedback is only the time of the first step
+  result and does not replace the end of the plan. End of processing alone is
+  not a claim that the action succeeded or that a later interactive choice
+  finished.
 
-برای backend جریانی که انتساب قطعیِ نوبت صوت به قطعهٔ متن ندارد، آغاز/پایان
-صوت نامعلوم باقی می‌ماند؛ از تازه‌ترین رویداد VAD حدس زده نمی‌شود. ورودی فایل
-نیز زمان capture زنده ندارد. زمان اولین صدای TTS در این سنجه ثبت نمی‌شود.
+For a streaming backend with no definite attribution of an audio turn to a text
+segment, audio start/end stays unknown; it is not guessed from the latest VAD
+event. File input has no live capture time. Time of the first TTS sound is not
+recorded by this measure.
 
-گزارش بر اساس منبع زنده/فایل، نوع فرمان/طرح، مسیر قواعد/مدل و شرایط آزمایش
-تفکیک می‌شود. وضعیت مدل سرد/گرم (`cold`/`warm`) باید توسط آزمایش‌کننده یا
-فراخواننده تعیین شود؛ پیش‌فرض `unknown` است. اولین فرمان لزوماً سرد نیست.
-با تغییر مدل، دستگاه یا شرایط آزمایش، گردآورندهٔ تازه استفاده کنید.
+## Reporting
 
-هر گروه و هر سنجه، شمار نمونهٔ معتبر خود را دارد. زیر ۲۰ نمونه، صدک گزارش
-نمی‌شود. صدک‌های ۵۰ و ۹۵ با رتبهٔ نزدیک محاسبه می‌شوند؛ برای برآورد باثبات‌تر،
-نمونهٔ بیشتر لازم است. نگهداری به ۱۶ فرمان باز، ۲۵۶ زمان در هر فرمان و ۵۱۲
-نمونهٔ کامل محدود است؛ نمونهٔ ناقص/سرریز، آمار کامل تولید نمی‌کند.
+Reports are grouped by live/file source, command or plan type, rule/model path
+and test conditions. The cold/warm (`cold`/`warm`) model state must be set by the
+tester or caller; the default is `unknown`, and the first command is not
+necessarily cold. Use a fresh collector when the model, device or test
+conditions change.
 
-ابزار موجودِ زیر با executor بی‌اثر، خروجی JSON بدون متن گفتار، صوت، تصویر یا
-نام مقصد تولید می‌کند. هر تکرار را پس از نتیجهٔ قبلی بگویید. گزینهٔ شرایط
-آزمایش، صرفاً برچسبِ شرایط کنترل‌شده است؛ مدل را گرم یا تخلیه نمی‌کند. برای
-آزمایش سرد باید پیش از هر نمونه، سردبودن مدل‌ها مستقل برقرار و بررسی شود؛
-نباید بیست تکرار پیوسته را صرفاً با این گزینه «سرد» نامید.
+Each group and metric has its own valid sample count. Below 20 samples no
+percentile is reported. The 50th and 95th percentiles use nearest rank; a more
+stable estimate needs more samples. Retention is limited to 16 open commands,
+256 times per command and 512 complete samples; an incomplete or overflowed
+sample produces no full statistic.
 
-</div>
+The existing tool below uses an inert executor and produces JSON without speech
+text, audio, images or target names. Speak each repeat after the previous
+result. The test-conditions option is only a label for controlled conditions;
+it does not warm or unload a model. For a cold test, cold models must be
+established and verified independently before each sample; twenty consecutive
+repeats must not be called "cold" merely because of this option.
 
 ```bash
 .venv/bin/python scripts/commands/measure_safe_live_latency.py --samples 20 --temperature unknown
 ```
 
-<div dir="rtl" lang="fa">
+## Evidence limits
 
-آزمون‌های قطعی، زمان ساختگی و executor ساختگی دارند و بنچمارک دستگاه نیستند.
-در اصلاح F18، میکروفون، مدل زنده، GNOME و توزیع تأخیر واقعی سرد/گرم آزمایش نشده‌اند.
-
-</div>
+The deterministic tests use fake time and a fake executor and are not a device
+benchmark. In the F18 correction the microphone, a live model, GNOME and real
+cold/warm latency distributions were not tested.

@@ -1,21 +1,19 @@
-<div dir="rtl" lang="fa">
+**Current contract (2026-10-25):** by a new owner decision, system-power
+consent comes from `PermissionPolicy` and the persistent settings: the
+command-execution switch and the power permission, or global trust, must be
+enabled. A clear command or a specific power button reaches the ordinary GNOME
+request without two repeated KYRIN confirmations. Request id, deadline,
+single-request behavior, cancellation and the permission recheck before
+sending are kept. Mandatory OS confirmations, application warnings and
+inhibitors are not bypassed. Independent initial command detection is
+unchanged: an ambiguous "Restart" is still not a clear computer command. See
+[the shared contract and its limits](PERSISTENT_PERMISSIONS.md).
 
-**قرارداد جاری، ۲۰۲۶/۱۰/۲۵:** طبق تصمیم جدید مالک، رضایت توان سیستم از
-`PermissionPolicy` و تنظیمات ماندگار می‌آید: کلید اجرای فرمان و مجوز توان یا
-اعتماد کلی باید فعال باشند. فرمان روشن یا دکمهٔ مشخص توان، بدون دو تأیید
-تکراری KYRIN به درخواست معمول GNOME می‌رسد. شناسه، مهلت، تک‌درخواستی‌بودن،
-لغو و بررسی مجدد مجوز پیش از ارسال حفظ شده‌اند. تأییدهای اجباری سیستم‌عامل،
-هشدار برنامه و inhibitor دور زده نمی‌شوند. تشخیص اولیهٔ مستقل فرمان تغییر
-نکرده است؛ «Restart» مبهم همچنان فرمان روشنِ رایانه محسوب نمی‌شود.
-[قرارداد مشترک و محدودیت‌ها](PERSISTENT_PERMISSIONS_FA.md).
-
-پیش‌نمایش بی‌خطر همچنان نمایش دومرحله‌ای قدیمی را با backend خنثی آزمایش
-می‌کند؛ این مسیر هیچ درخواست واقعی توان ارسال نمی‌کند. توضیحات پایین سابقهٔ
-قرارداد پیشین و پیش‌نمایش‌اند؛ الزام دو تأیید برای اجرای واقعی منسوخ شده است.
-آزمون جدید فقط backend ساختگی داشته است؛ خاموش‌کردن/راه‌اندازی مجدد واقعی در
-این تغییر آزمایش نشده است.
-
-</div>
+The harmless preview still exercises the old two-step display against a neutral
+backend; it sends no real power request. The text below is history of the
+previous contract and the preview; the two-confirmation requirement for real
+execution is obsolete. The new tests used only a fake backend; real
+shutdown/restart was not tested in this change.
 
 ## Historical contract and safe preview
 

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="120" viewBox="0 0 96 120">
+  <title>KYRIN front-facing running prototype</title>
+  <desc>Original KYRIN head and core, with hinged knees and elbows. Joint transforms are supplied by run-cycle.json. This asset is not loaded by the live extension.</desc>
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a530ff" />
+      <stop offset="0.55" stop-color="#7130f8" />
+      <stop offset="1" stop-color="#087dff" />
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#73f0ff" />
+      <stop offset="1" stop-color="#525bff" />
+    </linearGradient>
+  </defs>
+  <g id="character">
+    <g id="left-thigh" transform="translate(40 83)">
+      <path d="M-4-2 Q0-4 4-1 L4 14 Q0 18-4 14Z" fill="#5525c8" stroke="#36b9ff" stroke-width="2" />
+      <g id="left-shin" transform="translate(0 14)">
+        <circle r="3.5" fill="#4724ab" stroke="#67dcff" stroke-width="1.5" id="left-knee-cap" />
+        <path d="M-3 2 L3 2 4 14 Q0 18-4 15Z" fill="#5525c8" stroke="#36b9ff" stroke-width="2" />
+        <g id="left-foot" transform="translate(0 16)">
+          <path d="M-8-2 Q-7-7 0-7 Q7-7 8-2 L9 3 Q0 6-9 3Z" fill="#1759cf" stroke="#73eaff" stroke-width="1.8" stroke-linejoin="round" />
+          <path d="M-7 3 Q0 5 7 3" fill="none" stroke="#a2f4ff" stroke-width="1" />
+        </g>
+      </g>
+    </g>
+    <g id="right-thigh" transform="translate(55 83)">
+      <path d="M-4-2 Q0-4 4-1 L4 14 Q0 18-4 14Z" fill="#6730da" stroke="#59d3ff" stroke-width="2" />
+      <g id="right-shin" transform="translate(0 14)">
+        <circle r="3.5" fill="#5527c5" stroke="#73eaff" stroke-width="1.5" id="right-knee-cap" />
+        <path d="M-3 2 L3 2 4 14 Q0 18-4 15Z" fill="#6730da" stroke="#59d3ff" stroke-width="2" />
+        <g id="right-foot" transform="translate(0 16)">
+          <path d="M-8-2 Q-7-7 0-7 Q7-7 8-2 L9 3 Q0 6-9 3Z" fill="#1b67df" stroke="#83f0ff" stroke-width="1.8" stroke-linejoin="round" />
+          <path d="M-7 3 Q0 5 7 3" fill="none" stroke="#b5f7ff" stroke-width="1" />
+        </g>
+      </g>
+    </g>
+    <g id="upper-body">
+      <g id="body">
+        <path d="M34 59 Q48 54 62 59 L69 78 Q64 90 48 92 Q32 90 27 78Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="3" />
+        <circle cx="48" cy="75" r="10" fill="#15103e" stroke="#42c7ff" stroke-width="3" />
+        <ellipse cx="48" cy="75" rx="13" ry="5" transform="rotate(-23 48 75)" fill="none" stroke="#9e4cff" stroke-width="2.5" />
+        <circle cx="48" cy="75" r="4" fill="#0d0b2d" />
+        <circle cx="35" cy="74" r="1.2" fill="#a8edff" />
+        <circle cx="61" cy="80" r="1.2" fill="#a8edff" />
+      </g>
+      <g id="left-upper-arm" transform="translate(29 62)">
+        <path d="M-4-1 Q0-4 4 0 L4 12 Q0 17-4 12Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="2" />
+        <g id="left-forearm" transform="translate(0 13)">
+          <circle r="3.5" fill="#5c2bc5" stroke="#73eaff" stroke-width="1.5" id="left-elbow-cap" cy="0" />
+          <path d="M-3 1 L3 1 4 11 Q0 14-4 11Z" fill="url(#shell)" stroke="url(#edge)" stroke-width="2" />
+          <circle cx="0" cy="0" r="5" fill="#1c71e9" stroke="#70edff" stroke-width="1.8" id="left-hand" />
+        </g>
+      </g>
+      <g id="right-upper-arm" transform="translate(65 62)">
+        <path d="M-4-1 Q0-4 4 0 L4 12 Q0 17-4 12Z" fill="url(#shell)" stroke="#73eaff" stroke-width="2" />
+        <g id="right-forearm" transform="translate(0 13)">
+          <circle r="3.5" fill="#6631d7" stroke="#83f0ff" stroke-width="1.5" id="right-elbow-cap" cy="0" />
+          <path d="M-3 1 L3 1 4 11 Q0 14-4 11Z" fill="url(#shell)" stroke="#73eaff" stroke-width="2" />
+          <circle cx="0" cy="0" r="5" fill="#1c71e9" stroke="#83f0ff" stroke-width="1.8" id="right-hand" />
+        </g>
+      </g>
+      <g id="head">
+        <path d="M24 28 L18 18 Q24 19 30 23 M72 28 L78 18 Q72 19 66 23" fill="#8d2cff" stroke="#63dcff" stroke-width="2.5" stroke-linejoin="round" />
+        <path d="M16 40 Q16 17 48 15 Q80 17 80 40 Q80 63 48 65 Q16 63 16 40Z" fill="url(#shell)" stroke="#72eaff" stroke-width="3.5" />
+        <path d="M22 38 Q22 26 48 24 Q74 26 74 38 L72 48 Q69 58 48 59 Q27 58 24 48Z" fill="#161342" stroke="#3959ff" stroke-width="2" />
+        <path d="M45 50 Q48 52 51 50" fill="none" stroke="#73b8ff" stroke-width="1.8" stroke-linecap="round" />
+        <g id="eyes">
+          <path d="M31 38 Q36 33 42 39 Q40 45 35 45 Q31 44 31 38Z M65 38 Q60 33 54 39 Q56 45 61 45 Q65 44 65 38Z" fill="#55e9ff" />
+          <circle cx="38" cy="39" r="1.5" fill="#d2ffff" />
+          <circle cx="58" cy="39" r="1.5" fill="#d2ffff" />
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

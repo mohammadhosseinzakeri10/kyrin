@@ -87,5 +87,4 @@ Tests mirror component responsibilities and include synthetic portal/D-Bus,
 Qt, permission, cancellation and stale-observation scenarios. They are run by
 the same [quality gate](../../CONTRIBUTING.md#development-setup) locally and in CI.
 [Validation notes](../VALIDATION.md) distinguish that evidence from owner live
-checks. Cross-platform adapters, a self-contained installer and universal
-natural-language desktop control are not part of this release.
+checks. See the [roadmap](../ROADMAP.md) for platform, packaging and acceptance work.

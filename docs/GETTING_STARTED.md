@@ -1,10 +1,10 @@
 # Getting started
 
-KYRIN v0.1.0 is a portfolio alpha. Start by opening the control center, then
-configure recognition, voice output and desktop actions separately. The
-[tagged release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
-also provides a wheel, source archive and checksums. The instructions below
-use the tagged Git checkout, including its GNOME extensions.
+Start by opening the KYRIN control center, then configure recognition, voice
+output and desktop actions separately. The instructions below use public
+`main`, including its GNOME extensions. The original
+[v0.1.0 pre-release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+provides separately versioned build artifacts.
 
 ## 1. Install the development application
 
@@ -26,7 +26,7 @@ sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatche
 From a directory where you want to keep the source:
 
 ```bash
-git clone --branch v0.1.0 https://github.com/mohammadhosseinzakeri10/kyrin.git
+git clone --branch main https://github.com/mohammadhosseinzakeri10/kyrin.git
 cd kyrin
 export PIP_CACHE_DIR="$PWD/local-data/pip-cache"
 export HF_HOME="$PWD/local-data/cache/huggingface"
@@ -63,8 +63,8 @@ Choose one supported backend rather than installing every engine.
 | Backend | Additional setup | Reference |
 | --- | --- | --- |
 | Whisper | A local compatible whisper.cpp `whisper-server` executable and a GGML model; CPU is the simplest starting point | [Whisper adapter](stt/WHISPER_LIVE_ADAPTER.md) |
-| Vosk | Install the `stt-vosk` extra and provide a Vosk model directory for the selected language | [Vosk adapter (Persian)](stt/VOSK_ADAPTER_FA.md) |
-| Omnilingual | Compatible isolated Python worker/runtime, checkpoint and tokenizer | [Integration (Persian)](stt/OMNILINGUAL_ASR_FA.md) |
+| Vosk | Install the `stt-vosk` extra and provide a Vosk model directory for the selected language | [Vosk adapter (Persian)](stt/VOSK_ADAPTER.md) |
+| Omnilingual | Compatible isolated Python worker/runtime, checkpoint and tokenizer | [Integration](stt/OMNILINGUAL_ASR.md) |
 
 Store downloaded models in ignored `models/local/` and runtimes/caches under
 `local-data/`. [Model notes](../models/README.md) describe development catalog
@@ -164,6 +164,11 @@ not guarantee that the OS will skip consent. Revocation and session disconnect
 remain available. System power has its own capability and should be left off
 for initial tests.
 
+For Telegram semantic navigation, enable accessibility in the GNOME session and
+leave Telegram Desktop's **Disable screen reader mode** option off. KYRIN
+does not change either preference. This is separate from the input portal and
+capability grants. See [Telegram navigation](actions/TELEGRAM_CHAT_NAVIGATION_DESIGN.md#supported-accessibility-prerequisite-2026-11-05).
+
 ## Example commands
 
 Use a compatible English recognition model. Check the transcript and outcome
@@ -179,7 +184,7 @@ enable only the relevant capability in **Desktop Actions**.
 | `Scroll down` | Request scrolling with the desktop-scroll capability and pointer access. |
 | `Open chat Saved Messages` | Request navigation in a focused Telegram Desktop window with the required Telegram, input and observation permissions. |
 
-The [command guide (Persian)](commands/USER_COMMAND_GUIDE_FA.md) lists more
+The [English command guide](commands/USER_COMMAND_GUIDE.md) lists more
 phrases and their conditions. Local recognition quality and an application's
 exposed controls vary. An unverified dispatch is a report of input delivery.
 

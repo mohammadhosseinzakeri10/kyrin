@@ -41,7 +41,7 @@ revocation, disconnection, operation interruption or application exit, rather th
 in each operation's finally block. Disconnect reaps the old owner before a new
 setup can start, and invalidates earlier waiters. Late Closed signals are scoped
 to their session path. Idle microphone shutdown leaves input connected; restarting
-the application needs explicit setup. See the [L03 contract](SHARED_INPUT_SESSION_FA.md)
+the application needs explicit setup. See the [L03 contract](SHARED_INPUT_SESSION.md)
 and the official [Request Close contract](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Request.html)
 and [Session lifetime contract](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Session.html).
 

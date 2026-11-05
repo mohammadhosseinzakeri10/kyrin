@@ -99,7 +99,9 @@ class DesktopControlExecutor:
         self._capabilities = capabilities
 
     def execute(self, request: ActionRequest) -> ActionResult:
-        observation = request.intent.control_observation
+        observation = (
+            request.intent.control_observation or request.intent.tab_observation
+        )
         timeout = (
             min(45.0, max(0.001, observation.deadline - monotonic()))
             if observation is not None
@@ -365,7 +367,87 @@ class DesktopControlExecutor:
             return None
         return self._helper_result(request, result)
 
+    def _terminal_tab(self, request: ActionRequest) -> ActionResult:
+        observation = request.intent.tab_observation
+        assert observation is not None
+        if (
+            self._permissions is None
+            or not self._permissions.allows_intent(request.intent)
+            or not self._permissions.allows("desktop_control")
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="action_not_allowed"
+            )
+        if (
+            observation.app_id != "org.gnome.Ptyxis.desktop"
+            or self._identity_reader() != observation.identity
+            or not observation.current(self._token_reader(), monotonic())
+        ):
+            return ActionResult(
+                request.key, ActionOutcome.FAILED, error_code="window_state_changed"
+            )
+        keyboard_tab = self._permissions.allows("terminal_tab_keyboard")
+        helper_path = (
+            self._helper_path.with_name("terminal_tab_helper.py")
+            if keyboard_tab else self._helper_path
+        )
+        try:
+            result = run_process(
+                [
+                    self._system_python,
+                    str(helper_path),
+                    *([] if keyboard_tab else ["ptyxis-tab"]),
+                    observation.to_json(),
+                ],
+                helper=True,
+                helper_capabilities=(
+                    {"terminal-tab-keyboard-v1"} if keyboard_tab
+                    else {"desktop_control-v1", "ptyxis-tab-v1"}
+                ),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except BackendUnavailable as error:
+            return ActionResult(
+                request.key,
+                ActionOutcome.FAILED,
+                error_code="backend:" + error.status.reason,
+            )
+        except OSError, subprocess.TimeoutExpired:
+            return ActionResult(
+                request.key,
+                ActionOutcome.UNKNOWN,
+                error_code="visible_control_unavailable",
+            )
+        stage, _, output = result.stdout.partition(":")
+        if stage not in {"TAB_MENU", "TAB_ITEM"}:
+            stage, output = "TAB_ITEM", result.stdout
+        if keyboard_tab and output.strip() == "CONTROL_SETUP_REQUIRED":
+            return ActionResult(
+                request.key, ActionOutcome.FAILED,
+                error_code="terminal_tab_keyboard_setup_required",
+            )
+        parsed = self._helper_result(
+            request,
+            subprocess.CompletedProcess(result.args, result.returncode, output, ""),
+        )
+        return (
+            replace(
+                parsed,
+                error_code=f"terminal_tab_{stage.removeprefix('TAB_').lower()}:{parsed.error_code}",
+            )
+            if parsed.error_code
+            else parsed
+        )
+
     def _execute(self, request: ActionRequest) -> ActionResult:
+        if (
+            request.intent.kind is CommandKind.NEW_APP_TAB
+            and request.intent.tab_observation is not None
+        ):
+            return self._terminal_tab(request)
         if request.intent.kind is not CommandKind.VISIBLE_CONTROL:
             return self._delegate.execute(request)
         if self._permissions is not None and not self._permissions.allows_intent(
@@ -621,6 +703,15 @@ class DesktopControlExecutor:
             )
         if "CONTROL_SETUP_REQUIRED" in result.stdout:
             outcome, reason = ActionOutcome.FAILED, "visible_control_setup_required"
+        elif result.stdout.strip() == "TERMINAL_MENU_AUTOMATION_BLOCKED":
+            outcome, reason = (
+                ActionOutcome.FAILED,
+                "terminal_menu_automation_blocked",
+            )
+        elif result.stdout.strip() in {
+            "TERMINAL_TAB_SHORTCUT_UNSUPPORTED", "TERMINAL_TAB_CLOSE_MENU",
+        }:
+            outcome, reason = ActionOutcome.FAILED, result.stdout.strip().lower()
         elif "CAPTURE_GEOMETRY_REQUIRED" in result.stdout:
             outcome, reason = (
                 ActionOutcome.FAILED,

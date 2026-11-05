@@ -57,6 +57,9 @@ _EN_FORBIDDEN = re.compile(
 )
 _EN_NEGATION = re.compile(r"\b(?:not|never|no|don't|dont|cannot|can't)\b")
 _EN_SPLIT = re.compile(r"\s*(?:[;,]|\b(?:and|then)\b)\s*")
+_EN_REQUEST_PREFIX = re.compile(
+    r"^(?:(?:please|kindly|gently)\s+|(?:could you|would you|can you)\s+)*"
+)
 _EN_WAKE = re.compile(
     r"^(?:" + "|".join(re.escape(name) for name in DEFAULT_WAKE_NAMES) + r")\b\s*,?\s*"
 )
@@ -143,7 +146,7 @@ class RuleBasedOperationEvidence:
         clauses: list[str] = []
         for clause in _EN_SPLIT.split(text):
             clause = clause.strip(" .!?\t")
-            clause = re.sub(r"^(?:please|kindly|gently)\s+", "", clause)
+            clause = _EN_REQUEST_PREFIX.sub("", clause, count=1)
             if not clause:
                 return OperationEvidence(reason="incomplete_clause")
             match = _EN_ACTION.match(clause)

@@ -1,21 +1,14 @@
-<div dir="rtl" lang="fa">
-
-**تصمیم جاری مالک، ۲۰۲۶/۱۰/۲۵:** مجوز ذخیره‌شده یا اعتماد کلی، رضایت اجرای
-فرمان‌های پشتیبانی‌شده است. تأیید صرفاً تکراریِ بستنِ مقصد مشخص، انتخاب بستن
-از منو و دو تأیید واقعی توان سیستم از ترکیب اصلی حذف شده‌اند. رفع ابهام نام،
-انتخاب عمل نامشخص، شواهد مستقل فرمان/مقصد و رد پیشنهاد نامعتبر مدل حفظ
-شده‌اند. الزام‌های تأیید هر عملیات در توضیحات تاریخی پایین با
-[قرارداد مجوز ماندگار](../actions/PERSISTENT_PERMISSIONS_FA.md) جایگزین شده‌اند.
-
-</div>
+Saved permission or configured trust grants authority for supported actions.
+Command and target evidence, clarification, and rejection of invalid model
+proposals remain separate checks. See [persistent permissions](../actions/PERSISTENT_PERMISSIONS.md)
+for current behavior where older confirmation examples differ.
 
 # Local command models in the Ubuntu application
 
-<div dir="rtl">
-
-**به‌روزرسانی F03:** ورودی کنترل عمومی و تلگرام بدون شاهد پس‌شرط، `DISPATCHED_UNVERIFIED` است. مراحل وابسته در این حالت اجرا نمی‌شوند؛ راه‌اندازی برنامهٔ متفاوت می‌تواند ادامه یابد. بررسی محدود نتیجهٔ کند و محدودیت تأیید هویت چت در [قرارداد پس‌شرط](../actions/ACTION_POSTCONDITIONS.md) آمده است. این رفتار با آزمون قطعی بررسی شده؛ آزمون زنده انجام نشده است.
-
-</div>
+For generic interface control and Telegram, a dispatch without a verified
+effect is `DISPATCHED_UNVERIFIED`. Dependent steps do not proceed from that
+outcome. The [postcondition contract](../actions/ACTION_POSTCONDITIONS.md)
+describes the limited verification paths.
 
 The **Command Understanding** page can select an installed model from a local
 Ollama model store or a directory of separate stores. The initial selection is
@@ -31,7 +24,16 @@ weights are never copied into application settings or Git.
    **Refresh installed models**.
 3. Choose a model and **Auto**, **CPU**, or **GPU**. CPU and GPU use the same
    model files; the Ollama runner chooses where to compute. An explicit GPU
-   request fails if inference did not use GPU memory. Auto lets Ollama decide.
+   request requires observed GPU participation (full or mixed placement); pure CPU
+   and unknown placement fail. Explicit CPU requires observed CPU placement.
+   Auto lets Ollama decide and reports the observed result, including unknown.
+   The page separately shows the requested device and the last inference's memory
+   placement, inference status, and unload-request acknowledgement. Current memory
+   residency after that acknowledgement remains unknown; Ollama expires runners
+   asynchronously. Completed audio-file snapshots explicitly name their ended file
+   session and cannot replace a newer microphone observation. This is memory
+   placement, not processor-utilization telemetry. See the
+   [device reporting contract](COMMAND_MODEL_DEVICE_REPORTING.md).
 4. Click **Save**. KYRIN stops and restarts the listening session with the new
    selection. Use **Speech Recognition → Diagnostics** to inspect recognized
    speech and interpreted commands. Desktop actions still need the separate
@@ -120,17 +122,21 @@ requests a new command, and a changed window stops the old request.
 AT-SPI traversal uses only one active top-level window of the process; absent or
 ambiguous window evidence supplies no accessible target. `ACTIVE` follows the
 [official AT-SPI state contract](https://docs.gtk.org/atspi2/enum.StateType.html).
-<div dir="rtl">
+Semantic AT-SPI actions can run with OCR off. The helper re-resolves the
+control and ancestry in the unique active window bound to the original token.
+It requires visible, showing, enabled and sensitive controls and rejects stale,
+ambiguous, or changed structures. Actions are selected by the interface's
+advertised names. Desktop-control permission and the shared input ownership
+checks still apply.
 
-مسیر AT-SPI به آماده‌بودن یا حتی وجود سرویس OCR و مجوز تصویر وابسته نیست. گزینهٔ دسترس‌پذیر نقش و زنجیرهٔ والدهای خود را تا فرمان حمل می‌کند؛ helper همان ساختار را در پنجرهٔ فعال یکتا و با token اولیه دوباره حل می‌کند. کنترل و والدهای آن باید visible، showing، enabled و sensitive باشند؛ hidden، defunct، stale، ابهام یا تغییر ساختار مانع اجرا می‌شود. action مناسب از نام‌های غیرمحلی interface واقعی خوانده می‌شود؛ شمارهٔ صفر فرض نمی‌شود. مسیر معنایی RemoteDesktop یا screenshot ایجاد نمی‌کند، اما مجوز مستقل کنترل دسکتاپ و بررسی مالک مشترک ورودی همچنان الزامی‌اند.
-
-موفقیت `do_action` فقط به نتیجهٔ پذیرفته‌شدن فراخوانی تبدیل می‌شود. برای وضعیت boolean، cache پاک و وضعیت پس از عمل بازخوانی می‌شود؛ بدون تحقق پس‌شرط نتیجه نامعلوم است و کلیک مجدد انجام نمی‌شود. fallback مختصاتی فقط با نبود Action/عمل اعلام‌شده یا نبود کنترل صادرشده در درخت مجاز است؛ خطای انتقال، کنترل نامعتبر و action ناشناخته این fallback را مجاز نمی‌کنند. fallback از همان مالک ورودی عبور می‌کند و پس از حرکت اشاره‌گر، وضعیت و ساختار کنترل را پیش از فشردن دوباره بررسی می‌کند. مجوز پیامد عملیات و toggleهای عمومی اکنون تابع [سیاست قابلیت و تأیید محدود F02](../actions/CONTROL_POLICY.md) است؛ مدل تأیید یا قابلیت صادر نمی‌کند. این مسیر آزمون قطعی دارد؛ آزمون زندهٔ AT-SPI با OCR خاموش هنوز انجام نشده است.
-
-قراردادهای رسمی: [Action](https://docs.gtk.org/atspi2/method.Action.do_action.html)، [نام action](https://docs.gtk.org/atspi2/method.Action.get_action_name.html) و [وضعیت‌ها](https://docs.gtk.org/atspi2/enum.StateType.html). نام اتصال Python روی این دستگاه با introspection نیز بررسی شد: `get_action_name`.
-
-اعتبارسنجی این کارت: سه رگرسیون اصلی پیش از اصلاح شکست خوردند و پس از اصلاح موفق شدند. اجرای کامل با Qt غیرنمایشی و امکان ساخت D-Bus موقت، ۱۶۶۶ آزمون موفق داشت؛ lint و بررسی نوع هستهٔ اصلاح و آزمون معنایی جدید نیز موفق‌اند. بررسی نوع سراسری پروژه همچنان ۴۶۷ خطا در ۴۷ فایل دارد و موفق گزارش نمی‌شود.
-
-</div>
+A successful `do_action` is an accepted call. Boolean state requires a fresh
+read. The coordinate fallback is limited to missing exported semantic actions
+or controls and retains the ownership and pre-press checks. Transport errors
+and invalid or unknown actions fail closed. See the
+[control policy](../actions/CONTROL_POLICY.md) and
+[AT-SPI Action interface](https://docs.gtk.org/atspi2/iface.Action.html).
+Deterministic tests exercise this route. Native coverage with OCR disabled
+remains open.
 
 These controls do not claim atomicity with focus changes after the final check.
 These paths have deterministic tests but still need a live test with the
@@ -217,11 +223,6 @@ extension loads a little later; unavailable reads return unknown rather than
 locking the feature off until the app is restarted. A new-tab request checks
 again immediately before execution that exactly one Ptyxis window remains.
 
-<div dir="rtl" lang="fa">
-
-**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
-[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
-تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
-سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
-
-</div>
+Model admission and residency follow the [shared resource policy](../app/MODEL_RESOURCE_POLICY.md).
+The application keeps device selection and capability checks separate. Native
+latency and memory behavior still require measurement.

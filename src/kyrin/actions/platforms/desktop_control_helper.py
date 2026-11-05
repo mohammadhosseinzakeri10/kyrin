@@ -6,6 +6,7 @@ uses RemoteDesktop and rechecks focus, geometry, node state and pointer motion.
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
@@ -35,6 +36,10 @@ from kyrin.actions.platforms.desktop_accessibility import (  # noqa: E402
 from kyrin.actions.platforms.helper_lifecycle import (  # noqa: E402
     HelperLifetime,
     shared_session,
+)
+from kyrin.actions.platforms.ptyxis_menu import (  # noqa: E402
+    configured_tab_binding,
+    locate_tab,
 )
 from kyrin.actions.platforms.telegram_portal_helper import (  # noqa: E402
     BUS,
@@ -132,6 +137,11 @@ def _semantic_control(
     lifetime: HelperLifetime,
     target: AccessibilityTarget | None = None,
     consent: tuple[int, int, bool | None] | None = None,
+    resolver: Callable[
+        [Any, int, Any, tuple[int, int, int, int], str, AccessibilityTarget | None],
+        Control | None,
+    ]
+    | None = None,
 ) -> str:
     """Invoke one actual Action, without screenshot or RemoteDesktop setup."""
 
@@ -149,12 +159,20 @@ def _semantic_control(
         return "FOCUS_CHANGED"
     atspi = _atspi()
     desktop = atspi.get_desktop(0)
-    control = resolve_control(desktop, expected[1], atspi, frame[2:6], label, target)
+    locate = resolver or resolve_control
+    control = locate(desktop, expected[1], atspi, frame[2:6], label, target)
     if control is None:
         return (
             "NO_ACCESSIBLE_ACTION" if evidence() else "TARGET_CHANGED:stale_or_window"
         )
     node, structural_target, _valid, checked, _point = control
+    # Owner reports persistent loss of Ptyxis mouse controls around this path.
+    # Do not repeat the suspect popup activation through generic literal clicks
+    # either. This containment is not a claim that the native cause is known.
+    if expected[0] == "org.gnome.Ptyxis.desktop" and (
+        " ".join(node.get_name().casefold().split()) == "main menu"
+    ):
+        return "TERMINAL_MENU_AUTOMATION_BLOCKED"
     if not _matches_consent(control, frame[2:6], consent):
         return "TARGET_UNCERTAIN"
     if desired is not None and checked is None:
@@ -168,9 +186,7 @@ def _semantic_control(
         )
     # Re-resolve the same object/role/ancestry after capability reads. Never
     # substitute another same-named control or blindly reuse an action index.
-    fresh = resolve_control(
-        desktop, expected[1], atspi, frame[2:6], label, structural_target
-    )
+    fresh = locate(desktop, expected[1], atspi, frame[2:6], label, structural_target)
     if (
         fresh is None
         or fresh[0] != node
@@ -184,9 +200,7 @@ def _semantic_control(
     if not evidence() or final_frame is None or final_frame[:6] != frame[:6]:
         return "TARGET_CHANGED:stale_or_window"
     lifetime.check(input_event=True)
-    fresh = resolve_control(
-        desktop, expected[1], atspi, frame[2:6], label, structural_target
-    )
+    fresh = locate(desktop, expected[1], atspi, frame[2:6], label, structural_target)
     if (
         fresh is None
         or fresh[0] != node
@@ -215,6 +229,88 @@ def _semantic_control(
         expected_node=node,
     )
     return confirmed or ("ACTION_DISPATCHED" if invoked else "ACTION_UNCONFIRMED")
+
+
+def _semantic_terminal_tab(observation: WindowObservation, lifetime: Any) -> str:
+    """Identify a tab item in an already-open menu; never automate its popup."""
+    expected = observation.identity
+    if expected[0] != "org.gnome.Ptyxis.desktop":
+        return "TAB_MENU:FOCUS_CHANGED"
+    if (
+        not observation.current(_focused_window_token(), monotonic())
+        or _focused_identity() != expected
+    ):
+        return "TAB_MENU:TARGET_CHANGED:stale_or_window"
+    settings = Gio.Settings.new("org.gnome.Ptyxis.Shortcuts")
+    keys = tuple(settings.props.settings_schema.list_keys())
+    try:
+        binding = configured_tab_binding(keys, settings.get_string)
+    except ControlUnavailable:
+        return "TAB_ITEM:OBSERVATION_FAILED:action_unavailable"
+    frame = _window_and_pointer()
+    if frame is None or frame[:2] != expected:
+        return "TAB_MENU:FOCUS_CHANGED"
+    atspi = _atspi()
+    try:
+        menu = resolve_control(
+            atspi.get_desktop(0), expected[1], atspi, frame[2:6], "Main Menu"
+        )
+        if menu is None:
+            return "TAB_MENU:OBSERVATION_FAILED:target_not_found"
+        parent = menu[0].get_parent()
+        opened = (
+            parent is not None
+            and parent.get_child_count() == 2
+            and parent.get_state_set().contains(atspi.StateType.EXPANDED)
+            and parent.get_child_at_index(1).get_role() == atspi.Role.MENU
+            and parent.get_child_at_index(1).get_name() == "Main Menu"
+        )
+        if not opened:
+            return "TAB_MENU:TERMINAL_MENU_AUTOMATION_BLOCKED"
+    except ControlUnavailable as error:
+        return "TAB_MENU:OBSERVATION_FAILED:" + REJECTION_REASONS.get(
+            str(error), "accessibility_error"
+        )
+
+    def locate(
+        desktop: Any,
+        pid: int,
+        api: Any,
+        bounds: tuple[int, int, int, int],
+        _label: str,
+        target: AccessibilityTarget | None,
+    ) -> Control | None:
+        if configured_tab_binding(keys, settings.get_string) != binding:
+            raise ControlUnavailable("role or ancestry changed")
+        return locate_tab(desktop, pid, api, bounds, binding, target)
+
+    try:
+        # Render/export settling is read-only; no Action is retried and the
+        # original window observation/deadline is never replaced.
+        deadline = min(observation.deadline, monotonic() + 0.5)
+        while True:
+            lifetime.check()
+            if (
+                not observation.current(_focused_window_token(), monotonic())
+                or _focused_identity() != expected
+            ):
+                return "TAB_ITEM:TARGET_CHANGED:stale_or_window"
+            item = locate(
+                atspi.get_desktop(0), expected[1], atspi, frame[2:6], "New Tab", None
+            )
+            if item is not None:
+                break
+            if monotonic() >= deadline:
+                return "TAB_ITEM:OBSERVATION_FAILED:target_not_found"
+            sleep(0.025)
+        result = _semantic_control(
+            expected, "New Tab", None, observation, lifetime, item[1], resolver=locate
+        )
+        return "TAB_ITEM:" + result
+    except ControlUnavailable as error:
+        return "TAB_ITEM:OBSERVATION_FAILED:" + REJECTION_REASONS.get(
+            str(error), "accessibility_error"
+        )
 
 
 def _navigation_confirmed(
@@ -567,13 +663,21 @@ def main() -> int:
             raise BackendUnavailable(status)
     consent = _parse_consent(sys.argv)
     args = [arg for arg in sys.argv if not arg.startswith("consent=")]
-    if len(args) >= 2 and args[1] == "semantic":
-        if len(args) not in {7, 8}:
+    if len(args) >= 2 and args[1] in {"semantic", "ptyxis-tab"}:
+        terminal_tab = args[1] == "ptyxis-tab"
+        if terminal_tab:
+            if len(args) != 3:
+                raise ValueError("expected original Terminal window observation")
+            semantic_observation = WindowObservation.from_json(args[2])
+            semantic_identity = semantic_observation.identity
+            semantic_desired, target = None, None
+        elif len(args) not in {7, 8}:
             raise ValueError("expected semantic identity, mode, label and observation")
-        semantic_identity = (args[2], int(args[3]))
-        semantic_desired = {"click": None, "on": True, "off": False}[args[4]]
-        semantic_observation = WindowObservation.from_json(args[6])
-        target = AccessibilityTarget.from_json(args[7]) if len(args) == 8 else None
+        else:
+            semantic_identity = (args[2], int(args[3]))
+            semantic_desired = {"click": None, "on": True, "off": False}[args[4]]
+            semantic_observation = WindowObservation.from_json(args[6])
+            target = AccessibilityTarget.from_json(args[7]) if len(args) == 8 else None
         acquired = shared_session(2)
         if acquired is None:
             print("CONTROL_SETUP_REQUIRED", flush=True)
@@ -581,14 +685,18 @@ def main() -> int:
         lifetime, _session = acquired
         try:
             try:
-                result = _semantic_control(
-                    semantic_identity,
-                    args[5],
-                    semantic_desired,
-                    semantic_observation,
-                    lifetime,
-                    target,
-                    consent,
+                result = (
+                    _semantic_terminal_tab(semantic_observation, lifetime)
+                    if terminal_tab
+                    else _semantic_control(
+                        semantic_identity,
+                        args[5],
+                        semantic_desired,
+                        semantic_observation,
+                        lifetime,
+                        target,
+                        consent,
+                    )
                 )
             except ControlUnavailable as error:
                 result = "OBSERVATION_FAILED:" + REJECTION_REASONS.get(
@@ -603,9 +711,14 @@ def main() -> int:
             ):
                 result = "OBSERVATION_FAILED:accessibility_error"
             print(result, flush=True)
+            outcome = (
+                result.partition(":")[2]
+                if result.startswith(("TAB_MENU:", "TAB_ITEM:"))
+                else result
+            )
             return (
                 0
-                if result
+                if outcome
                 in {
                     "ACTION_DISPATCHED",
                     "STATE_ALREADY_SET",

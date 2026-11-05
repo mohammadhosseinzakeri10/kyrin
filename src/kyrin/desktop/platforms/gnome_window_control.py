@@ -9,6 +9,7 @@ from time import monotonic, sleep
 
 from kyrin.backend_protocol import BackendStatus, probe_gnome
 from kyrin.desktop.window_control import WindowControlStatus, WindowOperation
+from kyrin.desktop.window_group import WindowGroupObservation
 from kyrin.desktop.window_observation import WindowObservation
 from kyrin.operations import run_process
 
@@ -65,6 +66,14 @@ class GnomeAppWindowController:
     ) -> tuple[str, ...] | None:
         self._call_failure = None
         required = {method}
+        if method in {
+            "PrepareAppWindowsClose", "ConfirmAppWindowsClose",
+            "CloseConfirmedAppWindows", "CloseAuthorizedAppWindows",
+        }:
+            required.update({
+                "PrepareAppWindowsClose", "ConfirmAppWindowsClose",
+                "CloseConfirmedAppWindows", "GetAppWindowState",
+            })
         if method in {
             "ControlAppWindow",
             "PrepareWindowClose",
@@ -213,6 +222,82 @@ class GnomeAppWindowController:
             language or "en",
             timeout_s=max(0.001, window.deadline - monotonic()),
         ) == ("approved",)
+
+    def prepare_close_all(self, app_id: str) -> WindowGroupObservation | None:
+        desktop_id = self._desktop_ids.get(app_id)
+        if desktop_id is None:
+            return None
+        reply = self._call("PrepareAppWindowsClose", "s", desktop_id)
+        if reply is None or len(reply) != 1:
+            return None
+        try:
+            payload = json.loads(reply[0])
+            if not isinstance(payload, dict) or payload.get("app_id") != desktop_id:
+                return None
+            items = payload.get("windows")
+            if not isinstance(items, list) or not 1 <= len(items) <= 32:
+                return None
+            windows = []
+            for item in items:
+                if not isinstance(item, dict):
+                    return None
+                window = WindowObservation(
+                    app_id, item["process_id"], item["window_token"],
+                    payload["generation"], payload["observed_at"], payload["deadline"],
+                )
+                if (
+                    type(window.process_id) is not int
+                    or not isinstance(window.window_token, str)
+                    or not window.window_token.isdecimal()
+                    or not isinstance(window.generation, str)
+                ):
+                    return None
+                windows.append(window)
+            return WindowGroupObservation(tuple(windows))
+        except ValueError, TypeError, KeyError:
+            return None
+
+    def confirm_close_all(
+        self, group: WindowGroupObservation, language: str | None
+    ) -> bool:
+        if not group.current(monotonic()):
+            return False
+        return self._call(
+            "ConfirmAppWindowsClose", "ss", group.generation, language or "en",
+            timeout_s=max(0.001, group.deadline - monotonic()),
+        ) == ("approved",)
+
+    def close_all_confirmed(
+        self, group: WindowGroupObservation
+    ) -> WindowControlStatus:
+        return self._commit_close_all(group, "CloseConfirmedAppWindows")
+
+    def close_all_authorized(
+        self, group: WindowGroupObservation
+    ) -> WindowControlStatus:
+        return self._commit_close_all(group, "CloseAuthorizedAppWindows")
+
+    def _commit_close_all(
+        self, group: WindowGroupObservation, method: str
+    ) -> WindowControlStatus:
+        desktop_id = self._desktop_ids.get(group.app_id)
+        if desktop_id is None or not group.current(monotonic()):
+            return WindowControlStatus.UNKNOWN
+        if self._call(method, "s", group.generation) != (
+            "requested",
+        ):
+            return WindowControlStatus.UNKNOWN
+        # Observe all original IDs, without issuing close again or following any
+        # newly created window/save dialog. Missing state is never success.
+        for index in range(self._attempts):
+            if index:
+                sleep(self._retry_delay_s)
+            states = [self._call(
+                "GetAppWindowState", "ss", desktop_id, window.window_token
+            ) for window in group.windows]
+            if all(state == ("no_window",) for state in states):
+                return WindowControlStatus.CONFIRMED
+        return WindowControlStatus.UNKNOWN
 
     def close_authorized(self, window: WindowObservation) -> WindowControlStatus:
         return self._commit_close(window, "CloseAuthorizedWindow")

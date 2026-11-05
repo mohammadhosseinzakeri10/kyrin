@@ -212,10 +212,8 @@ def evaluate_item(
             session.close()
 
 
-def summarize(results: tuple[EvaluationResult, ...]) -> dict[str, object]:
-    """Weight each file by reference characters instead of averaging percents."""
-    if not results:
-        raise ValueError("results must not be empty")
+def _weighted_metrics(results: Sequence[EvaluationResult]) -> dict[str, int | float]:
+    """Use the same reference-weighted metrics for overall and language totals."""
     characters = sum(result.reference_characters for result in results)
     edits = sum(result.edit_distance for result in results)
     words = sum(result.reference_words for result in results)
@@ -228,5 +226,21 @@ def summarize(results: tuple[EvaluationResult, ...]) -> dict[str, object]:
         "reference_words": words,
         "word_edit_distance": word_edits,
         "wer": word_edits / words,
+    }
+
+
+def summarize(results: tuple[EvaluationResult, ...]) -> dict[str, object]:
+    """Retain overall metrics and expose each source language independently."""
+    if not results:
+        raise ValueError("results must not be empty")
+    languages: dict[str, list[EvaluationResult]] = {}
+    for result in results:
+        languages.setdefault(result.language, []).append(result)
+    return {
+        **_weighted_metrics(results),
+        "by_language": {
+            language: _weighted_metrics(items)
+            for language, items in sorted(languages.items())
+        },
         "results": [asdict(result) for result in results],
     }

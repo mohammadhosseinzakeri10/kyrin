@@ -26,8 +26,8 @@ and releases PCM before semantic inference. Reprocessing uses managed STT resour
 admission. Vosk carries real decoder alternatives/native scores; Omnilingual does
 not acquire those capabilities by sharing a session class. Raw ASR scores, IPA
 retrieval similarity and semantic intent are distinct quantities. Experimental
-limits and validation are documented in [the L04 policy](L04_RECOVERY_POLICY_FA.md)
-and [implementation report](../development/L04_IMPLEMENTATION_2026-10-26_FA.md).
+limits and validation are documented in [the L04 policy](L04_RECOVERY_POLICY.md)
+and implementation report (`L04_IMPLEMENTATION_2026-10-26_FA.md`, source repository only).
 
 The reference cases in `datasets/commands/semantic_cases.jsonl` define desired
 behavior, not a measured accuracy result. They distinguish owner-verified,

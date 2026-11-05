@@ -8,6 +8,19 @@ source milestones, not portable binary distributions.
 - Clarify installation, example commands, desktop requirements, local storage,
   and the evidence behind the published v0.1.0 snapshot.
 
+## Unreleased
+
+- Add guarded selection among windows of one app, app-scoped normal close, and
+  targeted Ptyxis tab operations. These paths have route-specific live limits.
+- Strengthen Telegram accessibility targeting, original-window checks and
+  diagnostics. Publish the supported accessibility setup and its limits.
+- Extend deterministic coverage of command roles, clarification, saved input
+  consent, cancellation, source provenance, and desktop targeting.
+- Improve independent language surfaces, visual feedback, local model device
+  reporting, and per-language recognition evaluation.
+- Publish the English architecture, permission contracts, contributor workflow,
+  decision records, and development roadmap alongside the source.
+
 ## [0.1.0] - 2026-10-26
 
 Initial public portfolio release (alpha).

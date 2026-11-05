@@ -168,10 +168,20 @@ class ApplicationController:
             else self._last_voice_state
         )
 
-    def event_belongs_to_session(self, session_id: str) -> bool:
+    def event_belongs_to_session(
+        self,
+        session_id: str,
+        *,
+        generation: int | None = None,
+    ) -> bool:
         with self._lock:
             state = self._voice_state_locked()
-            return state is not None and state.session_id == session_id
+            current_generation = getattr(self._session, "speech_generation", None)
+            return (
+                state is not None
+                and state.session_id == session_id
+                and (generation is None or generation == current_generation)
+            )
 
     def voice_event_is_current(self, event: VoiceModeChanged) -> bool:
         with self._lock:
@@ -187,7 +197,7 @@ class ApplicationController:
                 else self._last_runtime_diagnostics
             )
             return (
-                "KYRIN listening diagnostics L01-v2",
+                "KYRIN listening diagnostics L01-v3",
                 *self._diagnostics.snapshot(),
                 *runtime,
             )

@@ -83,6 +83,14 @@ class CommandUnderstandingWorker:
         with self._condition:
             return self._generation
 
+    def snapshot(self) -> tuple[str, ...]:
+        with self._condition:
+            return (
+                f"pending={len(self._queue)} limit={self._max_queued} unit=updates "
+                f"active={self._active_work is not None} generation={self._generation} "
+                f"finished={self._finished} failed={self._error is not None}",
+            )
+
     def submit(
         self,
         work: CommandWork,

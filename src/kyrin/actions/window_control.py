@@ -22,6 +22,10 @@ from kyrin.desktop.window_control import (
     WindowControlStatus,
     WindowOperation,
 )
+from kyrin.desktop.window_group import (
+    AppWindowGroupController,
+    AuthorizedWindowGroupCloser,
+)
 from kyrin.operations import check_operation
 
 _OPERATIONS = {
@@ -53,6 +57,8 @@ class WindowControlExecutor:
         self._allowed_window_apps = allowed_window_apps
 
     def execute(self, request: ActionRequest) -> ActionResult:
+        if request.intent.kind is CommandKind.CLOSE_ALL_APP_WINDOWS:
+            return execute_with_budget(request, lambda: self._close_all(request))
         if request.intent.kind in (
             CommandKind.CLOSE_APP_WINDOW,
             CommandKind.CLOSE_SHOWN_WINDOW,
@@ -79,6 +85,54 @@ class WindowControlExecutor:
                 request.key, ActionOutcome.UNKNOWN, error_code="window_unverified"
             )
         return ActionResult(request.key, ActionOutcome.FAILED, error_code=status.value)
+
+    def _close_all(self, request: ActionRequest) -> ActionResult:
+        def fail(code: str) -> ActionResult:
+            return ActionResult(request.key, ActionOutcome.FAILED, error_code=code)
+
+        target = request.intent.target
+        if target not in self._allowed_close_apps or (
+            self._permissions is not None
+            and not self._permissions.allows_intent(request.intent)
+        ):
+            return fail("action_not_allowed")
+        controller = self._controller
+        if not isinstance(controller, AppWindowGroupController):
+            return fail("backend:missing_capabilities:PrepareAppWindowsClose")
+        check_operation()
+        group = controller.prepare_close_all(target)
+        if group is None or group.app_id != target or not group.current(monotonic()):
+            return fail(backend_error(controller) or "window_state_changed")
+        direct = self._permissions is not None and self._permissions.allows(
+            "close_all_without_confirmation", target
+        )
+        authorized = (
+            controller if isinstance(controller, AuthorizedWindowGroupCloser) else None
+        )
+        if direct and authorized is None:
+            return fail("backend:missing_capabilities:CloseAuthorizedAppWindows")
+        if not direct and not controller.confirm_close_all(group, request.language):
+            return fail("window_close_confirmation_declined")
+        check_operation()
+        if not group.current(monotonic()):
+            return fail("window_state_changed")
+        if self._permissions is not None and not self._permissions.allows_intent(
+            request.intent
+        ):
+            return fail("action_not_allowed")
+        if direct:
+            assert self._permissions is not None and authorized is not None
+            if not self._permissions.allows("close_all_without_confirmation", target):
+                return fail("action_not_allowed")
+            status = authorized.close_all_authorized(group)
+        else:
+            status = controller.close_all_confirmed(group)
+        if status is WindowControlStatus.CONFIRMED:
+            return ActionResult(request.key, ActionOutcome.CONFIRMED)
+        return ActionResult(
+            request.key, ActionOutcome.UNKNOWN,
+            error_code=backend_error(controller) or "window_group_close_unverified",
+        )
 
     def _close(self, request: ActionRequest) -> ActionResult:
         def failed(code: str) -> ActionResult:

@@ -6,6 +6,8 @@ showing --help. Run it once per prompt ID after the speaker is ready.
 
 import argparse
 import csv
+import hashlib
+import json
 import re
 import shutil
 import tempfile
@@ -25,18 +27,33 @@ MULTILINGUAL_TEMPLATE = DATA_ROOT / "manifest.multilingual.template.csv"
 GERMAN_TEMPLATE = DATA_ROOT / "manifest.german.template.csv"
 SAFETY_TEMPLATE = DATA_ROOT / "manifest.safety.template.csv"
 NEUTRAL_TEMPLATE = DATA_ROOT / "manifest.neutral.template.csv"
+L04_TEMPLATE = DATA_ROOT / "manifest.l04.template.csv"
 TEMPLATES = (
     TEMPLATE,
     MULTILINGUAL_TEMPLATE,
     GERMAN_TEMPLATE,
     SAFETY_TEMPLATE,
     NEUTRAL_TEMPLATE,
+    L04_TEMPLATE,
 )
 SPEAKER_ID_PATTERN = re.compile(r"speaker-[a-z0-9][a-z0-9_-]{0,31}")
 
 
-def recording_destination(prompt_id: str, speaker_id: str | None) -> Path:
+def recording_destination(
+    prompt_id: str, speaker_id: str | None, *, take_id: str | None = None
+) -> Path:
     """Keep repeat prompts from different speakers in separate local paths."""
+    if prompt_id.startswith("l04-"):
+        if speaker_id is None or SPEAKER_ID_PATTERN.fullmatch(speaker_id) is None:
+            raise ValueError("L04 requires a pseudonymous speaker ID")
+        parent = PROJECT_ROOT / "local-data/l04-recordings" / speaker_id
+        if take_id is not None:
+            if re.fullmatch(r"take-[a-z0-9][a-z0-9_-]{0,31}", take_id) is None:
+                raise ValueError("take ID must match take-[a-z0-9_-] and be short")
+            parent /= take_id
+        return parent / f"{prompt_id}.wav"
+    if take_id is not None:
+        raise ValueError("take IDs are currently supported only for L04 prompts")
     if speaker_id is None:
         return DATA_ROOT / "recordings" / f"{prompt_id}.wav"
     if SPEAKER_ID_PATTERN.fullmatch(speaker_id) is None:
@@ -55,19 +72,63 @@ def prompt_catalog() -> dict[str, tuple[str, Path]]:
     return catalog
 
 
+def write_l04_reference(
+    destination: Path,
+    prompt_id: str,
+    speaker_id: str,
+    prompt: str,
+    *,
+    take_id: str | None = None,
+) -> None:
+    """A recording plan is never a verified spoken reference or a decision gold."""
+    with destination.with_suffix(".reference.json").open(
+        "x", encoding="utf-8"
+    ) as output:
+        json.dump(
+            {
+                "schema": 1,
+                "id": prompt_id,
+                "take_id": take_id,
+                "speaker_id": speaker_id,
+                "consent_scope": "explicit local recording; no redistribution",
+                "partition": "evaluation",
+                "audio_sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+                "intended_prompt": prompt,
+                "actually_spoken_reference": None,
+                "verified_by_speaker": False,
+                "reference_status": "not_verified",
+                "stt_runs": [],
+                "expected_decision_independently_reviewed": None,
+            },
+            output,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     catalog = prompt_catalog()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--id", required=True, choices=sorted(catalog))
-    parser.add_argument("--device", type=int, required=True, help="input device ID")
+    parser.add_argument(
+        "--device", type=int, help="input device ID; omit for the OS default input"
+    )
     parser.add_argument("--sample-rate", type=int, help="device default if absent")
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--countdown", type=int, default=3)
+    parser.add_argument("--take-id", help="separate L04 take, e.g. take-02")
+    parser.add_argument(
+        "--consent",
+        action="store_true",
+        help="speaker explicitly consented to this local L04 recording",
+    )
     parser.add_argument(
         "--speaker-id",
         help="pseudonymous speaker ID, e.g. speaker-02; omitting preserves legacy path",
     )
     args = parser.parse_args(argv)
+    if args.id.startswith("l04-") and not args.consent:
+        parser.error("L04 microphone use requires --consent after speaker agreement")
     prompt, template = catalog[args.id]
     if not 2 <= args.seconds <= 30:
         parser.error("--seconds must be between 2 and 30")
@@ -77,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--sample-rate must be positive")
 
     try:
-        destination = recording_destination(args.id, args.speaker_id)
+        destination = recording_destination(
+            args.id, args.speaker_id, take_id=args.take_id
+        )
     except ValueError as exc:
         parser.error(str(exc))
     recordings = destination.parent
@@ -85,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"recording already exists and will not be overwritten: {destination}"
         )
+    if (
+        args.id.startswith("l04-")
+        and destination.with_suffix(".reference.json").exists()
+    ):
+        parser.error("L04 reference already exists; choose a new speaker/session ID")
 
     try:
         import sounddevice as sd  # type: ignore[import-untyped]
@@ -92,12 +160,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.exit(2, f"Audio runtime is unavailable: {exc}\n")
 
     try:
-        if args.device < 0:
+        device = args.device if args.device is not None else int(sd.default.device[0])
+        if device < 0:
             raise MicrophoneError("no default input device")
-        details = sd.query_devices(args.device, "input")
+        details = sd.query_devices(device, "input")
         sample_rate = args.sample_rate or int(round(details["default_samplerate"]))
         sd.check_input_settings(
-            device=args.device, channels=1, dtype="int16", samplerate=sample_rate
+            device=device, channels=1, dtype="int16", samplerate=sample_rate
         )
     except sd.PortAudioError as exc:
         parser.exit(2, f"Microphone is unavailable: {exc}\n")
@@ -126,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             frames_remaining = round(args.seconds * sample_rate)
             chunk_frames = max(1, round(sample_rate * 0.02))
             with sd.RawInputStream(
-                device=args.device,
+                device=device,
                 samplerate=sample_rate,
                 channels=1,
                 dtype="int16",
@@ -180,6 +249,10 @@ def main(argv: list[str] | None = None) -> int:
             shutil.copyfile(template, manifest)
             print(f"همهٔ فایل‌ها آماده‌اند. متن‌های مرجع را در {manifest} بررسی کن.")
     else:
+        if args.id.startswith("l04-"):
+            write_l04_reference(
+                destination, args.id, args.speaker_id, prompt, take_id=args.take_id
+            )
         print("این ضبط فقط پس از تأیید متنِ واقعاً گفته‌شده وارد مجموعهٔ ارزیابی شود.")
     print(f"ضبط در {destination} ذخیره شد.", flush=True)
     return 0

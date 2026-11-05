@@ -1,4 +1,4 @@
-# Resolved on CPython 3.14.4, Ubuntu x86_64; see docs/development/QUALITY_CHECKS.md.
+# Resolved on CPython 3.14.4, Ubuntu x86_64; see docs/development/QUALITY_GATE.md.
 cffi==2.1.1
 flatbuffers==25.12.19
 numpy==2.5.3

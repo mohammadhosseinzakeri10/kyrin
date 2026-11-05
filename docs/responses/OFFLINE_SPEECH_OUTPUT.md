@@ -38,48 +38,24 @@ does not, the text remains visible and a warning reports the incomplete voice.
 
 ## Preventing self-hearing
 
-<div dir="rtl" lang="fa">
+The playback guard follows `is_playing` plus a 350 ms echo tail. Queueing
+or generating speech alone leaves the microphone active. Backends without
+playback state use the conservative guard. Muting replaces frames with
+silence downstream of `MicrophoneInput`, retaining frame format and timing.
 
-**قرارداد فعلی F16 ــ ۲۰۲۶/۱۰/۲۴:** حالت مشغول (`is_active`) شامل صف و تولید
-صوت است؛ محافظ ورودی از وضعیت پخش (`is_playing`) و دنبالهٔ ۳۵۰ میلی‌ثانیه‌ای
-استفاده می‌کند. صف و تولید صوتِ مدل، میکروفون را ساکت نمی‌کنند. backend فاقد
-گزارش وضعیت پخش، محافظ محافظه‌کارانهٔ قبلی را نگه می‌دارد. جایگزینی صوت با
-سکوت، طول، قالب و زمان دریافت را حفظ می‌کند و خارج از `MicrophoneInput` است.
+The optional PipeWire echo-cancellation path binds a uniquely resolved
+microphone and checks its reference-speaker links. Ambiguous aliases leave the
+half-duplex route active. The path does not change global audio defaults.
+Confirmed speech activity can interrupt the response from the VAD worker
+before final recognition. The speech pipeline keeps ordered frames and
+preserves the initial buffer for turn-based recognition. Authorization still
+uses final text and the action policy.
 
-نشست Ubuntu، هویت واقعیِ حل‌شدهٔ ورودی پیش‌فرض یا انتخاب‌شده را به PipeWire
-می‌رساند. مسیرهای پشتیبانی‌شده، نگاشت یکتای کارت/دستگاه ALSA، نام یا شرح
-یکتای منبع PulseAudio و پل‌های مشخص `pulse`/`pipewire` با فرادادهٔ منبع
-پیش‌فرض هستند. نام مبهم، ورودی ناشناخته و alias عمومیِ غیرقابل‌اثبات، AEC
-را فعال نمی‌کنند. `target.object` هدف دریافت را تثبیت می‌کند و fallback،
-جابه‌جایی و اتصال دوباره به هدف دیگر غیرفعال‌اند. وجود منبع مجازی و اتصال‌های
-میکروفون و مرجع بلندگو، پیش از اعلام فراهم‌بودن مسیر بررسی می‌شوند.
-
-در مسیر AEC، شروع تأییدشدهٔ گفتار مستقیماً در worker تشخیص فعالیت، پاسخ
-صوتی را قطع می‌کند؛ این callback پشت STT یا صف رابط منتظر نمی‌ماند. همهٔ
-پنجره‌های صوتی به‌ترتیب به STT می‌رسند و بافر نیم‌ثانیه‌ای ابتدای گفتار در
-backendهای مبتنی بر نوبت حفظ می‌شود. تشخیص فعالیت گفتار (VAD) فقط پاسخ
-صوتی را متوقف می‌کند؛ اجازهٔ عملیات، هویت گوینده یا تأیید dialog نیست.
-تصمیم‌گیری و مجوز عملیات همچنان به متن نهایی و سیاست‌های قبلی وابسته‌اند.
-
-بدون AEC، رابط حالت **نیمه‌دوطرفه** را نشان می‌دهد و صدای میکروفون هنگام
-پخش و دنبالهٔ پژواک ساکت می‌شود. دکمهٔ **توقف پاسخ صوتی** در تمام صفحه‌ها
-مستقیماً پاسخ جاری و صف صوت را باطل می‌کند؛ پس از مکث کوتاه می‌توان صحبت
-کرد. این دکمه میکروفون، مجوزها و عملیات در حال اجرا را لغو نمی‌کند. صوتی
-که پس از وقفه دیر آماده شود پخش نمی‌شود؛ تولید درون‌پردازه‌ای ممکن است تا
-پایان فراخوانی ادامه یابد. این رفتار با توقف پخش و لغو عملیات سه چرخهٔ
-مجزا دارد. پیش‌نمایش صدا و اعلان مرحلهٔ تأیید نیز همین اعتبارسنجی را دارند.
-
-مرجع حذف پژواک، monitor بلندگوی پیش‌فرض PipeWire است؛ خروجی واقعی باید از
-همان مسیر عبور کند. هیچ پیش‌فرض سراسری تغییر نمی‌کند. منبع موقت با نشست
-بسته می‌شود. ابزار خط فرمان همچنان فقط محافظ نیمه‌دوطرفه دارد. آزمون‌های
-ساختگی، نگاشت، اتصال، صف، وقفه، صوت دیررس، حفظ آغاز گفتار، سکوت پژواک و
-استقلال توقف دستی را پوشش می‌دهند. این آزمون‌ها کیفیت صوتی را ثابت نمی‌کنند.
-**آزمون زندهٔ میکروفون/بلندگو، سرویس صوتی نصب‌شده، میزان حذف پژواک و
-قطع گفتار واقعی انجام نشده است.** گام بعد، آزمون صاحب دستگاه با ورودی
-انتخاب‌شده، گفتار روی پاسخ و بررسی شنیده‌شدن اولین واژه و نبود فرمان کاذب
-است؛ مسیر بدون AEC و توقف دستی نیز باید روی همان دستگاه بررسی شوند.
-
-</div>
+Without echo cancellation, the UI reports half-duplex mode. **Stop spoken
+response** cancels playback and queued audio independently of microphone and
+action state. It discards late synthesis output. The CLI uses the
+half-duplex guard. Synthetic tests exercise these paths, while native
+echo cancellation and speech interruption require device acceptance.
 
 On desktop exit, the synthesizer interrupts playback and stops an active
 isolated model worker. If in-process CPU generation still holds the model lock,
@@ -131,11 +107,6 @@ AEC configuration follows the official [Echo Cancel module](https://docs.pipewir
 [stream target properties](https://docs.pipewire.org/page_man_pipewire-props_7.html)
 and [ALSA identity keys](https://docs.pipewire.org/group__spa__keys.html).
 
-<div dir="rtl" lang="fa">
-
-**F19، ۲۰۲۶/۱۰/۲۴:** اقامت و پذیرش مدل در ترکیب Ubuntu اکنون از
-[سیاست مشترک منابع](../app/MODEL_RESOURCE_POLICY.md) پیروی می‌کند؛
-تنظیم صریح دستگاه و قراردادهای مجوز حفظ شده‌اند. آزمون زنده و baseline
-سرعت/حافظهٔ این سیاست هنوز انجام نشده‌اند.
-
-</div>
+Model admission and residency follow the [shared resource policy](../app/MODEL_RESOURCE_POLICY.md).
+The application keeps device selection and capability checks separate. Native
+latency and memory behavior still require measurement.

@@ -15,7 +15,7 @@ are managed in the installed library. TTS packages in the source catalog use
 `models/local/by-model/tts/<family>/<model>/`.
 
 The records below describe models evaluated on a development machine. They
-document setup and experiments for the tagged source. Obtain and configure any
+describe development setup and experiments. Obtain and configure any
 model you want to use.
 
 ## Local command-understanding candidates
@@ -63,7 +63,7 @@ OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.5:4b
 KYRIN's Command Understanding page discovers all four names from their parent
 directory; selecting a name uses only its own store. The dry-run comparison
 tool and its limitations are described in
-[`LOCAL_MODEL_COMPARISON.md`](../docs/commands/LOCAL_MODEL_COMPARISON.md).
+[`LOCAL_MODEL_COMPARISON.md`](../docs/app/COMMAND_MODEL_LIVE_INTEGRATION.md).
 
 This directory keeps development model assets in a predictable place. Model
 weights and archives are intentionally excluded from Git because they are large
@@ -109,7 +109,7 @@ Six Omnilingual ASR v2 checkpoints are stored separately under
 `models/local/by-model/stt/omnilingual-asr/<model-name>/`. Each folder includes
 its own copy of `omniASR_tokenizer_written_v2.model`. KYRIN reads these folders
 in place and runs the official package from an isolated Python 3.12 runtime;
-see [local integration](../docs/stt/OMNILINGUAL_ASR_FA.md).
+see [local integration](../docs/stt/OMNILINGUAL_ASR.md).
 
 ## Local Whisper comparison models
 

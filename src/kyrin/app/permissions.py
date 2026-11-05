@@ -63,6 +63,7 @@ CAPABILITIES = (
         frozenset(
             {
                 CommandKind.CLOSE_APP_WINDOW,
+                CommandKind.CLOSE_ALL_APP_WINDOWS,
                 CommandKind.CLOSE_SHOWN_WINDOW,
             }
         ),
@@ -99,6 +100,16 @@ CAPABILITIES = (
         frozenset({CommandKind.VISIBLE_CONTROL}),
     ),
     Capability("system_power", "System power", "کنترل توان سیستم"),
+    Capability(
+        "close_all_without_confirmation",
+        "Close all windows without asking each time (permitted apps only)",
+        "بستن همهٔ پنجره‌ها بدون تأیید هر بار (فقط برنامه‌های مجاز)",
+    ),
+    Capability(
+        "terminal_tab_keyboard",
+        "Create Terminal tabs with Ctrl+Shift+T (keyboard access)",
+        "ساخت تب ترمینال با Ctrl+Shift+T (دسترسی صفحه‌کلید)",
+    ),
 )
 LEGACY_CAPABILITIES = frozenset(
     {

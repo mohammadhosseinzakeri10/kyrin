@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kyrin.audio.speech_timing import TimedSpeechBoundary
+    from kyrin.runtime.listening_diagnostics import ListeningDiagnostics
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_errors import AudioQueueOverflowError
@@ -46,6 +47,7 @@ class AudioBacklog:
         warning_ms: int = 1000,
         recovery_ms: int = 250,
         maximum_ms: int = 5000,
+        diagnostics: ListeningDiagnostics | None = None,
     ) -> None:
         if not 0 <= recovery_ms < warning_ms < maximum_ms:
             raise ValueError("require 0 <= recovery_ms < warning_ms < maximum_ms")
@@ -53,6 +55,7 @@ class AudioBacklog:
         self.warning_ms = warning_ms
         self.recovery_ms = recovery_ms
         self.maximum_ms = maximum_ms
+        self._diagnostics = diagnostics
         self._chunks: deque[AudioData | BacklogMarker | TimedSpeechBoundary] = deque()
         self._condition = Condition()
         self._pending_frames = 0
@@ -84,6 +87,7 @@ class AudioBacklog:
                 )
             self._chunks.append(chunk)
             self._pending_frames = pending
+            self._report()
             self._condition.notify()
             if not self._warned and pending * 1000 >= (
                 self.warning_ms * self.audio_format.sample_rate
@@ -112,6 +116,7 @@ class AudioBacklog:
         frames = len(chunk.data) // self.audio_format.bytes_per_frame
         with self._condition:
             self._pending_frames -= frames
+            self._report()
             if self._warned and self._pending_frames * 1000 <= (
                 self.recovery_ms * self.audio_format.sample_rate
             ):
@@ -129,3 +134,12 @@ class AudioBacklog:
             self._aborted = True
             self._chunks.clear()
             self._condition.notify_all()
+
+    def _report(self) -> None:
+        if self._diagnostics is not None:
+            self._diagnostics.queue(
+                "stt_backlog",
+                self._duration_ms(),
+                self.maximum_ms,
+                "ms_including_active",
+            )
