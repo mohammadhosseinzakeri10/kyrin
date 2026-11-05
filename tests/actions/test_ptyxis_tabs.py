@@ -89,13 +89,14 @@ def test_no_input_when_original_authority_or_target_is_invalid(case: str) -> Non
     elif case == "expired":
         assert req.intent.tab_observation
         w = req.intent.tab_observation
+        # Derive the deadline from the shifted start, as the contract does;
+        # shifting both bounds can exceed the age limit by one rounding step.
+        stale = w.observed_at - 20
         req = replace(
             req,
             intent=replace(
                 req.intent,
-                tab_observation=replace(
-                    w, observed_at=w.observed_at - 20, deadline=w.deadline - 20
-                ),
+                tab_observation=replace(w, observed_at=stale, deadline=stale + 10),
             ),
         )
     elif case == "cancelled":
