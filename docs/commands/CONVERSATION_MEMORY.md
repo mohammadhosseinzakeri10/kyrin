@@ -1,44 +1,24 @@
 # Conversation memory
 
-<div dir="rtl" lang="fa">
+## Current storage and retention
 
-**قرارداد فعلی ــ ۲۰۲۶/۱۰/۲۴، F17:** با تصمیم مالک، ذخیره در نصب تازه
-خاموش است. تنظیمات نسخهٔ ۱۵ و قدیمی‌تر هنگام خواندن، رفتار روشن قبلی را حفظ
-می‌کنند؛ فایل تنظیمات صرفاً با خواندن بازنویسی نمی‌شود. سقف پیش‌فرض فعال
-۲۰۰۰ متن، بدون انقضای زمانی، و بایگانی بدون سقف یا انقضای خودکار باقی می‌ماند.
-هیچ محدودیت مخرب تازه‌ای بر دادهٔ موجود تحمیل نشده است.
+Fresh settings disable persistent history. Older settings through version 15
+retain their earlier enabled behavior on read. Disabling persistence keeps
+existing records and detaches the database from microphone and file sessions.
+The short-lived session context and in-memory diagnostics have their own
+lifecycles. Explicit archive browsing remains available.
 
-در ترجیحات، ذخیره و چهار محدودیت مستقل تعداد/سن فعال و بایگانی قابل تنظیم‌اند.
-صفر در رابط و `null` در تنظیمات یعنی نامحدود. کاهش محدودیت تأیید جداگانه
-می‌خواهد و با دکمهٔ ذخیرهٔ تغییرات اعمال می‌شود. سن از زمان ثبت اولیهٔ متن
-محاسبه می‌شود؛ بایگانی و بازگردانی آن را تازه نمی‌کنند. متن دقیقاً روی مرز سن
-حفظ می‌شود؛ فقط متن قدیمی‌تر حذف می‌شود. سقف تعداد، تازه‌ترین شناسه‌های درج
-را نگه می‌دارد. محدودیت‌ها هنگام شروع نشست دارای ذخیره، درج، خواندن تاریخچه
-و بایگانی/بازگردانی اجرا می‌شوند؛ در زمان بسته‌بودن برنامه زمان‌بند حذف وجود ندارد.
-بازگردانی نباید متن فعال دیگری را کنار بزند یا متن منقضی برای زمینه را زنده کند.
+Preferences expose independent count and age limits for active and archived
+turns. The default is 2,000 active turns, with no age limit and no automatic
+archive limit. Limits use the original recorded time and run during storage
+operations. There is no background retention job when KYRIN is closed.
+Restoring records respects active limits and keeps newer active records.
 
-خاموش‌کردن ذخیره، اتصال تاریخچه به نشست میکروفون و فایل را قطع می‌کند:
-نه پایگاه داده ایجاد/باز می‌شود، نه متن قبلی برای مدل خوانده می‌شود و نه متن
-جدید ذخیره می‌شود. دادهٔ موجود حفظ می‌شود. نمایش متن در گزارش عیب‌یابیِ
-حافظه‌ای و زمینهٔ کوتاه‌مدت همان نشست، مستقل از این ذخیرهٔ پایدار است.
-مرور صریح بایگانی همچنان ممکن است و سیاست ذخیره‌شدهٔ نگهداری را رعایت می‌کند.
-
-سه عملیات مستقل رابط عبارت‌اند از «بایگانی و خروج از زمینه»، «حذف فعال» و
-«حذف همهٔ فعال و بایگانی این پایگاه داده». هر سه تأیید جداگانه دارند؛ بایگانی
-با رعایت سیاست نگهداری قابل بازگردانی است و دو حذف برگشت‌پذیر نیستند.
-برای جلوگیری از ثبت دوبارهٔ متن در حین عملیات، ابتدا باید میکروفون کاملاً
-متوقف و پردازش فایل تمام یا لغو شود. پس از موفقیت، گزارش عیب‌یابی، فهرست و
-پیش‌نمایش باز بایگانی پاک می‌شوند. `clear()` قرارداد قدیمیِ حذف فعال را حفظ
-می‌کند؛ دامنهٔ صریح با `clear_active()` و `clear_all()` مشخص است.
-حذف همه شامل نسخه‌های پشتیبان، snapshotهای جداگانه یا فایل‌های صوتی منبع نیست؛
-حذف سطرهای SQLite تضمین پاک‌سازی فیزیکی رسانه نیست.
-
-آزمون‌ها فقط پایگاه دادهٔ موقت را باز می‌کنند و ساعت تزریقی، مرز سن، سقف مستقل،
-بازگردانی، مهاجرت غیرمخرب تنظیمات، خاموش‌بودن ذخیره برای میکروفون و فایل،
-تأیید و پاک‌سازی رابط را پوشش می‌دهند. پایگاه دادهٔ شخصی برای این اصلاح باز
-نشده و آزمون زندهٔ برنامه انجام نشده است.
-
-</div>
+Archive, delete active history, and delete all history are separately
+confirmed. Stop microphone capture and finish or cancel file processing
+before clearing history. Archiving is reversible within retention limits.
+Deletion applies to the selected SQLite records. External backups and source
+audio are separate, and row deletion does not guarantee physical erasure.
 
 When persistence is enabled, KYRIN stores only finalized speech text, its reported
 language, a UTC time,
@@ -80,29 +60,9 @@ directory for each test. Their fake transcripts therefore exercise persistence
 without reading or writing the user's conversation database. A regression
 assertion checks the temporary path and its saved test turns.
 
-An earlier test run may have written fake transcripts before this isolation was
-added. The existing user database was inspected read-only and left unchanged:
-transcript text alone cannot prove which historical turns came from a test
-versus a real session. Do not delete records by matching common command text.
-
-On the owner's machine, all 81 pre-isolation turns were subsequently marked
-archived in one SQLite transaction. This includes three turns that did not
-match the literal test phrases; their origin is also uncertain. The rows remain
-in the database, and a separate 0600 snapshot was saved under
-`local-data/kyrin/memory/snapshots/` before archiving. New turns are active;
-`recent()` excludes archived turns. `archive_active()` and
-`restore_archived()` make the operation reversible without guessing origin.
-
-The repeatable synthetic benchmark at
-`scripts/commands/benchmark_conversation_history.py` creates a temporary
-database on the same XDG data drive and removes it afterward. On the owner's
-AI-Projects drive, 300 appends had median 0.845 ms and p95 1.354 ms; 300
-six-turn reads had median 0.011 ms and p95 0.012 ms. This measures SQLite
-operations, not microphone-to-action latency or all possible disk stalls. The
-write remains synchronous on the speech event consumer; a bounded writer queue
-should be considered only if a live trace shows material delay. Recent retrieval is recency
-based; topic ranking and cross-session references require their own evaluation
-before they may influence commands.
+The synthetic benchmark `scripts/commands/benchmark_conversation_history.py`
+uses a temporary database on the XDG data drive. It measures SQLite operations
+separately from speech-to-action latency.
 
 The control center also records text-free latency markers in the current
 listening session. After action feedback, Speech Recognition diagnostics show
@@ -115,9 +75,5 @@ transcript text beyond the separately configured conversation history.
 The supervised safe latency probe in
 `scripts/commands/measure_safe_live_latency.py` reads the saved local STT and
 command-model selections, uses a temporary conversation database, and replaces
-the desktop executor with an inert result. It never opens Telegram. On one
-owner-spoken `Open Telegram` trial on 2026-10-13, the confirmed activity start
-to final STT text took 1,100.28 ms; final text to inert action result took
-0.32 ms; total was 1,100.60 ms. This is a single warm-session observation of
-this command, not a population benchmark. The command may use the rule-based
-fast path, so it does not establish the latency of every LLM interpretation.
+the desktop executor with an inert result. Its timing is a warm-session
+diagnostic and depends on the recognition and command route.

@@ -4,7 +4,11 @@ The Ubuntu control center has a separate **Preferences → Interface language**
 setting. It does not change speech recognition, command understanding, spoken
 responses, or the language of text found on screen.
 
-The application includes English and Persian. **System language** selects the
+The application includes English and Persian. A fresh installation defaults to
+English even on a Persian system; existing saved selections remain unchanged.
+English is the primary V1 command/acceptance language, while the Persian
+interface remains available. See the [language policy](../LANGUAGE_POLICY.md).
+**System language** selects the
 best installed match for the operating-system locale and otherwise uses
 English. An explicit language choice remains saved across launches. Persian
 uses a right-to-left layout; paths and technical model identifiers remain in

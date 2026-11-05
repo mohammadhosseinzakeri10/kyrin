@@ -33,6 +33,36 @@ PERSIAN: dict[str, str] = {
     "tts_preview": "آزمودن تنظیمات فعلی صدا",
     "tts_preview_started": "نمونه‌ای کوتاه با تنظیمات فعلی پخش می‌شود…",
     "tts_preview_unavailable": "آزمون صدا در دسترس نیست.",
+    "command_cleanup_not_requested": "درخواست نشده است",
+    "command_cleanup_acknowledged": "درخواست تخلیه پذیرفته شده است",
+    "command_cleanup_unconfirmed": "درخواست تخلیه تأیید نشده است",
+    "command_device_file_ended": "آخرین نشست فایل صوتی (پایان‌یافته)",
+    "command_device_not_run": (
+        "مشاهدهٔ مدل فرمان: برای این انتخاب و نشست هنوز اجرا نشده است."
+    ),
+    "command_device_session_ended": (
+        "نشست مدل فرمان پایان یافته است؛ مشاهدهٔ جاری وجود ندارد."
+    ),
+    "command_device_running": (
+        "درخواست مدل فرمان در حال اجراست؛ دستگاه هنوز مشاهده نشده است."
+    ),
+    "command_device_last": (
+        "آخرین استنتاج فرمان — {model}: {state}. محل بارگذاری "
+        "مشاهده‌شده: {placement}. پاک‌سازی: {cleanup}. اقامت فعلی: {presence}."
+    ),
+    "command_inference_completed": "تکمیل‌شده",
+    "command_inference_failed": "ناموفق",
+    "command_placement_cpu": "پردازندهٔ مرکزی (CPU)",
+    "command_placement_gpu": "پردازندهٔ گرافیکی (GPU)",
+    "command_placement_mixed": "ترکیبی از پردازندهٔ مرکزی و گرافیکی (CPU/GPU)",
+    "command_placement_gpu_participation": (
+        "مشارکت پردازندهٔ گرافیکی تأیید شده؛ بارگذاری کامل روی آن نامعلوم است"
+    ),
+    "command_placement_unknown": "نامعلوم",
+    "command_placement_not_loaded": "مدل هنگام مشاهده بارگذاری نبود",
+    "command_presence_not_loaded": "بارگذاری نیست",
+    "command_presence_unknown": "وضعیت اقامت نامعلوم است",
+    "command_presence_loaded": "بارگذاری‌شده",
     "command_models_heading": "فهم فرمان",
     "command_models_caption": (
         "برای فرمان‌هایی که قواعد سریع حل نمی‌کنند، یک مدل محلی انتخاب کنید. "
@@ -42,7 +72,7 @@ PERSIAN: dict[str, str] = {
     "command_models_rules": "فقط قواعد سریع (پیش‌فرض)",
     "command_models_engine": "موتور",
     "command_models_store": "مخزن مدل‌های محلی",
-    "command_models_device": "پردازش مدل با",
+    "command_models_device": "دستگاه درخواستی مدل فرمان",
     "command_models_refresh": "به‌روزرسانی فهرست مدل‌های نصب‌شده",
     "command_models_store_title": "انتخاب مخزن مدل‌های Ollama",
     "command_models_found": "{count} مدل محلی کامل پیدا شد.",

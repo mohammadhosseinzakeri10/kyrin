@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from threading import Event
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_format import AudioFormat
@@ -26,6 +27,7 @@ class ManagedSttEngine:
         key: str,
     ) -> None:
         self._resources, self._key = resources, key
+        self._cancelled = Event()
         with self._admit(keep_resident=True):
             self._engine = open_engine()
         self.capabilities = self._engine.capabilities
@@ -34,7 +36,10 @@ class ManagedSttEngine:
     def _admit(self, *, keep_resident: bool = False) -> Iterator[None]:
         try:
             with self._resources.use(
-                Workload.STT, self._key, keep_resident=keep_resident
+                Workload.STT,
+                self._key,
+                keep_resident=keep_resident,
+                cancelled=self._cancelled.is_set,
             ):
                 yield
         except ResourceUnavailable as exc:
@@ -53,6 +58,9 @@ class ManagedSttEngine:
         self._resources.forget(self._key)
 
     def cancel_pending_inference(self) -> None:
+        # Stop also cancels admission before native inference has begun. Keep
+        # the current native owner's accounting until its call actually returns.
+        self._cancelled.set()
         cancel = getattr(self._engine, "cancel_pending_inference", None)
         if callable(cancel):
             cancel()

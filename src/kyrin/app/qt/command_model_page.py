@@ -18,6 +18,11 @@ from PySide6.QtWidgets import (
 from kyrin.app.qt.page_layout import scrollable_page_layout
 from kyrin.app.qt.translations import UiTranslations
 from kyrin.app.settings import CommandModelSelection
+from kyrin.commands.ollama_device import (
+    CommandDeviceReport,
+    InferenceState,
+    ModelPresence,
+)
 from kyrin.commands.ollama_models import installed_ollama_models
 from kyrin.stt.device import DevicePreference
 
@@ -77,6 +82,13 @@ class CommandModelPage(QWidget):
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status)
+        self.device_report: CommandDeviceReport | None = None
+        self._completed_file = False
+        self._device_report_empty = "command_device_not_run"
+        self.observed_device = QLabel()
+        self.observed_device.setWordWrap(True)
+        self.observed_device.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.observed_device)
         if current is not None:
             self.mode.setCurrentIndex(1)
             self.device.setCurrentIndex(self.device.findData(current.device.value))
@@ -91,6 +103,70 @@ class CommandModelPage(QWidget):
                     self.models.setCurrentRow(index)
                     break
 
+        self.mode.currentIndexChanged.connect(self.clear_device_report)
+        self.device.currentIndexChanged.connect(self.clear_device_report)
+        self.store_path.textChanged.connect(self.clear_device_report)
+        self.models.currentItemChanged.connect(self.clear_device_report)
+
+    def clear_device_report(self, *_args: object) -> None:
+        self.device_report = None
+        self._completed_file = False
+        self._device_report_empty = "command_device_not_run"
+        self._show_device_report()
+
+    def end_device_session(self) -> None:
+        if self.device_report is not None:
+            self.clear_device_report()
+            self._device_report_empty = "command_device_session_ended"
+            self._show_device_report()
+
+    def set_device_report(
+        self,
+        report: CommandDeviceReport,
+        store_path: Path,
+        *,
+        completed_file: bool = False,
+    ) -> bool:
+        item = self.models.currentItem()
+        if (
+            self.mode.currentData() != "ollama"
+            or item is None
+            or item.data(Qt.ItemDataRole.UserRole) != report.model
+            or self.device.currentData() != report.requested.value
+            or Path(self.store_path.text().strip()) != store_path
+        ):
+            return False
+        self.device_report = report
+        self._completed_file = completed_file
+        self._show_device_report()
+        return True
+
+    def _show_device_report(self) -> None:
+        t = self._translations.text
+        report = self.device_report
+        if report is None:
+            text = t(self._device_report_empty)
+        elif report.state is InferenceState.RUNNING:
+            text = t("command_device_running")
+        else:
+            text = t("command_device_last").format(
+                model="\u2068" + report.model + "\u2069",
+                state=t("command_inference_" + report.state.value),
+                placement=t(
+                    "command_placement_"
+                    + (
+                        "not_loaded"
+                        if report.observation.presence is ModelPresence.NOT_LOADED
+                        else report.observation.placement.value
+                    )
+                ),
+                presence=t("command_presence_" + report.residency.value),
+                cleanup=t("command_cleanup_" + report.cleanup.value),
+            )
+        if report is not None and self._completed_file:
+            text = t("command_device_file_ended") + "\n" + text
+        self.observed_device.setText(text)
+
     def translate(self) -> None:
         t = self._translations.text
         self.title.setText(t("command_models_heading"))
@@ -102,6 +178,7 @@ class CommandModelPage(QWidget):
         self.device_label.setText(t("command_models_device"))
         self.browse.setText(t("browse"))
         self.refresh_button.setText(t("command_models_refresh"))
+        self._show_device_report()
         for index, key in enumerate(("auto", "cpu", "gpu")):
             self.device.setItemText(index, t(key))
 

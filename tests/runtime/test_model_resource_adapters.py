@@ -1,6 +1,7 @@
 """Real adapter boundaries with fake STT, TTS and playback."""
 
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,56 @@ from kyrin.stt.device import ComputeDevice, DevicePreference, SpeechToTextOption
 from kyrin.stt.resources import ManagedSttEngine
 from kyrin.tts import runtime
 from kyrin.tts.models import TtsSelection
+
+
+def test_stop_cancels_stt_admission_without_waiting_for_native_owner() -> None:
+    from kyrin.stt.backends.whisper import WhisperSession
+    from kyrin.stt.capabilities import SpeechToTextCapabilities
+    from kyrin.stt.errors import SpeechToTextError
+
+    called = Event()
+    finished = Event()
+    errors: list[Exception] = []
+    resources = ModelResources(memory=lambda: MemorySnapshot())
+
+    class Engine:
+        capabilities = SpeechToTextCapabilities(
+            frozenset({ComputeDevice.CPU}), frozenset({"en"}), True, False
+        )
+
+        def open_session(self, options: SpeechToTextOptions) -> WhisperSession:
+            called.set()
+            return WhisperSession(lambda *_: "", "en", lambda: None)
+
+        def close(self) -> None:
+            pass
+
+    engine = ManagedSttEngine(Engine, resources, "synthetic-stt")
+
+    def open_waiting_session() -> None:
+        try:
+            engine.open_session(SpeechToTextOptions()).close()
+        except SpeechToTextError as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    runner = Thread(target=open_waiting_session)
+    try:
+        with resources.use(Workload.COMMAND, "synthetic-command"):
+            runner.start()
+            assert resources.wait_for_waiters(1, timeout=2)
+            engine.cancel_pending_inference()
+            assert finished.wait(1), (
+                "STT admission ignored stop while model owns resources"
+            )
+            assert resources._active  # Cancellation cannot steal native ownership.
+            assert not called.is_set()
+            assert len(errors) == 1
+    finally:
+        runner.join(3)
+        engine.close()
+    assert not runner.is_alive()
 
 
 def test_stt_keeps_selected_engine_across_turns_and_cancel_bypasses_admission() -> None:

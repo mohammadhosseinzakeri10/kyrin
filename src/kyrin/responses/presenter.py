@@ -1,6 +1,6 @@
 """Turn command and action events into text without invoking a UI or TTS."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from kyrin.actions.models import ActionFeedback, ActionNotice, ActionOutcome
 from kyrin.commands.models import (
@@ -128,6 +128,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "choose_operation_only_open": (
             "برنامهٔ {target} را باز کنم؟ «بله» یا «خیر» بگویید."
         ),
+        "new_tab_single_window": "برای تب تازه باید فقط یک پنجرهٔ {target} باز باشد.",
         "choose_window": (
             "فقط پنجره‌های {target} نمایش داده شده‌اند. "
             "شمارهٔ پنجرهٔ موردنظر را بگویید یا روی آن کلیک کنید."
@@ -173,6 +174,18 @@ _TEXT: dict[str, dict[str, str]] = {
             "تلگرام فعال نیست؛ لطفاً آن را جلو بیاورید و دوباره بگویید."
         ),
         "telegram_focus_changed": "پنجرهٔ فعال تغییر کرد؛ فرمان چت متوقف شد.",
+        "telegram_accessibility_unavailable": (
+            "کنترل دسترس‌پذیر تلگرام با اطمینان شناسایی نشد؛ فرمان متوقف شد."
+        ),
+        "telegram_menu_action_unavailable": (
+            "منوی اصلی تلگرام اکنون هیچ action دسترس‌پذیری ارائه نمی‌کند؛ "
+            "فرمان متوقف شد. اگر گزینهٔ «Disable screen reader mode» در "
+            "تنظیمات تلگرام روشن است، خاموش‌کردن آن و راه‌اندازی دوبارهٔ "
+            "تلگرام ممکن است کمک کند."
+        ),
+        "telegram_target_changed": (
+            "پنجره یا کنترل تلگرام تغییر کرد؛ فرمان متوقف شد."
+        ),
         "chat_target_changed": (
             "جای ردیف چت یا اندازهٔ پنجره تغییر کرد؛ دوباره تلاش کنید."
         ),
@@ -200,6 +213,22 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "visible_control_state_unavailable": (
             "وضعیت این گزینه از رابط دسترس‌پذیری خوانده نشد؛ تغییری ندادم."
+        ),
+        "terminal_menu_automation_blocked": (
+            "بازکردن خودکار منوی ترمینال موقتاً متوقف است. "
+            "منو را دستی باز کنید و سپس دوباره تب تازه بخواهید."
+        ),
+        "terminal_tab_keyboard_setup_required": (
+            "دسترسی صفحه‌کلید برای ساخت تب آماده نیست. انتخاب مربوط را در "
+            "Desktop Actions ذخیره کنید و برای افزودن دسترسی صفحه‌کلید، "
+            "دکمهٔ آماده‌سازی دسترسی کلیک دسکتاپ را یک بار بزنید."
+        ),
+        "terminal_tab_shortcut_unsupported": (
+            "میان‌بر تب تازهٔ ترمینال خاموش، دارای تعارض یا متفاوت از "
+            "Ctrl+Shift+T است؛ این مسیر آن را پشتیبانی نمی‌کند."
+        ),
+        "terminal_tab_close_menu": (
+            "منوی ترمینال را ببندید و سپس دوباره تب تازه بخواهید."
         ),
         "visible_control_sensitive": (
             "این پیامد به ابزار و مجوز اختصاصی نیاز دارد؛ "
@@ -333,6 +362,9 @@ _TEXT: dict[str, dict[str, str]] = {
             "bring it forward, no to cancel, or choose an option number."
         ),
         "choose_operation_only_open": "Open {target}? Say yes or no.",
+        "new_tab_single_window": (
+            "To create a new tab, keep exactly one {target} window open."
+        ),
         "choose_window": (
             "Only {target} windows are shown. Say a window number or click its preview."
         ),
@@ -376,6 +408,17 @@ _TEXT: dict[str, dict[str, str]] = {
         "telegram_focus_changed": (
             "The active window changed, so I stopped the chat command."
         ),
+        "telegram_accessibility_unavailable": (
+            "I couldn't verify Telegram's accessible control, so I stopped the command."
+        ),
+        "telegram_menu_action_unavailable": (
+            "Telegram's main menu isn't offering an accessible action, so I "
+            "stopped the command. If Telegram's “Disable screen reader mode” "
+            "option is on, turning it off and restarting Telegram may help."
+        ),
+        "telegram_target_changed": (
+            "The Telegram window or control changed, so I stopped the command."
+        ),
         "chat_target_changed": (
             "The chat row or window changed before the click. Please try again."
         ),
@@ -405,6 +448,22 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
         "visible_control_state_unavailable": (
             "The control did not expose its state, so I left it unchanged."
+        ),
+        "terminal_menu_automation_blocked": (
+            "Automatic Terminal menu opening is temporarily blocked. "
+            "Open its menu manually before requesting a new tab."
+        ),
+        "terminal_tab_keyboard_setup_required": (
+            "Terminal tab keyboard access is not ready. Save its selection in "
+            "Desktop Actions, then use Set up desktop click access once to add "
+            "keyboard access."
+        ),
+        "terminal_tab_shortcut_unsupported": (
+            "The Terminal new-tab shortcut is disabled, conflicting, or differs "
+            "from Ctrl+Shift+T. This route cannot use it."
+        ),
+        "terminal_tab_close_menu": (
+            "Close the Terminal menu before requesting a new tab."
         ),
         "visible_control_sensitive": (
             "This effect needs a dedicated tool and permission; "
@@ -547,11 +606,21 @@ class ResponsePresenter:
     def present(
         self, event: ResponseRequest | ActionNotice | ActionFeedback | SystemNotice
     ) -> PresentedResponse:
+        if (
+            isinstance(event, ActionFeedback)
+            and event.intent.kind is CommandKind.NEW_APP_TAB
+            and event.error_code is not None
+            and event.error_code.startswith(
+                ("terminal_tab_menu:", "terminal_tab_item:")
+            )
+        ):
+            # Keep the step in diagnostics; localize the original guard reason.
+            event = replace(event, error_code=event.error_code.partition(":")[2])
         language = _supported_language(event.language) or self.language
         messages = _TEXT[language]
         if isinstance(event, ResponseRequest):
             text = (
-                event.message
+                dict(event.message_translations).get(language, event.message)
                 if event.kind is ResponseKind.CONVERSATION
                 else self._command_text(event, messages, language)
             )
@@ -621,6 +690,9 @@ class ResponsePresenter:
                 "screen_access_required",
                 "telegram_not_active",
                 "telegram_focus_changed",
+                "telegram_accessibility_unavailable",
+                "telegram_menu_action_unavailable",
+                "telegram_target_changed",
                 "chat_target_changed",
                 "chat_unverified",
                 "telegram_menu_uncertain",
@@ -645,6 +717,10 @@ class ResponsePresenter:
                 "visible_control_target_changed",
                 "visible_control_setup_required",
                 "visible_control_state_unavailable",
+                "terminal_menu_automation_blocked",
+                "terminal_tab_keyboard_setup_required",
+                "terminal_tab_shortcut_unsupported",
+                "terminal_tab_close_menu",
                 "visible_control_sensitive",
                 "visible_control_risk_unknown",
                 "visible_control_capability_required",
@@ -700,6 +776,7 @@ class ResponsePresenter:
             if isinstance(event, ResponseRequest)
             and event.kind is ResponseKind.CONVERSATION
             and event.language is not None
+            and not event.message_translations
             else language
         )
         return PresentedResponse(
@@ -766,7 +843,18 @@ class ResponsePresenter:
                 template = messages["choose_operation_open"]
             else:
                 template = messages["choose_operation"]
-            return template.format(target=event.target, options=options)
+            result = template.format(target=event.target, options=options)
+            if (
+                CommandKind.SHOW_APP_WINDOWS in event.operation_candidates
+                and CommandKind.NEW_APP_WINDOW in event.operation_candidates
+                and CommandKind.NEW_APP_TAB not in event.operation_candidates
+            ):
+                result = (
+                    messages["new_tab_single_window"].format(target=event.target)
+                    + " "
+                    + result
+                )
+            return result
         if event.kind is ResponseKind.CONFIRM_ACTION:
             operation = event.operation_candidates[0]
             app_actions = {
@@ -800,6 +888,14 @@ class ResponsePresenter:
         if event.kind is ResponseKind.CONFIRM_NUMBERED_CLOSE:
             return messages["confirm_numbered_close"].format(number=event.window_index)
         if event.kind is ResponseKind.CHOOSE_WINDOW:
+            if event.operation_candidates == (CommandKind.NEW_APP_TAB,):
+                return (
+                    "تب تازه را در کدام پنجرهٔ Terminal بسازم؟ "
+                    "شمارهٔ پنجره را بگویید یا «لغو» کنید."
+                    if language == "fa"
+                    else "Which Terminal window should get the new tab? "
+                    "Say its number, or Cancel."
+                )
             if event.target == "open applications":
                 return messages["choose_open_window"]
             return messages["choose_window"].format(target=event.target)

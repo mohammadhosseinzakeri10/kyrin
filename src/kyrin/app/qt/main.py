@@ -57,6 +57,7 @@ from kyrin.responses.speech import (
     ResponseSpeaker,
     SpeechSynthesisError,
 )
+from kyrin.responses.visual_router import VisualPresentationRouter
 from kyrin.system_power.flow import (
     InertPowerBackend,
     PowerPrompt,
@@ -367,6 +368,11 @@ def main() -> int:
         ":"
     )
     visual_sink = GnomeVisualStatusSink() if gnome_session else None
+    visual_router = (
+        VisualPresentationRouter(visual_sink.publish)
+        if visual_sink is not None
+        else None
+    )
     observer_factory = _gnome_observer if gnome_session else None
     activator_factory = GnomeExistingAppActivator if gnome_session else None
     window_controller_factory = GnomeAppWindowController if gnome_session else None
@@ -391,7 +397,7 @@ def main() -> int:
         response_speaker=speaker,
         echo_cancellation_factory=PipeWireEchoCancellation,
         voice_standby=True,
-        visual_publish=visual_sink.publish if visual_sink is not None else None,
+        visual_publish=visual_router.publish if visual_router is not None else None,
     )
     controller = ApplicationController(factory, power_flow, start_in_standby=True)
     audio_import = AudioFileImport(controller, factory, app)
@@ -433,6 +439,13 @@ def main() -> int:
         startup_registration=registration,
         startup_error=startup_error,
         audio_import=audio_import,
+        visual_publish=visual_router.publish if visual_router is not None else None,
+        visual_notice_publish=visual_router.publish_notice
+        if visual_router is not None
+        else None,
+        power_visual_publish=visual_router.publish_power
+        if visual_router is not None
+        else None,
     )
     window.show()
     guard.audio_paste_requested.connect(window.paste_audio_file)

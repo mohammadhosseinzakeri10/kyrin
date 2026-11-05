@@ -6,6 +6,10 @@ from queue import Empty, Full, Queue
 from threading import Event, Thread
 from time import perf_counter_ns
 from types import TracebackType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kyrin.runtime.listening_diagnostics import ListeningDiagnostics
 
 from kyrin.audio.audio_data import AudioData
 from kyrin.audio.audio_errors import AudioCaptureStopError, AudioQueueOverflowError
@@ -26,6 +30,8 @@ class AudioCaptureQueue:
         max_chunks: int = 8,
         stop_timeout_s: float = 1.0,
         clock_ns: Callable[[], int] = perf_counter_ns,
+        diagnostics: ListeningDiagnostics | None = None,
+        diagnostic_generation: int = 0,
     ) -> None:
         if max_chunks <= 0:
             raise ValueError("max_chunks must be positive")
@@ -33,6 +39,8 @@ class AudioCaptureQueue:
             raise ValueError("stop_timeout_s must be positive")
 
         self._source = source
+        self._diagnostics = diagnostics
+        self._diagnostic_generation = diagnostic_generation
         self._clock_ns = clock_ns
         self._queue: Queue[AudioData] = Queue(maxsize=max_chunks)
         self._stop_requested = Event()
@@ -80,6 +88,14 @@ class AudioCaptureQueue:
                             ),
                         )
                     self._queue.put_nowait(chunk)
+                    if self._diagnostics is not None:
+                        self._diagnostics.pulse("capture_produced")
+                        self._diagnostics.queue(
+                            "capture_queue",
+                            self._queue.qsize(),
+                            self._queue.maxsize,
+                            "chunks",
+                        )
                 except Full:
                     self._error = AudioQueueOverflowError(
                         "Audio capture queue filled before processing caught up",
@@ -102,6 +118,14 @@ class AudioCaptureQueue:
                         if self._error is None:
                             self._error = exc
             self._done.set()
+            if self._diagnostics is not None:
+                self._diagnostics.state(
+                    "capture_worker",
+                    "failed" if self._error else "ended",
+                    reason="source_returned",
+                    source="audio",
+                    generation=self._diagnostic_generation,
+                )
 
     def chunks(self) -> Iterator[AudioData]:
         """Yield captured chunks in order, or propagate a capture failure."""
@@ -118,6 +142,10 @@ class AudioCaptureQueue:
                 continue
             if self._done.is_set() and self._error is not None:
                 raise self._error
+            if self._diagnostics is not None:
+                self._diagnostics.queue(
+                    "capture_queue", self._queue.qsize(), self._queue.maxsize, "chunks"
+                )
             yield chunk
 
     def stop(self) -> None:

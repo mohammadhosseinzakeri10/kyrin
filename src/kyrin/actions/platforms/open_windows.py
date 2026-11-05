@@ -18,10 +18,13 @@ class OpenWindowPickerExecutor:
         fallback: ActionExecutor,
         desktop_ids: Mapping[str, str],
         close_desktop_ids: Mapping[str, str] | None = None,
+        *,
+        legacy_picker_app: str | None = None,
     ) -> None:
         self._fallback = fallback
         self._desktop_ids = dict(desktop_ids)
         self._close_desktop_ids = dict(close_desktop_ids or {})
+        self._legacy_picker_app = legacy_picker_app
         self._picker_open = False
         self.backend_status = BackendStatus(False, "not_probed")
 
@@ -40,7 +43,11 @@ class OpenWindowPickerExecutor:
             CommandKind.SELECT_OPEN_APP_WINDOW,
             CommandKind.HIDE_APP_WINDOWS,
         }
-        global_picker = intent.kind in kinds and (
+        app_picker = (
+            intent.kind is CommandKind.SHOW_APP_WINDOWS
+            and intent.target != self._legacy_picker_app
+        )
+        global_picker = app_picker or intent.kind in kinds and (
             intent.target == "desktop"
             or intent.kind is CommandKind.SELECT_OPEN_APP_WINDOW
         )
@@ -50,7 +57,15 @@ class OpenWindowPickerExecutor:
                 self._picker_open = False
             return self._fallback.execute(request)
         args: tuple[str, ...]
-        if intent.kind is CommandKind.SELECT_OPEN_APP_WINDOW:
+        if app_picker:
+            desktop_id = self._desktop_ids.get(intent.target)
+            if desktop_id is None:
+                return ActionResult(
+                    request.key, ActionOutcome.FAILED, error_code="app_not_configured"
+                )
+            # Reuse the existing shared snapshot, restricted to this exact app.
+            method, args = "ShowOpenWindows", ("as", "1", desktop_id)
+        elif intent.kind is CommandKind.SELECT_OPEN_APP_WINDOW:
             desktop_id = self._desktop_ids.get(intent.target)
             if desktop_id is None:
                 return ActionResult(
@@ -78,7 +93,9 @@ class OpenWindowPickerExecutor:
                 if not self.backend_status.ready
                 else "window_unverified",
             )
-        self._picker_open = intent.kind is CommandKind.SHOW_ALL_WINDOWS
+        self._picker_open = intent.kind in (
+            CommandKind.SHOW_ALL_WINDOWS, CommandKind.SHOW_APP_WINDOWS
+        )
         return ActionResult(request.key, ActionOutcome.LAUNCH_ACCEPTED)
 
     def _call(self, method: str, *args: str) -> str | None:

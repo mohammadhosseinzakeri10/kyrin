@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml"><img src="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml/badge.svg?branch=main" alt="Python quality checks"></a>
-  <a href="LICENSE">MIT license</a> · Python 3.14+ · Ubuntu / GNOME · v0.1.0 alpha
+  <a href="LICENSE">MIT license</a> · Python 3.14+ · Ubuntu / GNOME · Alpha
 </p>
 <p align="center">
   <a href="#try-it">Try it</a> · <a href="docs/architecture/OVERVIEW.md">Architecture</a> ·
@@ -25,11 +25,10 @@ Its speech engines are replaceable, and its command interpreter proposes
 actions that a separate authorization layer can reject. The Qt control
 center configures audio, models, and desktop permissions.
 
-**v0.1.0 is an MIT-licensed portfolio alpha.** The
-[tagged release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
-includes source and Python build artifacts. Optional runtimes, speech models,
-and GNOME integration require separate setup. Later development is planned
-for a private repository. See the [release policy](docs/RELEASE_POLICY.md).
+**KYRIN is an open-source alpha.** This branch carries the current
+reviewed source. The original [v0.1.0 pre-release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+remains a separate milestone with its own artifacts.
+See the [release policy](docs/RELEASE_POLICY.md) and [roadmap](docs/ROADMAP.md).
 
 ## Try it
 
@@ -45,14 +44,15 @@ microphone capture or desktop action authority.
 The actual Qt control window rendered in an isolated preview with default
 settings. The image shows the interface before a model or microphone session.
 
-## Capabilities in v0.1.0
+## Capabilities in the current source
 
 | Area | What this snapshot implements | What to expect |
 | --- | --- | --- |
 | Speech input | Microphone capture, local-file input, voice activity detection, and Vosk, whisper.cpp, and Omnilingual adapters | Recognition needs a compatible local model and runtime. Start with the documented English examples. |
 | Command understanding | Deterministic phrases, optional loopback Ollama proposals, bounded recovery and numbered clarification | Coverage depends on the recognized text, supported action and target. |
 | Desktop control | App launch and activation, selected window operations, scrolling and named visible controls | Requires explicit permissions. Accessibility, GNOME extensions, portal consent and OCR requirements vary by operation. |
-| Telegram Desktop | Selected navigation, including Saved Messages and guarded chat selection | Coverage depends on the window and readable targets. The chat-opening flow does not send a message. |
+| Experimental window control | Same-app window selection, app-scoped normal close, and targeted Ptyxis tab operations | Requires a fresh GNOME target and the relevant grants. Live coverage varies by route. |
+| Telegram Desktop | Selected navigation, including Saved Messages and guarded chat selection | Coverage depends on the window and readable targets. Semantic routes require the documented accessibility setup. Navigation does not send messages. |
 | Feedback | Qt output, English/Persian interface, optional local speech output and GNOME status character | Speech output requires its own runtime and model. UI language and recognition language are separate settings. |
 
 See the [supported examples](docs/GETTING_STARTED.md#example-commands) and
@@ -87,8 +87,7 @@ and [security boundaries](SECURITY.md).
 
 [Contributing](CONTRIBUTING.md) describes the pinned development environment
 and how to run the same syntax, Ruff, strict mypy and pytest gate used in CI.
-[Validation](docs/VALIDATION.md) records the tagged commit's results separately
-from live desktop evidence. The [documentation index](docs/README.md)
+[Validation](docs/VALIDATION.md) separates current checks, the tagged release, and live evidence. The [documentation index](docs/README.md)
 distinguishes current guides from historical engineering notes.
 
 Use [issues](https://github.com/mohammadhosseinzakeri10/kyrin/issues) for

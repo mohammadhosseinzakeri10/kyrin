@@ -30,6 +30,7 @@ from kyrin.app.events import (
     ApplicationEvent,
     AudioCaptureReady,
     AudioDuplexChanged,
+    CommandDeviceReported,
     SttDeviceReady,
 )
 from kyrin.app.model_library import InstalledModel, ModelLibrary
@@ -73,6 +74,11 @@ from kyrin.commands.models import (
 from kyrin.memory.history import SqliteConversationHistory, default_history_path
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.responses.visual_status import (
+    VisualPresentation,
+    listening_lifecycle_presentation,
+    power_presentation,
+)
 from kyrin.runtime.latency import SpeechActionLatency
 from kyrin.runtime.speech_sessions import SpeechSessionEnded
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
@@ -166,6 +172,10 @@ class ControlWindow(QWidget):
         load_error: SettingsError | None = None,
         startup_error: DesktopRegistrationError | None = None,
         audio_import: AudioFileImport | None = None,
+        visual_publish: Callable[[VisualPresentation], None] | None = None,
+        visual_notice_publish: Callable[[VisualPresentation], None] | None = None,
+        power_visual_publish: Callable[[PowerPrompt], bool] | None = None,
+        visual_language: str = "en",
     ) -> None:
         super().__init__()
         self._settings = settings
@@ -174,13 +184,21 @@ class ControlWindow(QWidget):
             self._input_sessions.configure(PermissionPolicy(settings))
         self._store = store
         self._controller = controller
+        self._visual_publish = visual_publish
+        self._visual_notice_publish = visual_notice_publish
+        self._power_visual_publish = power_visual_publish
+        self._audio_import_caption_pending = False
+        self._visual_language = visual_language
+        self._last_visual_lifecycle: tuple[ApplicationState, str] | None = None
         self._microphones = microphones
         self._whisper_server_available = whisper_server_available
         self._whisper_gpu_server_available = whisper_gpu_server_available
         self._omnilingual_python = omnilingual_python
         self._active_stt_device: ComputeDevice | None = None
+        self._command_device_session_id = ""
         self._audio_ready = False
         self._last_listening_diagnostics_refresh = 0.0
+        self._audio_ready_identity = ("", -1)
         self._echo_cancelled = False
         self._pending_settings: AppSettings | None = None
         self._pending_commands_active: bool | None = None
@@ -1008,10 +1026,14 @@ class ControlWindow(QWidget):
     ) -> None:
         # A single app owner handles setup and commands. No setup-time input
         # is emitted; actual input remains under DesktopInputBroker.
-        if any(job is not None for job in (
-            self._pointer_grant_process, self._scroll_grant_process,
-            self._control_grant_process,
-        )):
+        if any(
+            job is not None
+            for job in (
+                self._pointer_grant_process,
+                self._scroll_grant_process,
+                self._control_grant_process,
+            )
+        ):
             return
         self._input_startup_restore_pending = False
         job = InputSetupJob(self._input_sessions, capability, self, restore=restore)
@@ -1028,16 +1050,24 @@ class ControlWindow(QWidget):
         if getattr(self, attribute) is not job:
             return
         setattr(self, attribute, None)
-        if self._quitting or not self._input_grant_selected(job.capability):
+        if not self._input_grant_selected(job.capability):
             self._input_sessions.disconnect(forget=True)
+        elif self._quitting:
+            # Exit releases live input, not saved consent. A queued completion
+            # must preserve the rotated token for the next application start.
+            # Contract: docs/actions/SHARED_INPUT_SESSION_FA.md.
+            self._input_sessions.disconnect()
         else:
             self.actions_page.set_input_session_status(self._input_sessions.status())
         job.deleteLater()
 
     def _disconnect_input_session(self) -> None:
         self._input_startup_restore_pending = False
-        for job in (self._pointer_grant_process, self._scroll_grant_process,
-                    self._control_grant_process):
+        for job in (
+            self._pointer_grant_process,
+            self._scroll_grant_process,
+            self._control_grant_process,
+        ):
             if job is not None:
                 job.kill()
         self._input_sessions.disconnect()
@@ -1066,9 +1096,11 @@ class ControlWindow(QWidget):
             or not self._input_grant_selected(capability)
             or self.actions_page.has_unsaved_changes(self._settings)
         ):
-            label = (self.actions_page.desktop_scroll_grant_status
-                     if capability == "desktop_scroll"
-                     else self.actions_page.desktop_control_grant_status)
+            label = (
+                self.actions_page.desktop_scroll_grant_status
+                if capability == "desktop_scroll"
+                else self.actions_page.desktop_control_grant_status
+            )
             label.setText(self._translations.text(capability + "_save_first"))
             return
         self._start_input_setup(capability, attribute)
@@ -1159,6 +1191,11 @@ class ControlWindow(QWidget):
             or self._settings.history_retention != candidate.history_retention
         ):
             self._clear_memory_views()
+        restore_input = (
+            self._settings is not None
+            and not self._settings.action_execution_enabled
+            and candidate.action_execution_enabled
+        )
         self._input_sessions.configure(PermissionPolicy(candidate))
         self._settings = candidate
         for process, capability in (
@@ -1168,6 +1205,11 @@ class ControlWindow(QWidget):
         ):
             if process is not None and not self._input_grant_selected(capability):
                 process.kill()
+        if restore_input:
+            # Enabling saved actions deserves the same one-shot restore as
+            # startup. Ordinary settings saves and status polls never retry it.
+            self._input_startup_restore_pending = True
+            self._restore_input_session()
         self.actions_page.set_input_session_status(self._input_sessions.status())
         if self._screen_reader is not None and self._ocr_default_root is not None:
             self._screen_reader.set_engine(
@@ -1194,6 +1236,10 @@ class ControlWindow(QWidget):
     def _start_current(self, *, commands_active: bool | None = None) -> None:
         assert self._settings is not None
         self._active_stt_device = None
+        self.command_model_page.clear_device_report()
+        self._command_device_session_id = ""
+        if self._audio_import is not None:
+            self._audio_import.invalidate_device_result()
         self._audio_ready = False
         self._update_active_device_label()
         try:
@@ -1266,6 +1312,39 @@ class ControlWindow(QWidget):
     def _refresh(self) -> None:
         self._controller.expire_system_action()
         status = self._controller.status()
+        # Runtime events own captions while running. Only app lifecycle
+        # transitions publish here, including startup with the microphone off.
+        # Polling must never reset an active reply, question or action result.
+        if self._visual_publish is not None and not (
+            self._audio_import_caption_pending
+            or (self._audio_import is not None and self._audio_import.busy)
+        ):
+            identity = (status.state, self._visual_language)
+            if identity != self._last_visual_lifecycle:
+                self._last_visual_lifecycle = identity
+                phase = {
+                    ApplicationState.STOPPED: "off",
+                    ApplicationState.PAUSED: "off",
+                    ApplicationState.SETUP_REQUIRED: "setup",
+                    ApplicationState.STARTING: "starting",
+                    ApplicationState.STOPPING: "stopping",
+                    ApplicationState.ERROR: "failed",
+                }.get(status.state)
+                if phase is not None:
+                    self._visual_publish(
+                        listening_lifecycle_presentation(
+                            phase,
+                            language=identity[1],
+                        )
+                    )
+        if (
+            self._command_device_session_id
+            and not self._command_device_session_is_current(
+                self._command_device_session_id
+            )
+        ):
+            self.command_model_page.end_device_session()
+            self._command_device_session_id = ""
         now = monotonic()
         if now - self._last_listening_diagnostics_refresh >= 1:
             self._last_listening_diagnostics_refresh = now
@@ -1336,11 +1415,74 @@ class ControlWindow(QWidget):
             )
             self.apply_button.setEnabled(not self._quitting)
 
+    def _command_device_session_is_current(self, session_id: str) -> bool:
+        return bool(session_id) and (
+            (
+                self._controller.status().state is ApplicationState.RUNNING
+                and self._controller.event_belongs_to_session(session_id)
+            )
+            or (
+                self._audio_import is not None
+                and self._audio_import.event_belongs_to_session(session_id)
+            )
+        )
+
+    def _present_command_device(
+        self, event: CommandDeviceReported, *, completed_file: bool = False
+    ) -> None:
+        selection = self._settings.command_model if self._settings else None
+        if selection is None or (
+            selection.model,
+            selection.device,
+            selection.store_path,
+        ) != (event.report.model, event.report.requested, event.store_path):
+            return
+        if completed_file:
+            # A queued file completion must not replace a newer live observation.
+            if (
+                self._command_device_session_id
+                and self._command_device_session_id != event.session_id
+                and self._command_device_session_is_current(
+                    self._command_device_session_id
+                )
+            ):
+                return
+        elif not self._command_device_session_is_current(event.session_id):
+            return
+        if self.command_model_page.set_device_report(
+            event.report, event.store_path, completed_file=completed_file
+        ):
+            self._command_device_session_id = "" if completed_file else event.session_id
+            report = event.report
+            self.diagnostics_output.appendPlainText(
+                f"command_model={report.model} requested={report.requested.value} "
+                f"state={report.state.value} "
+                f"placement={report.observation.placement.value} "
+                f"observed_presence={report.observation.presence.value} "
+                f"residency={report.residency.value} "
+                f"cleanup={report.cleanup.value} "
+                f"reason={report.reason} evidence={report.observation.reason}"
+            )
+
     def _on_event(self, event: ApplicationEvent) -> None:
         t = self._translations.text
+        if isinstance(event, CommandDeviceReported):
+            self._present_command_device(event)
+            return
         if isinstance(event, (AudioCaptureReady, SpeechSessionEnded)):
             if event.session_id and not self._controller.event_belongs_to_session(
                 event.session_id
+            ):
+                return
+            if isinstance(event, AudioCaptureReady) and event.session_id:
+                if not self._controller.event_belongs_to_session(
+                    event.session_id, generation=event.generation
+                ):
+                    return
+            if (
+                isinstance(event, SpeechSessionEnded)
+                and event.session_id == self._audio_ready_identity[0]
+                and event.generation < self._audio_ready_identity[1]
             ):
                 return
         if isinstance(event, VoiceModeChanged):
@@ -1366,6 +1508,7 @@ class ControlWindow(QWidget):
             return
         if isinstance(event, AudioCaptureReady):
             self._audio_ready = True
+            self._audio_ready_identity = (event.session_id, event.generation)
             self._refresh()
             return
         if isinstance(event, SpeechSessionEnded):
@@ -1395,6 +1538,11 @@ class ControlWindow(QWidget):
                         f"p50={summary.p50_ms:.0f} ms, p95={summary.p95_ms:.0f} ms"
                     )
         if isinstance(event, PowerPrompt):
+            if self._power_visual_publish is not None:
+                if not self._power_visual_publish(event):
+                    return
+            elif self._visual_publish is not None:
+                self._visual_publish(power_presentation(event))
             self._power_prompt = (
                 event
                 if event.stage
@@ -1412,6 +1560,7 @@ class ControlWindow(QWidget):
         elif isinstance(event, PresentedResponse):
             self.feedback_label.setText(event.text)
         elif isinstance(event, SpeechSynthesisError):
+            self._publish_visual_notice("playback_failed")
             self.feedback_label.setText(str(event))
             self.power_dialog.show_voice_error()
         elif (
@@ -1458,6 +1607,13 @@ class ControlWindow(QWidget):
     def _show_audio_import_message(self, message: str) -> None:
         self.feedback_label.setText(message)
 
+    def _publish_visual_notice(self, phase: str) -> None:
+        publish = self._visual_notice_publish or self._visual_publish
+        if publish is not None:
+            publish(
+                listening_lifecycle_presentation(phase, language=self._visual_language)
+            )
+
     def _browse_audio_file(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self, "Choose audio file", "", "Audio files (*.wav *.mp3 *.m4a *.ogg)"
@@ -1471,16 +1627,61 @@ class ControlWindow(QWidget):
     def import_audio_file(self, path: Path) -> None:
         if self._audio_import is None or self._settings is None:
             self._show_audio_import_message("Audio-file input is unavailable")
+            self._publish_visual_notice("file_unavailable")
             return
         if self._has_unsaved_changes():
             self._show_audio_import_message(
                 "Save current settings before importing audio"
             )
+            self._publish_visual_notice("file_save")
             return
+        self._audio_import_caption_pending = True
         if self._audio_import.submit(path, self._settings):
             self._show_audio_import_message(f"Processing audio: {path.name}")
+        else:
+            self._audio_import_caption_pending = self._audio_import.busy
 
     def _audio_import_finished(self, result: AudioImportResult) -> None:
+        # Validation failures have no job ID. A completion from an older file
+        # must not overwrite a new import or a resumed live conversation.
+        current = not result.job_id or (
+            self._audio_import is not None
+            and self._audio_import.result_is_current(result, allow_cancelled=True)
+        )
+        if not current:
+            return
+        if current and not (self._audio_import is not None and self._audio_import.busy):
+            self._audio_import_caption_pending = False
+            # The runtime already published the file outcome. A delayed GUI
+            # poll must not replace it with the idle microphone caption.
+            self._last_visual_lifecycle = (
+                self._controller.status().state,
+                self._visual_language,
+            )
+        if (
+            self._visual_publish is not None
+            and current
+            and not (self._audio_import is not None and self._audio_import.busy)
+        ):
+            if result.error is not None:
+                phase = "file_stopped" if result.cancelled else "file_failed"
+                if not result.job_id or (
+                    self._audio_ready
+                    and self._controller.status().state is ApplicationState.RUNNING
+                ):
+                    self._publish_visual_notice(phase)
+                else:
+                    self._visual_publish(
+                        listening_lifecycle_presentation(
+                            phase, language=self._visual_language
+                        )
+                    )
+        if result.command_device is not None:
+            if self._audio_import is None or not self._audio_import.result_is_current(
+                result
+            ):
+                return
+            self._present_command_device(result.command_device, completed_file=True)
         self._show_audio_import_message(
             result.error
             or "Audio file processed; command result is shown in Diagnostics"

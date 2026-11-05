@@ -62,6 +62,10 @@ RECOVERY_CONTRACTS = (
     RecoveryContract(
         CommandKind.CLOSE_APP_WINDOW, "operation/app", "exact permitted app"
     ),
+    RecoveryContract(
+        CommandKind.CLOSE_ALL_APP_WINDOWS,
+        "exact operation/all/app", "rules-only, native snapshot confirmation",
+    ),
     RecoveryContract(CommandKind.MAXIMIZE_APP, "operation/app", "exact permitted app"),
     RecoveryContract(
         CommandKind.UNMAXIMIZE_APP, "operation/app", "exact permitted app"
@@ -126,7 +130,10 @@ _NOT_REQUEST = re.compile(
 _PAYLOAD_ROLE = re.compile(r"\b(?:for|chat)\b")
 _SEQUENCE = re.compile(r"\s+(?:and then|then|and)\s+")
 _NON_ACTION_PREFIX = re.compile(
-    r"^(?:please\s+)?(?:do not|don't|dont|never|no|type|write|say|quote)\b"
+    r"^(?:(?:please|kindly|gently|could you|can you|would you)\s+)*"
+    r"(?:(?:do not|don't|dont|never|no|type|write|say|quote|send|delete|pay|"
+    r"the words|the phrase|the text|it says|this says|i said|"
+    r"search the web for)\b|[\"“«])"
 )
 
 

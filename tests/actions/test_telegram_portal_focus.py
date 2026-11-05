@@ -85,6 +85,7 @@ def test_keyboard_action_borrows_live_session_without_start_or_close(
     expected = ("org.telegram.desktop", 42)
     monkeypatch.setattr(helper.sys, "argv", ["helper", expected[0], "42"])
     monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: "window-1")
     monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _identity: True)
     keys = []
     monkeypatch.setattr(helper, "_key", lambda *_args: keys.append(_args))
@@ -93,12 +94,73 @@ def test_keyboard_action_borrows_live_session_without_start_or_close(
     )
 
     class Borrowed:
+        def check(self, *, input_event: bool = False) -> None:
+            pass
+
         def close(self) -> None:
             pass
 
     monkeypatch.setattr(helper, "shared_session", lambda devices: (Borrowed(), "/live"))
     assert helper.main() == 0
     assert keys
+
+
+@pytest.mark.parametrize(
+    ("change", "returncode", "marker"),
+    [
+        ("missing_control", 4, "CONTROL_UNAVAILABLE"),
+        ("focus", 2, "FOCUS_CHANGED"),
+        ("token", 2, "TARGET_CHANGED"),
+    ],
+)
+def test_missing_search_control_is_not_reported_as_focus_change(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    change: str,
+    returncode: int,
+    marker: str,
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    state = {"failed": False, "closed": False}
+    monkeypatch.setattr(
+        helper.sys, "argv", ["helper", *map(str, expected), "focus-search"]
+    )
+    monkeypatch.setattr(
+        helper, "_focused_identity",
+        lambda: (
+            ("other.desktop", 7)
+            if state["failed"] and change == "focus" else expected
+        ),
+    )
+    monkeypatch.setattr(
+        helper, "_focused_window_token",
+        lambda: "new" if state["failed"] and change == "token" else "original",
+    )
+    monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _expected: True)
+
+    class Borrowed:
+        def check(self, *, input_event: bool = False) -> None:
+            pass
+
+        def close(self) -> None:
+            state["closed"] = True
+
+    monkeypatch.setattr(
+        helper, "shared_session", lambda _devices: (Borrowed(), "/live")
+    )
+
+    def unavailable(*_args: object, **_kwargs: object) -> NoReturn:
+        state["failed"] = True
+        raise helper.ControlUnavailable("private diagnostic must not escape")
+
+    monkeypatch.setattr(helper, "_focus_search", unavailable)
+    monkeypatch.setattr(helper, "_key", lambda *_a: pytest.fail("no injected keys"))
+    assert helper.main() == returncode
+    output = capsys.readouterr().out
+    assert output.splitlines()[-1] == marker
+    assert "private" not in output
+    assert state["closed"]
 
 
 def test_pointer_click_requires_matching_window_geometry_and_position(
@@ -558,6 +620,7 @@ def test_revoked_live_session_does_not_dispatch_keyboard_input(
         helper, "_focused_identity", lambda: ("org.telegram.desktop", 42)
     )
     monkeypatch.setattr(helper, "shared_session", lambda _: None)
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: "window-1")
     monkeypatch.setattr(helper, "_key", lambda *_args: pytest.fail("no revoked input"))
     assert helper.main() == 3
 
@@ -665,3 +728,122 @@ def test_focus_change_during_search_never_sends_remaining_characters(
     with pytest.raises(ValueError):
         helper._type_search_target(object(), "/session", "Ali", expected)
     assert sent == []
+
+
+@pytest.mark.parametrize(
+    ("focused_token", "returncode", "marker"),
+    [("window-2", 2, "TARGET_CHANGED"), ("window-1", 0, "SEARCH_FOCUSED")],
+)
+def test_keyboard_helper_requires_the_operation_window(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    focused_token: str,
+    returncode: int,
+    marker: str,
+) -> None:
+    """A same-PID replacement window is rejected before any input session."""
+    expected = ("org.telegram.desktop", 42)
+    monkeypatch.setattr(
+        helper.sys,
+        "argv",
+        ["helper", *map(str, expected), "focus-search", "window=window-1"],
+    )
+    monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: focused_token)
+    monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _expected: True)
+    sessions: list[str] = []
+    focused: list[str | None] = []
+
+    class Borrowed:
+        def check(self, *, input_event: bool = False) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def session(_devices: int) -> tuple[Borrowed, str]:
+        sessions.append("acquired")
+        return Borrowed(), "/live"
+
+    def focus_search(
+        *_args: object, window_token: str | None = None, **_kwargs: object
+    ) -> None:
+        focused.append(window_token)
+
+    monkeypatch.setattr(helper, "shared_session", session)
+    monkeypatch.setattr(helper, "_focus_search", focus_search)
+    assert helper.main() == returncode
+    assert capsys.readouterr().out.splitlines()[-1] == marker
+    if returncode:
+        assert sessions == [] and focused == []
+    else:
+        assert focused == ["window-1"]
+
+
+@pytest.mark.parametrize(
+    ("capture_token", "focused_token", "sessions_expected"),
+    [("window-7", "window-8", 0), ("window-8", "window-7", 1)],
+)
+def test_click_helper_requires_capture_from_the_operation_window(
+    helper: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    capture_token: str,
+    focused_token: str,
+    sessions_expected: int,
+) -> None:
+    expected = ("org.telegram.desktop", 42)
+    geometry = CaptureGeometry(
+        "logical_desktop",
+        0,
+        (0, 0, 800, 600),
+        (800, 600),
+        1,
+        1,
+        (0, 0, 0, 0),
+        (0, 0),
+        (1, 1),
+        capture_token,
+        "capture-1",
+        100.0,
+    )
+    monkeypatch.setattr(
+        helper.sys,
+        "argv",
+        [
+            "helper",
+            *map(str, expected),
+            "click",
+            "70",
+            "90",
+            "40",
+            "20",
+            "800",
+            "600",
+            "geometry=" + geometry.to_json(),
+            "window=window-7",
+        ],
+    )
+    monkeypatch.setattr(helper, "_focused_identity", lambda: expected)
+    monkeypatch.setattr(helper, "_focused_window_token", lambda: focused_token)
+    monkeypatch.setattr(helper, "_wait_for_expected_focus", lambda _expected: True)
+    monkeypatch.setattr(
+        helper,
+        "_click_verified_box",
+        lambda *_args, **_kwargs: pytest.fail("no pointer input"),
+    )
+    sessions: list[str] = []
+
+    class Borrowed:
+        def close(self) -> None:
+            pass
+
+    def session(_devices: int) -> tuple[Borrowed, str]:
+        sessions.append("acquired")
+        return Borrowed(), "/live"
+
+    monkeypatch.setattr(helper, "shared_session", session)
+    assert helper.main() == 2
+    assert capsys.readouterr().out.splitlines()[-1] == "TARGET_CHANGED"
+    assert len(sessions) == sessions_expected

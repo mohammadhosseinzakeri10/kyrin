@@ -8,6 +8,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
+from typing import cast
 
 import pytest
 
@@ -33,10 +34,13 @@ from kyrin.actions.models import (
     ActionRequest,
     ActionResult,
 )
+from kyrin.actions.platforms.input_session import InputSessionService
 from kyrin.app.controller import ApplicationController, ApplicationState, RuntimeSession
 from kyrin.app.events import AudioCaptureReady, SttDeviceReady
 from kyrin.app.model_library import ModelLibrary
 from kyrin.app.permission_token import permission_token_path, save_opaque_token
+from kyrin.app.platforms.ubuntu import UbuntuSessionFactory
+from kyrin.app.qt.audio_file_import import AudioFileImport, AudioImportResult
 from kyrin.app.qt.model_library_page import ModelLibraryPage
 from kyrin.app.qt.screen_access_page import ScreenAccessPage
 from kyrin.app.qt.translations import ENGLISH, UiPreferences, UiTranslations
@@ -63,8 +67,10 @@ from kyrin.desktop.platforms.xdg import XdgDesktopAppCatalog
 from kyrin.memory.history import ConversationTurn, SqliteConversationHistory
 from kyrin.responses.presenter import PresentedResponse
 from kyrin.responses.speech import SpeechSynthesisError
+from kyrin.responses.visual_router import VisualPresentationRouter
+from kyrin.responses.visual_status import VisualPresentation, VisualStatus
 from kyrin.runtime.command_runtime import LiveCommandRuntime
-from kyrin.runtime.speech_sessions import SpeechRuntimeEvent
+from kyrin.runtime.speech_sessions import SpeechRuntimeEvent, SpeechSessionEnded
 from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
 from kyrin.stt.backends.omnilingual import CHECKPOINT_BYTES, TOKENIZER_NAME
 from kyrin.stt.device import ComputeDevice, DevicePreference
@@ -113,6 +119,17 @@ class FakeSession:
         self.stopped.set()
 
 
+@pytest.fixture(autouse=True)
+def input_service(
+    isolated_profile: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[InputSessionService]:
+    """Never carry grants or worker ownership between independent UI tests."""
+    service = InputSessionService()
+    monkeypatch.setattr("kyrin.app.qt.window.INPUT_SESSIONS", service)
+    yield service
+    service.disconnect()
+
+
 @pytest.fixture
 def application(monkeypatch: pytest.MonkeyPatch) -> Iterator[QApplication]:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
@@ -158,6 +175,9 @@ def _window(
     controller: ApplicationController,
     registration: FakeRegistration | None = None,
     catalog: XdgDesktopAppCatalog | None = None,
+    visual_publish: Callable[[VisualPresentation], None] | None = None,
+    visual_notice_publish: Callable[[VisualPresentation], None] | None = None,
+    power_visual_publish: Callable[[PowerPrompt], bool] | None = None,
 ) -> ControlWindow:
     return ControlWindow(
         settings,
@@ -169,7 +189,317 @@ def _window(
         ui_translations=UiTranslations(store.path.parent),
         app_catalog=catalog,
         startup_registration=registration,
+        visual_publish=visual_publish,
+        visual_notice_publish=visual_notice_publish,
+        power_visual_publish=power_visual_publish,
     )
+
+
+def test_window_revocation_stays_inside_test_profile(
+    application: QApplication,
+    tmp_path: Path,
+    isolated_profile: Path,
+    input_service: InputSessionService,
+) -> None:
+    """Exercise real policy revocation without selecting another data directory."""
+    path = permission_token_path("desktop-input")
+    assert path.is_relative_to(isolated_profile)
+    assert input_service._policy is None
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    granted = _window(
+        AppSettings(listening_enabled=False, trust_all_capabilities=True),
+        store,
+        _controller([]),
+    )
+    try:
+        save_opaque_token(path, "disposable-test-consent")
+        revoked = _window(AppSettings(listening_enabled=False), store, _controller([]))
+        try:
+            assert not path.exists()
+        finally:
+            revoked.close()
+    finally:
+        granted.close()
+
+
+def test_mascot_app_lifecycle_does_not_overwrite_running_feedback(
+    application: QApplication,
+    tmp_path: Path,
+) -> None:
+    session = FakeSession()
+    controller = ApplicationController(lambda _: nullcontext(session))
+    settings = AppSettings(stt=SttSelection("vosk", tmp_path / "model", "en"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    visuals: list[VisualPresentation] = []
+    window = _window(settings, store, controller, visual_publish=visuals.append)
+    try:
+        assert "Microphone off" in visuals[-1].caption
+        count = len(visuals)
+        window._refresh()
+        assert len(visuals) == count
+        controller.start(settings)
+        assert session.running.wait(2)
+        window._refresh()
+        visuals.append(VisualPresentation(VisualStatus.CONVERSATION, "Model reply"))
+        count = len(visuals)
+        window._refresh()
+        window._refresh()
+        assert len(visuals) == count
+        assert visuals[-1].caption == "Model reply"
+        controller.request_stop()
+        assert controller.wait_until_stopped(2)
+        window._refresh()
+        assert "Microphone off" in visuals[-1].caption
+        controller.start(AppSettings())
+        window._refresh()
+        assert "speech model" in visuals[-1].caption
+    finally:
+        controller.request_stop()
+        assert controller.wait_until_stopped(2)
+        window.close()
+
+
+def test_visual_feedback_stays_english_with_persian_ui_and_specific_errors(
+    application: QApplication, tmp_path: Path
+) -> None:
+    UiTranslations(tmp_path).save(UiPreferences("fa"))
+    visuals: list[VisualPresentation] = []
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        visual_publish=visuals.append,
+    )
+    try:
+        assert window._translations.preferences.locale == "fa"
+        assert "Microphone off" in visuals[-1].caption
+        window._on_event(SpeechSynthesisError("private_backend_error"))
+        assert (
+            visuals[-1].caption
+            == "Voice output failed; the text response is still available."
+        )
+        window.import_audio_file(tmp_path / "missing.wav")
+        assert "Audio-file input is unavailable" in visuals[-1].caption
+        window._audio_ready = True
+        window._audio_import_finished(AudioImportResult("invalid file"))
+        assert "Audio file processing failed" in visuals[-1].caption
+        expected = visuals[-1]
+        window._refresh()
+        assert visuals[-1] == expected
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_queued_file_completion_survives_gui_lifecycle_polling(
+    application: QApplication, tmp_path: Path, cancelled: bool
+) -> None:
+    controller = _controller([])
+    visuals: list[VisualPresentation] = []
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        controller,
+        visual_publish=visuals.append,
+    )
+    # Model the interval after a worker completed but before its Qt result arrived.
+    # No file, microphone, model or executor is opened by this fixture.
+    importer = AudioFileImport(controller, cast(UbuntuSessionFactory, object()))
+    importer._job_id = "current-job"
+    if cancelled:
+        importer.cancel()
+    window._audio_import = importer
+    window._audio_import_caption_pending = True
+    window._last_visual_lifecycle = (ApplicationState.RUNNING, "en")
+    try:
+        result = VisualPresentation(
+            VisualStatus.UNVERIFIED, "File action result unknown."
+        )
+        visuals.append(result)
+        window._refresh()
+        assert visuals[-1] == result
+        window._audio_import_finished(AudioImportResult(job_id="old-job"))
+        assert window._audio_import_caption_pending
+        window._audio_import_finished(
+            AudioImportResult(
+                "cancelled" if cancelled else None,
+                job_id="current-job",
+                cancelled=cancelled,
+            )
+        )
+        assert not window._audio_import_caption_pending
+        expected = visuals[-1]
+        if cancelled:
+            assert expected.caption == "Audio file processing stopped."
+        else:
+            assert expected == result
+        window._refresh()
+        assert visuals[-1] == expected
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        importer.deleteLater()
+        application.processEvents()
+
+
+def test_stale_power_event_cannot_replace_the_current_caption_or_dialog(
+    application: QApplication, tmp_path: Path
+) -> None:
+    visuals: list[VisualPresentation] = []
+    router = VisualPresentationRouter(visuals.append)
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        visual_publish=router.publish,
+        power_visual_publish=router.publish_power,
+    )
+    try:
+        prompt = PowerPrompt(
+            2, PowerAction.RESTART, PowerStage.SECOND, "Confirm restart"
+        )
+        window._on_event(prompt)
+        window._on_event(
+            PowerPrompt(1, PowerAction.POWER_OFF, PowerStage.FIRST, "Old request")
+        )
+        assert window._power_prompt == prompt
+        assert visuals[-1].caption == "Confirm restart"
+        window._on_event(SpeechSynthesisError("private_backend_error"))
+        assert visuals[-1].caption == "Confirm restart"
+    finally:
+        window.power_dialog.dismiss()
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_auxiliary_errors_preserve_the_actual_primary_caption(
+    application: QApplication, tmp_path: Path
+) -> None:
+    visuals: list[VisualPresentation] = []
+    router = VisualPresentationRouter(visuals.append)
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        _controller([]),
+        visual_publish=router.publish,
+        visual_notice_publish=router.publish_notice,
+    )
+    try:
+        progress = VisualPresentation(VisualStatus.EXECUTING, "Minimizing telegram…")
+        router.publish(progress)
+        window._on_event(SpeechSynthesisError("private backend error"))
+        assert visuals[-1].status is VisualStatus.EXECUTING
+        assert visuals[-1].caption.startswith(progress.caption)
+        assert "Voice output failed" in visuals[-1].caption
+        window.import_audio_file(tmp_path / "unavailable.wav")
+        assert visuals[-1].caption.startswith(progress.caption)
+        assert "Audio-file input is unavailable" in visuals[-1].caption
+    finally:
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+def test_second_file_rejection_preserves_pending_completion_and_never_blocks(
+    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _controller([])
+    visuals: list[VisualPresentation] = []
+    window = _window(
+        AppSettings(),
+        JsonSettingsStore(tmp_path / "settings.json"),
+        controller,
+        visual_publish=visuals.append,
+    )
+    importer = AudioFileImport(controller, cast(UbuntuSessionFactory, object()))
+    importer._busy = True
+    importer._job_id = "current-job"
+    importer.finished.connect(window._audio_import_finished)
+    window._audio_import = importer
+    window._settings = AppSettings(stt=SttSelection("fake", tmp_path, "en"))
+    window._audio_import_caption_pending = True
+    monkeypatch.setattr(window, "_has_unsaved_changes", lambda: False)
+    monkeypatch.setattr(
+        "kyrin.app.qt.audio_file_import.validate_audio_file", lambda _: None
+    )
+    try:
+        expected = VisualPresentation(VisualStatus.PROCESSING, "Processing audio file…")
+        visuals.append(expected)
+        window.import_audio_file(tmp_path / "second.wav")
+        assert window._audio_import_caption_pending
+        assert "already being processed" in window.feedback_label.text()
+        assert visuals[-1] == expected
+        importer._busy = False  # First job finished; its Qt completion is queued.
+        window._last_visual_lifecycle = (ApplicationState.RUNNING, "en")
+        window._refresh()
+        assert visuals[-1] == expected
+        window.feedback_label.setText("Current reply")
+        window._audio_import_finished(
+            AudioImportResult("stale error", job_id="old-job")
+        )
+        assert window.feedback_label.text() == "Current reply"
+    finally:
+        importer._busy = False
+        window._timer.stop()
+        window.deleteLater()
+        importer.deleteLater()
+        application.processEvents()
+
+
+@pytest.mark.parametrize("locale", ["en", "fa"])
+@pytest.mark.parametrize(
+    "identifier", ["close_all_without_confirmation", "terminal_tab_keyboard"]
+)
+def test_optional_capability_ui_saves_reopens_and_revokes(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    locale: str,
+    identifier: str,
+) -> None:
+    from kyrin.app.permissions import PermissionPolicy
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    UiTranslations(tmp_path).save(UiPreferences(locale))
+    settings = AppSettings(listening_enabled=False)
+    window = _window(settings, store, _controller([]))
+    try:
+        page = window.actions_page
+        checkbox = page.capability_checkboxes[identifier]
+        assert not checkbox.isChecked()
+        expected = (
+            ("بدون تأیید" if locale == "fa" else "without asking")
+            if identifier == "close_all_without_confirmation" else "Ctrl+Shift+T"
+        )
+        assert expected in checkbox.text()
+        if identifier == "terminal_tab_keyboard":
+            page.set_input_session_status({"state": "ready", "devices": 2})
+            assert page.terminal_tab_keyboard_grant_status.text() == (
+                window._translations.text("input_session_unprepared")
+            )
+            page.set_input_session_status({"state": "ready", "devices": 3})
+            assert window._translations.text("input_session_ready") in (
+                page.terminal_tab_keyboard_grant_status.text()
+            )
+        checkbox.setChecked(True)
+        assert page.has_unsaved_changes(settings)
+        window._save_and_start(window._candidate_settings())
+        assert identifier in store.load().capability_grants
+    finally:
+        window.close()
+    reopened = _window(store.load(), store, _controller([]))
+    try:
+        assert reopened.actions_page.capability_checkboxes[identifier].isChecked()
+        reopened.actions_page.revoke_permissions_button.click()
+        reopened._save_and_start(reopened._candidate_settings())
+        assert identifier not in store.load().capability_grants
+        assert not PermissionPolicy(store.load()).allows(identifier)
+    finally:
+        reopened.close()
 
 
 def test_trust_is_visible_persistent_and_revocable_in_settings(
@@ -251,6 +581,138 @@ def test_late_portal_grant_completion_does_not_restore_revoked_permission(
     assert calls == [{"forget": True}]
     assert getattr(window, attribute) is None
     window.close()
+
+
+@pytest.mark.parametrize(
+    "capability,attribute",
+    [
+        ("telegram_chat", "_pointer_grant_process"),
+        ("desktop_scroll", "_scroll_grant_process"),
+        ("desktop_control", "_control_grant_process"),
+    ],
+)
+@pytest.mark.parametrize("revoked", [False, True])
+def test_quit_with_queued_input_setup_result_preserves_only_unrevoked_access(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capability: str,
+    attribute: str,
+    revoked: bool,
+) -> None:
+    from dataclasses import replace
+    from typing import Any
+
+    from kyrin.actions.platforms.input_session import InputSessionService
+    from kyrin.app.permission_token import read_opaque_token
+    from kyrin.app.qt.input_access import InputSetupJob
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    path = permission_token_path("desktop-input")
+
+    class SavedService(InputSessionService):
+        def prepare(self, capability: str, *, restore: bool = False) -> dict[str, Any]:
+            save_opaque_token(path, "replacement-grant")
+            self._state = "ready"
+            return self.status()
+
+        def status(self) -> dict[str, Any]:
+            return {"state": self._state, "devices": 3}
+
+    service = SavedService()
+    monkeypatch.setattr("kyrin.app.qt.window.INPUT_SESSIONS", service)
+    settings = AppSettings(
+        listening_enabled=False,
+        action_execution_enabled=True,
+        trust_all_capabilities=True,
+    )
+    window = _window(
+        settings, JsonSettingsStore(tmp_path / "settings.json"), _controller([])
+    )
+    try:
+        window._input_startup_restore_pending = False
+        window._start_input_setup(capability, attribute)
+        job = getattr(window, attribute)
+        assert isinstance(job, InputSetupJob)
+        # Finish in the worker, but leave its Qt completion signal queued.
+        job._worker.join(2)
+        assert not job._worker.is_alive()
+        assert read_opaque_token(path) == "replacement-grant"
+        if revoked:
+            window._save_and_start(replace(settings, trust_all_capabilities=False))
+        window._quit()
+        application.processEvents()
+        assert getattr(window, attribute) is None
+        assert service._process is None
+        restarted = InputSessionService()
+        assert service._policy is not None
+        restarted.configure(service._policy)
+        if revoked:
+            assert not path.exists()
+            assert restarted.startup_capability() is None
+        else:
+            assert read_opaque_token(path) == "replacement-grant"
+            assert restarted.startup_capability() == "telegram_chat"
+    finally:
+        window._timer.stop()
+        window._input_status_timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+@pytest.mark.parametrize("case", ["ready", "missing_token", "restore_denied"])
+def test_enabling_actions_restores_saved_input_without_another_setup_click(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    from dataclasses import replace
+    from typing import Any
+
+    from kyrin.actions.platforms.input_session import InputSessionService
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    if case != "missing_token":
+        save_opaque_token(permission_token_path("desktop-input"), "existing-grant")
+    calls: list[tuple[str, bool]] = []
+
+    class SavedService(InputSessionService):
+        def prepare(self, capability: str, *, restore: bool = False) -> dict[str, Any]:
+            calls.append((capability, restore))
+            self._state = (
+                "interaction_required" if case == "restore_denied" else "ready"
+            )
+            return self.status()
+
+        def status(self) -> dict[str, Any]:
+            return {"state": self._state, "devices": 2}
+
+    service = SavedService()
+    monkeypatch.setattr("kyrin.app.qt.window.INPUT_SESSIONS", service)
+    settings = AppSettings(listening_enabled=False, allow_desktop_scroll=True)
+    window = _window(
+        settings, JsonSettingsStore(tmp_path / "settings.json"), _controller([])
+    )
+    try:
+        application.processEvents()
+        assert calls == []  # Disabled execution cannot request input access.
+        window._save_and_start(replace(settings, action_execution_enabled=True))
+        _pump_until(application, lambda: window._scroll_grant_process is None)
+        expected = [] if case == "missing_token" else [("desktop_scroll", True)]
+        assert calls == expected
+        label = window.actions_page.desktop_scroll_grant_status.text()
+        assert ("connected" in label) == (case == "ready")
+        assert window._settings is not None
+        window._save_and_start(replace(window._settings, tts_enabled=False))
+        application.processEvents()
+        assert calls == expected  # Unrelated saves never retry, even after denial.
+    finally:
+        service.disconnect()
+        window._timer.stop()
+        window._input_status_timer.stop()
+        window.deleteLater()
+        application.processEvents()
 
 
 def test_preferences_can_clear_local_text_history(
@@ -1074,6 +1536,57 @@ def test_listening_switch_enters_standby_and_full_off_stops_session(
         application.processEvents()
 
 
+def test_command_diagnostics_retains_acceptance_batch_when_entering_standby(
+    application: QApplication, tmp_path: Path
+) -> None:
+    model = tmp_path / "vosk-model"
+    model.mkdir()
+    settings = AppSettings(
+        listening_enabled=False, stt=SttSelection("vosk", model, "en")
+    )
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    sessions: list[FakeSession] = []
+    controller = _controller(sessions)
+    window = _window(settings, store, controller)
+    try:
+        window.start_initial_session()
+        window.listening_button.click()
+        _pump_until(
+            application, lambda: bool(sessions) and sessions[0].running.is_set()
+        )
+        window._on_event(AudioCaptureReady())
+        # A full app run must retain older turns beyond the former 1000-line cap.
+        for index in range(600):
+            window._on_event(
+                TranscriptUpdate(
+                    index, f"acceptance-{index:02}", TranscriptStatus.FINAL
+                )
+            )
+            window._on_event(CommandResolution(index, None))
+        window.listening_button.click()
+        assert not controller.commands_active()
+        assert not sessions[0].stopped.is_set()
+        history = window.diagnostics_output.toPlainText()
+        assert "acceptance-00" in history
+        assert "acceptance-599" in history
+        assert history.count("acceptance-") == 600
+        window.listening_button.click()
+        assert controller.commands_active()
+        window.microphone_off_button.click()
+        _pump_until(application, lambda: controller.wait_until_stopped(0))
+        assert window.diagnostics_output.toPlainText() == history
+        # Only an explicit clear removes the transient history before Quit.
+        window.clear_diagnostics_button.click()
+        assert window.diagnostics_output.toPlainText() == ""
+    finally:
+        controller.request_stop()
+        controller.wait_until_stopped(2)
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
 def test_voice_modes_start_in_standby_and_full_off_persists(
     application: QApplication, tmp_path: Path
 ) -> None:
@@ -1163,7 +1676,7 @@ def test_voice_modes_start_in_standby_and_full_off_persists(
         )
         window.recognition_page.copy_listening_diagnostics_button.click()
         report = QApplication.clipboard().text()
-        assert "L01-v2" in report
+        assert "L01-v3" in report
         assert "PRIVATE_SENTENCE" not in report
         assert "ui capture_ready=" in report
     finally:
@@ -1661,8 +2174,12 @@ def test_telegram_control_access_is_requested_from_settings(
         finished = Signal(object)
 
         def __init__(
-            self, service: object, capability: str, parent: QObject,
-            *, restore: bool = False,
+            self,
+            service: object,
+            capability: str,
+            parent: QObject,
+            *,
+            restore: bool = False,
         ) -> None:
             super().__init__(parent)
             self.capability = capability
@@ -1694,7 +2211,9 @@ def test_telegram_control_access_is_requested_from_settings(
     "case", ["restore", "disconnect", "missing_settings", "quit", "restore_denied"]
 )
 def test_saved_input_restores_once_on_each_window_start_without_setup_clicks(
-    application: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     case: str,
 ) -> None:
     from typing import Any
@@ -1704,10 +2223,13 @@ def test_saved_input_restores_once_on_each_window_start_without_setup_clicks(
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     save_opaque_token(permission_token_path("desktop-input"), "existing-grant")
     store = JsonSettingsStore(tmp_path / "settings.json")
-    store.save(AppSettings(
-        listening_enabled=False, action_execution_enabled=True,
-        trust_all_capabilities=True,
-    ))
+    store.save(
+        AppSettings(
+            listening_enabled=False,
+            action_execution_enabled=True,
+            trust_all_capabilities=True,
+        )
+    )
     calls: list[tuple[str, bool]] = []
 
     class SavedService(InputSessionService):
@@ -1741,6 +2263,7 @@ def test_saved_input_restores_once_on_each_window_start_without_setup_clicks(
             if case in {"disconnect", "missing_settings", "quit"}:
                 assert len(calls) == previous_calls
             else:
+
                 def finished(current: ControlWindow = window) -> bool:
                     return current._pointer_grant_process is None
 
@@ -2069,3 +2592,329 @@ def test_manual_voice_stop_is_independent_of_microphone_and_actions(
         assert window.duplex_label.text() == ENGLISH["audio_aec"]
     finally:
         window.deleteLater()
+
+
+@pytest.mark.parametrize("locale", ["en", "fa"])
+def test_command_device_event_is_scoped_thread_safe_and_independent_of_stt(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    locale: str,
+) -> None:
+    from typing import cast
+
+    from kyrin.app.events import CommandDeviceReported
+    from kyrin.app.platforms.ubuntu import UbuntuSessionFactory
+    from kyrin.app.qt.audio_file_import import AudioFileImport, AudioImportResult
+    from kyrin.app.settings import CommandModelSelection
+    from kyrin.commands.ollama_device import (
+        CleanupState,
+        CommandDeviceReport,
+        DeviceObservation,
+        InferenceState,
+        ModelPlacement,
+        ModelPresence,
+    )
+
+    monkeypatch.setattr(
+        "kyrin.app.qt.command_model_page.installed_ollama_models",
+        lambda path: ("test:latest", "other:latest"),
+    )
+    selection = CommandModelSelection(
+        "ollama", "test:latest", tmp_path, DevicePreference.AUTO
+    )
+    settings = AppSettings(
+        stt=SttSelection("vosk", tmp_path, "en"), command_model=selection
+    )
+    sessions: list[FakeSession] = []
+
+    class ScopedSession(FakeSession):
+        def voice_mode_state(self) -> VoiceModeChanged:
+            return VoiceModeChanged(VoiceMode.ACTIVE, session_id=str(id(self)))
+
+    @contextmanager
+    def factory(_settings: AppSettings) -> Iterator[ScopedSession]:
+        session = ScopedSession()
+        sessions.append(session)
+        yield session
+
+    controller = ApplicationController(factory)
+    bridge = EventBridge()
+    translations = UiTranslations(tmp_path / "ui")
+    translations.save(UiPreferences(locale))
+    window = ControlWindow(
+        settings,
+        JsonSettingsStore(tmp_path / "settings.json"),
+        controller,
+        FakeMicrophones(),
+        bridge,
+        whisper_server_available=False,
+        ui_translations=translations,
+    )
+    page = window.command_model_page
+    report = CommandDeviceReport(
+        selection.model,
+        selection.device,
+        InferenceState.COMPLETED,
+        DeviceObservation(
+            ModelPlacement.MIXED, ModelPresence.LOADED, "ollama_ps_memory"
+        ),
+        ModelPresence.UNKNOWN,
+        "completed",
+        CleanupState.ACKNOWLEDGED,
+    )
+    try:
+        assert page.observed_device.text() == translations.text(
+            "command_device_not_run"
+        )
+        controller.start(settings)
+        _pump_until(
+            application, lambda: controller.status().state is ApplicationState.RUNNING
+        )
+        session_id = str(id(sessions[-1]))
+        window._on_event(SttDeviceReady(ComputeDevice.CPU))
+        stt_label = window.active_device_label.text()
+        event = CommandDeviceReported(report, session_id, tmp_path)
+        worker = Thread(target=lambda: bridge.publish(event))
+        worker.start()
+        worker.join(1)
+        _pump_until(application, lambda: page.device_report == report)
+        assert (
+            translations.text("command_placement_mixed") in page.observed_device.text()
+        )
+        assert (
+            translations.text("command_cleanup_acknowledged")
+            in page.observed_device.text()
+        )
+        assert window.active_device_label.text() == stt_label
+        assert page.device.currentData() == "auto"
+        assert "reason=completed" in window.diagnostics_output.toPlainText()
+
+        page.clear_device_report()
+        for invalid in (
+            CommandDeviceReported(report, "", tmp_path),
+            CommandDeviceReported(report, "old-session", tmp_path),
+            CommandDeviceReported(report, session_id, tmp_path / "other-store"),
+        ):
+            window._on_event(invalid)
+            assert page.device_report is None
+
+        # Editing a model/device/store clears its label and rejects old events.
+        changes: tuple[tuple[Callable[[], None], Callable[[], None]], ...] = (
+            (
+                lambda: page.models.setCurrentRow(1),
+                lambda: page.models.setCurrentRow(0),
+            ),
+            (
+                lambda: page.device.setCurrentIndex(1),
+                lambda: page.device.setCurrentIndex(0),
+            ),
+            (
+                lambda: page.store_path.setText(str(tmp_path / "other")),
+                lambda: page.store_path.setText(str(tmp_path)),
+            ),
+            (
+                lambda: page.mode.setCurrentIndex(0),
+                lambda: page.mode.setCurrentIndex(1),
+            ),
+        )
+        for change, restore in changes:
+            window._on_event(event)
+            assert page.device_report == report
+            change()
+            assert page.device_report is None
+            window._on_event(event)
+            assert page.device_report is None
+            restore()
+
+        window._on_event(event)
+        controller.request_stop()
+        window._refresh()
+        assert page.device_report is None
+        window._on_event(event)
+        assert page.device_report is None
+        assert controller.wait_until_stopped(2)
+        # A file owns a separate session while the microphone is stopped.
+        importer = AudioFileImport(controller, cast(UbuntuSessionFactory, object()))
+        file_session = ScopedSession()
+        importer._session = file_session
+        importer._busy = True
+        window._audio_import = importer
+        file_event = CommandDeviceReported(report, str(id(file_session)), tmp_path)
+        window._on_event(file_event)
+        assert page.device_report == report
+        window._refresh()
+        assert page.device_report == report
+        importer.cancel()
+        window._refresh()
+        assert page.device_report is None
+        window._on_event(file_event)
+        assert page.device_report is None
+        importer._busy = False
+        importer._session = None
+        importer._cancelled.clear()
+        importer._job_id = "file-job"
+        result = AudioImportResult(command_device=file_event, job_id="file-job")
+        window._audio_import_finished(result)
+        assert page.device_report == report
+        assert (
+            translations.text("command_device_file_ended")
+            in page.observed_device.text()
+        )
+        window._refresh()
+        assert page.device_report == report
+        page.clear_device_report()
+        importer._job_id = "new-file-job"
+        window._audio_import_finished(result)
+        assert page.device_report is None
+        importer._job_id = "file-job"
+        controller.start(settings)
+        _pump_until(
+            application, lambda: controller.status().state is ApplicationState.RUNNING
+        )
+        window._on_event(event)
+        window._on_event(file_event)
+        assert page.device_report is None
+        fresh = CommandDeviceReported(report, str(id(sessions[-1])), tmp_path)
+        window._on_event(fresh)
+        assert page.device_report == report
+        window._audio_import_finished(result)
+        assert (
+            translations.text("command_device_file_ended")
+            not in page.observed_device.text()
+        )
+        importer.cancel()
+        page.clear_device_report()
+        window._audio_import_finished(result)
+        assert page.device_report is None
+        window._audio_import = None
+        importer.deleteLater()
+    finally:
+        controller.request_stop()
+        controller.wait_until_stopped(2)
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()
+
+
+@pytest.mark.parametrize("cleanup", ["not_requested", "acknowledged", "unconfirmed"])
+@pytest.mark.parametrize("locale", ["en", "fa"])
+def test_command_device_page_translates_all_placements_and_lifecycle(
+    application: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    locale: str,
+    cleanup: str,
+) -> None:
+    from kyrin.app.qt.command_model_page import CommandModelPage
+    from kyrin.app.settings import CommandModelSelection
+    from kyrin.commands.ollama_device import (
+        CleanupState,
+        CommandDeviceReport,
+        DeviceObservation,
+        InferenceState,
+        ModelPlacement,
+        ModelPresence,
+    )
+
+    monkeypatch.setattr(
+        "kyrin.app.qt.command_model_page.installed_ollama_models",
+        lambda path: ("test:latest",),
+    )
+    translations = UiTranslations(tmp_path / "ui")
+    translations.save(UiPreferences(locale))
+    page = CommandModelPage(
+        translations,
+        current=CommandModelSelection(
+            "ollama", "test:latest", tmp_path, DevicePreference.GPU
+        ),
+    )
+    assert page.device_label.text() == translations.text("command_models_device")
+    for state in (InferenceState.COMPLETED, InferenceState.FAILED):
+        for placement in ModelPlacement:
+            report = CommandDeviceReport(
+                "test:latest",
+                DevicePreference.GPU,
+                state,
+                DeviceObservation(placement, ModelPresence.LOADED),
+                ModelPresence.UNKNOWN,
+                cleanup=CleanupState(cleanup),
+            )
+            assert page.set_device_report(report, tmp_path)
+            assert (
+                translations.text("command_placement_" + placement.value)
+                in page.observed_device.text()
+            )
+            assert (
+                translations.text("command_cleanup_" + cleanup)
+                in page.observed_device.text()
+            )
+            assert (
+                translations.text("command_inference_" + state.value)
+                in page.observed_device.text()
+            )
+    absent = CommandDeviceReport(
+        "test:latest",
+        DevicePreference.GPU,
+        InferenceState.COMPLETED,
+        DeviceObservation(presence=ModelPresence.NOT_LOADED),
+        ModelPresence.NOT_LOADED,
+    )
+    page.set_device_report(absent, tmp_path)
+    assert (
+        translations.text("command_placement_not_loaded") in page.observed_device.text()
+    )
+    page.end_device_session()
+    assert page.observed_device.text() == translations.text(
+        "command_device_session_ended"
+    )
+    page.deleteLater()
+
+
+def test_old_capture_readiness_cannot_mark_a_retry_ready(
+    application: QApplication,
+    tmp_path: Path,
+) -> None:
+    class Session(FakeSession):
+        speech_generation = 0
+
+        def voice_mode_state(self) -> VoiceModeChanged:
+            return VoiceModeChanged(VoiceMode.ACTIVE, session_id="retry-fixture")
+
+    session = Session()
+
+    @contextmanager
+    def factory(_settings: AppSettings) -> Iterator[RuntimeSession]:
+        yield session
+
+    settings = AppSettings(stt=SttSelection("vosk", tmp_path / "model", "en"))
+    store = JsonSettingsStore(tmp_path / "settings.json")
+    store.save(settings)
+    controller = ApplicationController(factory)
+    window = _window(settings, store, controller)
+    try:
+        window.start_initial_session()
+        assert session.running.wait(2)
+        old = AudioCaptureReady("retry-fixture")
+        window._on_event(old)
+        assert window._audio_ready
+        session.speech_generation = 1
+        window._audio_ready = False
+        window._on_event(old)
+        assert not window._audio_ready, "previous stream's Ready survived recovery"
+        window._on_event(AudioCaptureReady("retry-fixture", generation=1))
+        assert window._audio_ready
+        window._on_event(
+            SpeechSessionEnded(0, None, session_id="retry-fixture", generation=0)
+        )
+        assert window._audio_ready  # Old end cannot clear the new stream's readiness.
+        window._on_event(
+            SpeechSessionEnded(1, None, session_id="retry-fixture", generation=1)
+        )
+        assert not window._audio_ready
+    finally:
+        controller.request_stop()
+        assert controller.wait_until_stopped(2)
+        window._timer.stop()
+        window.deleteLater()
+        application.processEvents()

@@ -44,6 +44,37 @@ ENGLISH: dict[str, str] = {
     "tts_preview": "Test current voice settings",
     "tts_preview_started": "Playing a short sample with the current settings…",
     "tts_preview_unavailable": "Voice preview is unavailable.",
+    "command_cleanup_not_requested": "not requested",
+    "command_cleanup_acknowledged": "unload request acknowledged",
+    "command_cleanup_unconfirmed": "unload request unconfirmed",
+    "command_device_file_ended": "Last audio-file session (ended)",
+    "command_device_not_run": (
+        "Observed command model: not run for this selection/session."
+    ),
+    "command_device_session_ended": (
+        "Command model session ended; no current observation."
+    ),
+    "command_device_running": (
+        "Command model request in progress; device not yet observed."
+    ),
+    "command_device_last": (
+        "Last command inference — {model}: {state}. Observed "
+        "memory placement: {placement}. Cleanup: {cleanup}. "
+        "Current residency: {presence}."
+    ),
+    "command_inference_completed": "completed",
+    "command_inference_failed": "failed",
+    "command_placement_cpu": "CPU",
+    "command_placement_gpu": "GPU",
+    "command_placement_mixed": "mixed CPU/GPU",
+    "command_placement_gpu_participation": (
+        "GPU participation confirmed; full GPU placement unknown"
+    ),
+    "command_placement_unknown": "unknown",
+    "command_placement_not_loaded": "model not loaded at observation",
+    "command_presence_not_loaded": "not loaded",
+    "command_presence_unknown": "residency unknown",
+    "command_presence_loaded": "loaded",
     "command_models_heading": "Command understanding",
     "command_models_caption": (
         "Choose a local language model for commands the fast rules cannot resolve. "
@@ -53,7 +84,7 @@ ENGLISH: dict[str, str] = {
     "command_models_rules": "Fast rules only (default)",
     "command_models_engine": "Engine",
     "command_models_store": "Local model store",
-    "command_models_device": "Run model on",
+    "command_models_device": "Requested command device",
     "command_models_refresh": "Refresh installed models",
     "command_models_store_title": "Select an Ollama model store",
     "command_models_found": "{count} complete local models found.",

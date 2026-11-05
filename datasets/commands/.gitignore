@@ -1,1 +1,7 @@
 /results/
+
+# Owner-linked replay inputs and historical local model results.
+l04_audio_cases.jsonl
+verified_speech_links.jsonl
+l04_followup_summary.json
+l04_recovery_summary.json

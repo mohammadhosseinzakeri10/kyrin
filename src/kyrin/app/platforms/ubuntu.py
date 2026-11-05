@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from copy import copy
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from kyrin.actions.activate_or_launch import ActivateOrLaunchExecutor
 from kyrin.actions.authorized import PermissionExecutor
-from kyrin.actions.control_policy import ControlConfirmer
+from kyrin.actions.control_policy import ControlConfirmation, ControlConfirmer
 from kyrin.actions.desktop_input import DesktopInputBroker, DesktopInputExecutor
 from kyrin.actions.executor import ActionExecutor
 from kyrin.actions.gate import ActionGate, ActionPolicy
@@ -28,6 +29,7 @@ from kyrin.actions.platforms.desktop_scroll import DesktopScrollExecutor
 from kyrin.actions.platforms.linux import LinuxDesktopEntryExecutor
 from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
 from kyrin.actions.platforms.ptyxis import PtyxisActionExecutor
+from kyrin.actions.platforms.ptyxis_tabs import PtyxisTabExecutor
 from kyrin.actions.platforms.telegram import (
     ChatVerifier,
     TelegramSavedMessagesExecutor,
@@ -40,6 +42,7 @@ from kyrin.app.events import (
     ApplicationEvent,
     AudioCaptureReady,
     AudioDuplexChanged,
+    CommandDeviceReported,
     SttDeviceReady,
 )
 from kyrin.app.permissions import PermissionPolicy
@@ -69,6 +72,7 @@ from kyrin.commands.models import (
     ResponseChannel,
     ResponseRequest,
 )
+from kyrin.commands.ollama_device import CommandDeviceReport
 from kyrin.commands.ollama_engine import OllamaCommandEngine
 from kyrin.commands.ollama_models import installed_ollama_models
 from kyrin.commands.ollama_server import LocalOllamaServer
@@ -99,6 +103,7 @@ from kyrin.responses.system_notices import notice_for_backlog, notice_for_error
 from kyrin.responses.visual_status import VisualPresentation, VisualStatusController
 from kyrin.runtime.command_runtime import LiveCommandRuntime
 from kyrin.runtime.speech_sessions import SpeechSessionController, SpeechSessionEnded
+from kyrin.runtime.voice_control import VoiceMode, VoiceModeChanged
 from kyrin.stt.audio_recovery import AudioRecoveryPolicy
 from kyrin.stt.backends.vosk import VoskEngine
 from kyrin.stt.backends.whisper import WhisperEngine
@@ -112,6 +117,7 @@ from kyrin.system_power.flow import (
     SystemPowerFlow,
 )
 from kyrin.system_power.gnome import GnomePowerBackend
+from kyrin.timing import TimingEvent
 
 EngineOpener = Callable[[SttSelection], SpeechToTextEngine]
 SourceFactory = Callable[[MicrophoneConfiguration], AudioInput]
@@ -256,6 +262,7 @@ class UbuntuSessionFactory:
         command_server_factory: CommandServerFactory = _command_server,
         echo_cancellation_factory: Callable[[], PipeWireEchoCancellation] | None = None,
         voice_standby: bool = False,
+        visual_language: str = "en",
         model_resources: ModelResources | None = None,
     ) -> None:
         self._stt_openers = dict(stt_openers)
@@ -280,21 +287,67 @@ class UbuntuSessionFactory:
         self._command_server_factory = command_server_factory
         self._echo_cancellation_factory = echo_cancellation_factory
         self._voice_standby = voice_standby
+        self._visual_language = visual_language
         self._model_resources = model_resources or MODEL_RESOURCES
         self._audio_file: Path | None = None
         # Shared by shallow audio-file clones too. A timed-out old owner must
         # finish before any subsequent session gets a new input broker.
         self._input_brokers: list[DesktopInputBroker] = []
 
-    def for_audio_file(self, path: Path) -> UbuntuSessionFactory:
+    def for_audio_file(
+        self,
+        path: Path,
+        *,
+        on_command_device: Callable[[CommandDeviceReported], None] | None = None,
+    ) -> UbuntuSessionFactory:
         """Use the same composition and permissions with a file source."""
         clone = copy(self)
         clone._audio_file = path
         clone._voice_standby = False
+        if on_command_device is not None:
+
+            def forward(event: ApplicationEvent) -> None:
+                if isinstance(event, CommandDeviceReported):
+                    on_command_device(event)
+                self._on_event(event)
+
+            clone._on_event = forward
         return clone
 
     @contextmanager
     def __call__(self, settings: AppSettings) -> Iterator[RuntimeSession]:
+        visual = (
+            VisualStatusController(
+                self._visual_publish,
+                language=self._visual_language,
+                capture_ready=self._audio_file is not None,
+                voice_mode=VoiceMode.STANDBY
+                if self._voice_standby
+                else VoiceMode.ACTIVE,
+                file_input=self._audio_file is not None,
+            )
+            if self._visual_publish is not None
+            else None
+        )
+        completed = False
+        try:
+            with self._open_session(settings, visual) as runtime:
+                yield runtime
+            completed = True
+        finally:
+            if visual is not None:
+                failure = sys.exception()
+                visual.on_closed(
+                    failed=not completed,
+                    error=failure if isinstance(failure, Exception) else None,
+                )
+
+    @contextmanager
+    def _open_session(
+        self,
+        settings: AppSettings,
+        visual: VisualStatusController | None,
+    ) -> Iterator[RuntimeSession]:
         selection = settings.stt
         if selection is None:
             raise ValueError("select an STT model before starting listening")
@@ -370,6 +423,8 @@ class UbuntuSessionFactory:
             allowed_close_apps=frozenset(settings.allowed_close_apps),
             window_presence=window_presence,
             terminal_app_id=terminal_app_id,
+            targeted_terminal_tabs=settings.allow_desktop_control
+            and self._focused_window is not None,
         )
         chat_enabled = (
             settings.action_execution_enabled
@@ -401,6 +456,7 @@ class UbuntuSessionFactory:
         if window_presence is not None and settings.allowed_window_apps:
             supported_kinds.update(
                 {
+                    CommandKind.SHOW_APP_WINDOWS,
                     CommandKind.SHOW_ALL_WINDOWS,
                     CommandKind.SELECT_APP_WINDOW,
                     CommandKind.CLOSE_SHOWN_WINDOW,
@@ -428,6 +484,7 @@ class UbuntuSessionFactory:
                     CommandKind.RESTORE_APP,
                     CommandKind.MINIMIZE_APP,
                     CommandKind.CLOSE_APP_WINDOW,
+                    CommandKind.CLOSE_ALL_APP_WINDOWS,
                     CommandKind.MAXIMIZE_APP,
                     CommandKind.UNMAXIMIZE_APP,
                     CommandKind.FULLSCREEN_APP,
@@ -512,6 +569,16 @@ class UbuntuSessionFactory:
                     ),
                     rules,
                 )
+
+                def report_command_device(report: CommandDeviceReport) -> None:
+                    self._on_event(
+                        CommandDeviceReported(
+                            report,
+                            runtime.listening_diagnostics.session_id,
+                            command_selection.store_path,
+                        )
+                    )
+
                 interpreter = ModelAssistedInterpreter(
                     rules,
                     OllamaCommandEngine(
@@ -520,6 +587,7 @@ class UbuntuSessionFactory:
                         command_selection.device,
                         resources=self._model_resources,
                         model_store=command_selection.store_path,
+                        on_device_report=report_command_device,
                     ),
                     spoken_names,
                     allowed_apps=frozenset(installed),
@@ -574,21 +642,17 @@ class UbuntuSessionFactory:
                 interpreter,
                 action_authorizer=permissions.allows_intent,
                 recent_utterances=recent_utterances,
+                # Visible controls and scrolls are both bound to the window
+                # observed for their spoken request.
                 window_observer=(
                     lambda: observe_window(focused_window, read_active_window_token)
                 )
-                if settings.allow_desktop_control and focused_window is not None
+                if (settings.allow_desktop_control or settings.allow_desktop_scroll)
+                and focused_window is not None
                 else None,
             )
             detector = self._detector_factory()
             presenter = ResponsePresenter(selection.language)
-            visual = (
-                VisualStatusController(
-                    self._visual_publish, language=selection.language
-                )
-                if self._visual_publish is not None
-                else None
-            )
             if speaker is None and self._synthesizer is not None:
                 speaker = ResponseSpeaker(self._synthesizer, on_error=self._on_event)
             if (
@@ -630,6 +694,7 @@ class UbuntuSessionFactory:
                 )
 
             def create_pipeline() -> LiveSpeechPipeline | FileSpeechPipeline:
+                pipeline_generation = runtime.speech_generation
                 if self._audio_file is not None:
                     file_source = AudioFileInput(self._audio_file)
                     source: AudioInput = file_source
@@ -680,6 +745,11 @@ class UbuntuSessionFactory:
                     self._on_event(SttDeviceReady(device))
 
                 def on_audio_ready() -> None:
+                    if (
+                        visual is not None
+                        and pipeline_generation == runtime.speech_generation
+                    ):
+                        visual.on_capture_ready()
                     runtime.listening_diagnostics.state(
                         "capture",
                         "ready",
@@ -695,7 +765,10 @@ class UbuntuSessionFactory:
                         generation=runtime.speech_generation,
                     )
                     self._on_event(
-                        AudioCaptureReady(runtime.listening_diagnostics.session_id)
+                        AudioCaptureReady(
+                            runtime.listening_diagnostics.session_id,
+                            pipeline_generation,
+                        )
                     )
 
                 def on_audio_chunk() -> None:
@@ -727,6 +800,8 @@ class UbuntuSessionFactory:
                     detector,
                     engine,
                     options=options,
+                    diagnostics=runtime.listening_diagnostics,
+                    diagnostic_generation=runtime.speech_generation,
                     # Omnilingual infers complete utterances. A 640 ms pause
                     # inside a verified Persian sentence split it at the
                     # generic 384 ms boundary and corrupted the first word.
@@ -746,7 +821,7 @@ class UbuntuSessionFactory:
 
             def show_live(event: LiveSpeechEvent) -> None:
                 if visual is not None:
-                    visual.on_live_event(event)
+                    visual.on_live_event(event, stream_id=runtime.speech_generation)
                 self._on_event(event)
                 if isinstance(event, BacklogNotice):
                     show_response(presenter.present(notice_for_backlog(event)))
@@ -778,6 +853,8 @@ class UbuntuSessionFactory:
                     show_response(presenter.present(output))
 
             def show_session_end(event: SpeechSessionEnded) -> None:
+                if visual is not None:
+                    visual.on_session_end(event)
                 self._on_event(event)
                 if event.error is not None:
                     show_response(presenter.present(notice_for_error(event.error)))
@@ -792,6 +869,8 @@ class UbuntuSessionFactory:
                         )
 
             def show_power(prompt: PowerPrompt) -> None:
+                if visual is not None:
+                    visual.on_power_prompt(prompt)
                 self._on_event(prompt)
                 show_response(
                     PresentedResponse(
@@ -839,11 +918,32 @@ class UbuntuSessionFactory:
                 show_response(presenter.present(event))
 
             chat_selection = (
-                TelegramChatSelection(show_chat_selection_prompt, show_action)
+                TelegramChatSelection(
+                    show_chat_selection_prompt,
+                    show_action,
+                    on_selection_start=visual.on_action_start
+                    if visual is not None
+                    else None,
+                    on_navigation_start=visual.on_chat_navigation_start
+                    if visual is not None
+                    else None,
+                )
                 if chat_enabled and settings.action_execution_enabled
                 else None
             )
             executor: ActionExecutor | None = None
+            confirmation = self._control_confirmation
+            if visual is not None and confirmation is not None:
+                original_confirmation = confirmation
+
+                def show_control_confirmation(prompt: ControlConfirmation) -> bool:
+                    visual.on_control_prompt(prompt)
+                    approved = original_confirmation(prompt)
+                    if approved:
+                        visual.on_control_approved()
+                    return approved
+
+                confirmation = show_control_confirmation
             if settings.action_execution_enabled:
                 input_broker = DesktopInputBroker()
                 self._input_brokers.append(input_broker)
@@ -862,6 +962,7 @@ class UbuntuSessionFactory:
                             app_id: desktop_ids[app_id]
                             for app_id in installed
                             if app_id in desktop_ids
+                            and app_id in settings.allowed_window_apps
                         },
                         {
                             app_id: desktop_ids[app_id]
@@ -869,6 +970,7 @@ class UbuntuSessionFactory:
                             if app_id in desktop_ids
                             and app_id in settings.allowed_window_apps
                         },
+                        legacy_picker_app=terminal_app_id,
                     )
                 if observer is not None:
                     executor = ObservedAppExecutor(executor, observer)
@@ -905,19 +1007,30 @@ class UbuntuSessionFactory:
                         allow_any_focused_app=True,
                     )
                 if settings.allow_desktop_control and self._focused_window is not None:
-                    executor = DesktopControlExecutor(
+                    controls = DesktopControlExecutor(
                         executor,
                         identity_reader=self._focused_window,
                         verifier=self._chat_verifier,
-                        confirmation=self._control_confirmation,
+                        confirmation=confirmation,
                         permissions=permissions,
                     )
+                    executor = controls
+                    if terminal_app_id is not None:
+                        executor = PtyxisTabExecutor(
+                            executor,
+                            controls,
+                            app_id=terminal_app_id,
+                            desktop_id=installed[terminal_app_id].name,
+                            permissions=permissions,
+                            identity_reader=self._focused_window,
+                            token_reader=read_active_window_token,
+                        )
                 if self._window_controller_factory is not None:
                     controller = self._window_controller_factory(desktop_ids)
                     executor = WindowControlExecutor(
                         executor,
                         controller,
-                        confirmation=self._control_confirmation,
+                        confirmation=confirmation,
                         permissions=permissions,
                         allowed_close_apps=frozenset(settings.allowed_close_apps),
                         allowed_window_apps=frozenset(settings.allowed_window_apps),
@@ -926,6 +1039,15 @@ class UbuntuSessionFactory:
                 executor = DesktopInputExecutor(executor, input_broker)
                 if visual is not None:
                     executor = _VisualActionExecutor(executor, visual)
+
+            def show_voice_state(event: VoiceModeChanged) -> None:
+                if visual is not None and event == runtime.voice_mode_state():
+                    visual.on_voice_state(event)
+
+            def show_timing(event: TimingEvent) -> None:
+                if visual is not None:
+                    visual.on_timing(event)
+                self._on_event(event)
 
             runtime = LiveCommandRuntime(
                 SpeechSessionController(create_pipeline),
@@ -937,7 +1059,7 @@ class UbuntuSessionFactory:
                 on_command_event=show_command,
                 on_action_output=show_action,
                 on_session_end=show_session_end,
-                on_timing=self._on_event,
+                on_timing=show_timing,
                 scroll_focus_reader=(
                     self._focused_window
                     if settings.allow_desktop_scroll or settings.allow_desktop_control
@@ -948,8 +1070,16 @@ class UbuntuSessionFactory:
                 history=history,
                 voice_standby=self._voice_standby,
                 on_voice_mode=self._on_event,
+                on_voice_state=show_voice_state,
+                on_stopping=visual.on_stopping if visual is not None else None,
                 finite_source=self._audio_file is not None,
             )
+            runtime.listening_diagnostics.attach(
+                "model_resources", self._model_resources.snapshot
+            )
+            speaker_snapshot = getattr(speaker, "snapshot", None)
+            if speaker_snapshot is not None:
+                runtime.listening_diagnostics.attach("tts", speaker_snapshot)
             yield runtime
         except AudioCaptureStopError:
             # The native STT worker may still own the model after a failed

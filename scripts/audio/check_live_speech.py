@@ -400,7 +400,6 @@ def print_action_decision(
 
 
 def run(args: argparse.Namespace) -> None:
-    presenter = ResponsePresenter(args.response_language or args.language or "en")
     visual_available = args.visual_feedback and GnomeVisualStatusSink.available()
     if args.visual_feedback and not visual_available:
         print(
@@ -411,11 +410,27 @@ def run(args: argparse.Namespace) -> None:
     visual = (
         VisualStatusController(
             GnomeVisualStatusSink().publish,
-            language=args.response_language or args.language or "en",
+            language="en",
+            capture_ready=False,
         )
         if visual_available
         else None
     )
+    completed = False
+    try:
+        _run(args, visual)
+        completed = True
+    finally:
+        if visual is not None:
+            failure = sys.exception()
+            visual.on_closed(
+                failed=not completed,
+                error=failure if isinstance(failure, Exception) else None,
+            )
+
+
+def _run(args: argparse.Namespace, visual: VisualStatusController | None) -> None:
+    presenter = ResponsePresenter(args.response_language or args.language or "en")
     detector = SileroVad()
     if args.execute_actions:
         print(
@@ -562,24 +577,28 @@ def run(args: argparse.Namespace) -> None:
     else:
         engine = VoskEngine(args.model_path, language=args.language)
     speaker: ResponseSpeaker | None = None
+
+    def show_playback_error(exc: SpeechSynthesisError) -> None:
+        if visual is not None:
+            visual.on_playback_error()
+        print(
+            f"Voice response unavailable ({exc}); text was displayed.",
+            file=sys.stderr,
+            flush=True,
+        )
+
     if coordinator is not None and not args.no_voice_responses:
         try:
             speech_backend = SpeechDispatcherSynthesizer()
             speaker = ResponseSpeaker(
                 speech_backend,
-                on_error=lambda exc: print(
-                    f"Voice response unavailable ({exc}); text was displayed.",
-                    file=sys.stderr,
-                    flush=True,
-                ),
+                on_error=show_playback_error,
             )
         except SpeechSynthesisError as exc:
-            print(
-                f"Voice response unavailable ({exc}); text remains on.",
-                file=sys.stderr,
-            )
+            show_playback_error(exc)
 
     def create_pipeline() -> LiveSpeechPipeline:
+        generation = runtime.speech_generation
         device, audio_format, frames_per_chunk = microphone_settings(args)
         from kyrin.audio.microphone.input import MicrophoneInput
 
@@ -590,8 +609,18 @@ def run(args: argparse.Namespace) -> None:
             f"{frames_per_chunk} frames/chunk.",
             flush=True,
         )
+
+        def capture_ready() -> None:
+            if visual is not None and generation == runtime.speech_generation:
+                visual.on_capture_ready()
+
         return LiveSpeechPipeline(
-            guarded_source, audio_format, detector, engine, options=args.stt_options
+            guarded_source,
+            audio_format,
+            detector,
+            engine,
+            options=args.stt_options,
+            on_audio_ready=capture_ready,
         )
 
     controller = SpeechSessionController(create_pipeline, args.recovery_policy)
@@ -606,7 +635,7 @@ def run(args: argparse.Namespace) -> None:
 
     def show_live(event: LiveSpeechEvent) -> None:
         if visual is not None:
-            visual.on_live_event(event)
+            visual.on_live_event(event, stream_id=runtime.speech_generation)
         with output_lock:
             print_live_event(event, monotonic() - start, presenter, speaker)
 
@@ -617,6 +646,8 @@ def run(args: argparse.Namespace) -> None:
             print_command_event(event, monotonic() - start, presenter, speaker)
 
     def show_session_end(event: SpeechSessionEnded) -> None:
+        if visual is not None:
+            visual.on_session_end(event)
         if event.retry_delay_s is not None and event.error is not None:
             response = presenter.present(notice_for_error(event.error))
             with output_lock:
@@ -645,6 +676,9 @@ def run(args: argparse.Namespace) -> None:
         on_action_output=show_action,
         on_session_end=show_session_end,
         on_active_app=show_active_app,
+        on_voice_state=visual.on_voice_state if visual is not None else None,
+        on_stopping=visual.on_stopping if visual is not None else None,
+        on_timing=visual.on_timing if visual is not None else None,
     )
     timer = Timer(args.seconds, runtime.stop) if args.seconds is not None else None
 

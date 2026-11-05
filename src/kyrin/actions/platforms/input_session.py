@@ -28,6 +28,7 @@ HELPERS = {
     "desktop_scroll_helper.py": ("desktop_scroll", 2),
     "desktop_control_helper.py": ("desktop_control", 2),
     "telegram_portal_helper.py": ("telegram_chat", 3),
+    "terminal_tab_helper.py": ("terminal_tab_keyboard", 1),
 }
 BUILD = "desktop-input-owner-2026-10-25-l03"
 MAX_MESSAGE = 1024 * 1024
@@ -91,6 +92,8 @@ class InputSessionService:
 
     @staticmethod
     def _selected(policy: PermissionPolicy, capability: str) -> bool:
+        if capability == "terminal_tab_keyboard":
+            return policy.has_grant(capability) and policy.has_grant("desktop_control")
         if capability == "telegram_chat":
             return policy.has_grant(capability, "telegram") and (
                 policy.settings.remember_telegram_pointer

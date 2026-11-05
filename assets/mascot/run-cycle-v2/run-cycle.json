@@ -1,0 +1,122 @@
+{
+  "schema_version": 2,
+  "status": "prototype_pending_owner_visual_acceptance",
+  "duration_ms": 640,
+  "comparison_durations_ms": [
+    560,
+    640,
+    720
+  ],
+  "view_box": [
+    0,
+    0,
+    96,
+    120
+  ],
+  "ground_y": 115,
+  "hip_y": 83,
+  "thigh_length": 14,
+  "shin_length": 16,
+  "upper_arm_length": 13,
+  "forearm_length": 12,
+  "torso_lean_deg": 0,
+  "head_counter_rotation_deg": 0,
+  "interpolation": "periodic_cubic_hermite",
+  "keyframes": [
+    {
+      "name": "left_contact_right_recovery",
+      "root_y": 1.4,
+      "left_thigh": -18,
+      "left_knee": 20,
+      "left_foot": 0,
+      "right_thigh": 18,
+      "right_knee": 62,
+      "right_foot": 0,
+      "left_shoulder": 22,
+      "left_elbow": -65,
+      "right_shoulder": -28,
+      "right_elbow": -85
+    },
+    {
+      "name": "left_support_right_knee_forward",
+      "root_y": 0.1,
+      "left_thigh": 6,
+      "left_knee": 12,
+      "left_foot": 0,
+      "right_thigh": -22,
+      "right_knee": 78,
+      "right_foot": 0,
+      "left_shoulder": 4,
+      "left_elbow": -75,
+      "right_shoulder": -6,
+      "right_elbow": -85
+    },
+    {
+      "name": "flight_toward_right_contact",
+      "root_y": -2,
+      "left_thigh": 24,
+      "left_knee": 52,
+      "left_foot": 0,
+      "right_thigh": -38,
+      "right_knee": 68,
+      "right_foot": 0,
+      "left_shoulder": -24,
+      "left_elbow": -85,
+      "right_shoulder": 20,
+      "right_elbow": -65
+    },
+    {
+      "name": "right_contact_left_recovery",
+      "root_y": 1.4,
+      "left_thigh": 18,
+      "left_knee": 62,
+      "left_foot": 0,
+      "right_thigh": -18,
+      "right_knee": 20,
+      "right_foot": 0,
+      "left_shoulder": -28,
+      "left_elbow": -85,
+      "right_shoulder": 22,
+      "right_elbow": -65
+    },
+    {
+      "name": "right_support_left_knee_forward",
+      "root_y": 0.1,
+      "left_thigh": -22,
+      "left_knee": 78,
+      "left_foot": 0,
+      "right_thigh": 6,
+      "right_knee": 12,
+      "right_foot": 0,
+      "left_shoulder": -6,
+      "left_elbow": -85,
+      "right_shoulder": 4,
+      "right_elbow": -75
+    },
+    {
+      "name": "flight_toward_left_contact",
+      "root_y": -2,
+      "left_thigh": -38,
+      "left_knee": 68,
+      "left_foot": 0,
+      "right_thigh": 24,
+      "right_knee": 52,
+      "right_foot": 0,
+      "left_shoulder": 20,
+      "left_elbow": -65,
+      "right_shoulder": -24,
+      "right_elbow": -85
+    }
+  ],
+  "view": "front",
+  "projection_distance": 180,
+  "projection_y_depth": 0.12,
+  "hip_x": {
+    "left": 40,
+    "right": 56
+  },
+  "shoulder_x": {
+    "left": 30,
+    "right": 66
+  }
+}

@@ -75,6 +75,8 @@ class DesktopActionsPage(QWidget):
         self.revoke_permissions_button.clicked.connect(self._revoke_permissions)
         layout.addWidget(self.revoke_permissions_button)
         self.capability_checkboxes: dict[str, QCheckBox] = {}
+        self.terminal_tab_keyboard_grant_status = QLabel()
+        self.terminal_tab_keyboard_grant_status.setWordWrap(True)
         self._unknown_grants = set(settings.capability_grants if settings else ()) - {
             item.identifier for item in CAPABILITIES
         }
@@ -89,6 +91,8 @@ class DesktopActionsPage(QWidget):
             )
             self.capability_checkboxes[capability.identifier] = checkbox
             layout.addWidget(checkbox)
+            if capability.identifier == "terminal_tab_keyboard":
+                layout.addWidget(self.terminal_tab_keyboard_grant_status)
         self.search = QLineEdit()
         self.search.textChanged.connect(self._filter)
         layout.addWidget(self.search)
@@ -383,6 +387,7 @@ class DesktopActionsPage(QWidget):
         state = str(status.get("state", "unprepared"))
         devices = int(str(status.get("devices", 0)))
         for label, required in (
+            (self.terminal_tab_keyboard_grant_status, 1),
             (self.telegram_pointer_grant_status, 3),
             (self.desktop_scroll_grant_status, 2),
             (self.desktop_control_grant_status, 2),

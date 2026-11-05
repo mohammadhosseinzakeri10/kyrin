@@ -1,37 +1,91 @@
 # Telegram chat navigation: first bounded action
 
-<div dir="rtl" lang="fa">
+## Supported accessibility prerequisite (2026-11-05)
 
-**قرارداد فعلی F10 — ۲۰۲۶/۱۰/۲۴:** منو با کنترل یکتای زندهٔ AT-SPI و نام
-`Main menu`/«منوی اصلی» باز می‌شود؛ مختصات ثابت حذف شده است. دو Escape
-مسیر معتبر قبلی حفظ شده‌اند؛ تمرکز Search معنایی است. فیلد باید با نام
-Search/«جستجو»/«جست‌وجو»، نقش ENTRY/TEXT و قابلیت EditableText یکتا باشد.
-token پنجره پیش از portal ثبت می‌شود و پس از consent باید همان باشد.
+Owner decision: KYRIN's semantic Telegram routes are supported with GNOME
+session accessibility enabled (`org.gnome.desktop.interface
+toolkit-accessibility=true`) and Telegram's own "Disable screen reader mode"
+option OFF. The owner sets and checks both; KYRIN changes neither. Neither is
+RemoteDesktop consent, input-session readiness or `ScreenReaderEnabled`.
+Session-wide accessibility lets other authorized local accessibility clients
+read application UI. The owner accepted that tradeoff instead of a
+Telegram-only launcher.
 
-Ctrl+A و تایپ سراسری نام حذف شده‌اند. متن مستقیماً به شیء همان فیلد، در
-بخش‌های حداکثر چهارنویسه‌ای می‌رود؛ offset نویسه و length بایت UTF-8 است.
-شیء، ancestry، bounds، token، focus و متن قبلی بین بخش‌ها بازخوانی می‌شوند.
-مالک broker، لغو، مهلت و epoch مجوز با `HelperLifetime.check` پیش از هر
-تغییر بررسی می‌شوند؛ مالک مشترک کل عملیات در executor موجود حفظ شده است.
-تغییر focus داخل فراخوانی درج، متن را به فیلد دیگری منتقل نمی‌کند. ورودی
-قبلاً پذیرفته‌شده بازگردانده نمی‌شود. نبود/ابهام شاهد یا تغییر وضعیت، عملیات
-را متوقف می‌کند؛ fallback مختصاتی یا تایپ کور وجود ندارد.
+Under this configuration, ordinary Telegram launches were owner-accepted on
+2026-11-05: three fresh launches and one after re-login. When the unique Qt
+Main menu exposes no action, the command fails closed as
+`telegram_menu_action_unavailable` with hedged guidance about the Telegram
+option. Other missing semantics remain `telegram_accessibility_unavailable`.
+The [validation guide](../VALIDATION.md) distinguishes these observations
+from coverage of other menu routes and versions.
 
-آزمون‌های ساختگی resize/sidebar/RTL، تغییر focus/پنجره/token، جایگزینی فیلد،
-تغییر ancestry/متن، لغو و حفظ مالک broker بین بخش‌ها را پوشش می‌دهند.
-**آزمون زنده انجام نشده است:** باید نام و نقش واقعی کنترل‌ها، اثر EditableText
-بر نتایج جست‌وجو، منو، زبان فارسی، sidebar، resize، تغییر focus و لغو/پس‌گرفتن
-مجوز روی نسخهٔ نصب‌شده بررسی شوند. AT-SPI در بررسی‌های قبلی Telegram قابل
-اتکا نبود؛ build فاقد شاهد معتبر و زبان‌های دیگر فعلاً متوقف می‌شوند.
-OCR سطرها/مقصدها همچنان محدودیت چیدمان دارد. این قرارداد جایگزین توضیحات
-تاریخیِ کلیک گوشهٔ چپ و Ctrl+F/Ctrl+A در ادامهٔ سند است.
+## Common route audit and focus-only menu (2026-10-30)
 
-APIها با مستند رسمی جاری بررسی شدند:
-[درج متن](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.EditableText.insert_text.html)،
-[وضعیت‌های AT-SPI](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.StateType.html)،
-[کنترل‌های Telegram Desktop](https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/dialogs/dialogs_widget.cpp).
+The real Main menu button advertises only setFocus. The Telegram-only Qt semantic
+profile may invoke that focus action, require the same live button FOCUSED and
+the original Shell window/lifetime, then send one Space press/release. It does
+not treat focus as clicking, use Enter or convert local coordinates. Explicit
+activation actions retain preference; unknown/multiple actions stay blocked.
+Destination clicks still require existing independent OCR/capture evidence.
+Original-token checks now also cover Saved Messages/Archive/Contacts/Escape and
+each shortcut press. Native menu effects remain unaccepted pending owner results.
+The [control policy](CONTROL_POLICY.md) defines the target, consent and
+postcondition boundaries for these routes.
 
-</div>
+## GI text dispatch correction (2026-10-30)
+
+The actual Search editor's GI proxy is Accessible. Its instance get_text() is
+the deprecated zero-argument interface getter, which shadows Text.get_text(start,
+end). Real read-only inspection reproduces TypeError with the old invocation;
+explicit Atspi.Text.get_text(node, 0, -1) reads the same editor successfully.
+Both prefix and final-content reads now use this explicit interface. Existing
+focused-object, identity, text-agreement, UTF-8, lifetime and permission checks
+are unchanged. Two regressions model the real proxy collision for ASCII and
+mixed-script payloads. A subsequent owner run and screenshot confirm exact literal
+query insertion and actual search results. Accept only that bounded native query
+path while preserving backend dispatched_unverified and unconfirmed OCR evidence.
+At this historical stage, native acceptance was limited to the verified query.
+See the accessibility prerequisite above for the later ordinary-launch observations.
+
+## Observed Qt semantic-window profile (2026-10-29)
+
+An owner-run temporary accessibility-enabled Telegram process now exports an
+ACTIVE top-level FILLER (AT-SPI role 20), through a Qt provider with the exact
+Telegram PID. Its SCREEN rectangles are window-local: root origin (0, 0), size
+equal to the independently observed GNOME frame. Previously, accessibility was
+not activated and the process exposed zero window children. No global preference
+or desktop launcher was changed; ordinary-launch activation remains unaccepted.
+
+The Telegram-only locator recognizes this profile alongside normal FRAME/WINDOW/
+DIALOG roots. It requires one active candidate, direct application parent, Qt
+provider, matching PID, valid states, and exact local root size/origin. Other
+active windows remain ambiguity evidence. Existing Shell desktop ID/PID, original
+window token, frame, permission, cancellation and deadline checks still bracket
+every semantic resolution and edit. These local bounds authorize no pointer
+coordinates: menu activation and field editing remain directed at live objects.
+The generic desktop accessibility/window resolver is unchanged.
+
+Qt exposes non-editable Search wrappers and hidden copies as well as the actual
+visible editor. Only visible/showing editable ENTRY/TEXT nodes with both text
+interfaces can become search candidates; two eligible editors still reject.
+Invalid ancestry, state, process, geometry or changing objects remain blockers.
+Native search effects and EditableText behavior still need owner validation.
+
+### Semantic menu and search boundary
+
+The menu and search routes resolve a unique, live AT-SPI control. A search
+editor requires a matching name, text/entry role and EditableText interface.
+The original window token is recorded before portal work and checked after
+consent. Literal text goes to that editor in chunks of at most four
+characters. Offsets count characters and lengths count UTF-8 bytes.
+The helper rechecks the object, ancestry, bounds, token, focus and existing
+text between chunks. Ambiguous or stale evidence stops the operation. It
+does not send global replacement keystrokes or fall back to guessed coordinates.
+
+The synthetic suite covers resize, sidebar layout, mixed scripts, ownership,
+revocation, cancellation and changes of target or focus. A text insertion
+already accepted by the destination cannot be recalled. See the later
+dated sections above for native evidence and current prerequisites.
 
 ## Telegram destination commands (2026-10-18)
 

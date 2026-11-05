@@ -1,13 +1,16 @@
 """Run activity detection and streaming transcription from one audio source."""
 
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from functools import partial
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from time import perf_counter_ns
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from kyrin.runtime.listening_diagnostics import ListeningDiagnostics
 
 from kyrin.audio.activity.speech_activity_monitor import (
     SpeechActivityFrame,
@@ -63,6 +66,8 @@ class LiveSpeechPipeline:
         on_audio_chunk: Callable[[], None] | None = None,
         on_speech_started: Callable[[], None] | None = None,
         clock_ns: Callable[[], int] = perf_counter_ns,
+        diagnostics: ListeningDiagnostics | None = None,
+        diagnostic_generation: int = 0,
     ) -> None:
         vad_converter = SampleRateConverter(
             source_format, detector.input_format.sample_rate
@@ -83,6 +88,8 @@ class LiveSpeechPipeline:
                 raise ValueError("idle preroll must fit within the audio backlog")
             self._idle_preroll_windows = count
         self._clock_ns = clock_ns
+        self._diagnostics = diagnostics
+        self._diagnostic_generation = diagnostic_generation
         self.source = source
         self.source_format = source_format
         self.detector = detector
@@ -150,6 +157,7 @@ class LiveSpeechPipeline:
                     warning_ms=self.backlog_warning_ms,
                     recovery_ms=self.backlog_recovery_ms,
                     maximum_ms=self.backlog_maximum_ms,
+                    diagnostics=self._diagnostics,
                 )
                 monitor = SpeechActivityMonitor(
                     self.detector,
@@ -171,12 +179,41 @@ class LiveSpeechPipeline:
                     while not stopped.is_set():
                         try:
                             events.put(event, timeout=0.05)
+                            if self._diagnostics is not None:
+                                self._diagnostics.queue(
+                                    "speech_events", events.qsize(), 256, "events"
+                                )
                             return
                         except Full:
                             continue
 
                 def stt_worker() -> None:
                     timing = SpeechTiming(self._clock_ns)
+
+                    def stt_call(
+                        callback: Callable[[], Sequence[TranscriptUpdate]],
+                    ) -> tuple[TranscriptUpdate, ...]:
+                        if self._diagnostics is not None:
+                            self._diagnostics.state(
+                                "stt_call",
+                                "busy",
+                                reason="call_entered",
+                                source="stt",
+                                generation=self._diagnostic_generation,
+                            )
+                        try:
+                            return timing.call(callback)
+                        finally:
+                            if self._diagnostics is not None:
+                                self._diagnostics.pulse("stt_call_returned")
+                                self._diagnostics.state(
+                                    "stt_call",
+                                    "idle",
+                                    reason="call_returned",
+                                    source="stt",
+                                    generation=self._diagnostic_generation,
+                                )
+
                     try:
 
                         def on_marker(
@@ -187,7 +224,7 @@ class LiveSpeechPipeline:
                                 marker = marker.marker
                             if turn_session is None:
                                 return
-                            updates = timing.call(
+                            updates = stt_call(
                                 turn_session.start_turn
                                 if marker is BacklogMarker.SPEECH_STARTED
                                 else turn_session.end_turn
@@ -201,12 +238,12 @@ class LiveSpeechPipeline:
                         for chunk in converted:
                             if stopped.is_set():
                                 return
-                            for update in timing.call(
+                            for update in stt_call(
                                 partial(session.accept_audio, chunk)
                             ):
                                 publish(update)
                         if not stopped.is_set() and not errors:
-                            for update in timing.call(session.finish):
+                            for update in stt_call(session.finish):
                                 publish(update)
                     except Exception as exc:
                         errors.append(exc)
@@ -218,6 +255,14 @@ class LiveSpeechPipeline:
                             close_errors.append(exc)
                             errors.append(exc)
                         stt_done.set()
+                        if self._diagnostics is not None:
+                            self._diagnostics.state(
+                                "stt_worker",
+                                "failed" if errors else "ended",
+                                reason="worker_returned",
+                                source="stt",
+                                generation=self._diagnostic_generation,
+                            )
 
                 audio_ready = False
 
@@ -249,6 +294,8 @@ class LiveSpeechPipeline:
                         converted = self._vad_converter.convert(source_chunks(capture))
                         for window in framer.frame(converted):
                             frame = monitor.process(window)
+                            if self._diagnostics is not None:
+                                self._diagnostics.pulse("vad_processed")
                             # Playback interruption must not wait behind STT or the
                             # UI event queue. Speech/onset audio retains its order;
                             # opted-in idle gaps stay in the bounded preroll below.
@@ -301,6 +348,14 @@ class LiveSpeechPipeline:
                         backlog.abort()
                     finally:
                         vad_done.set()
+                        if self._diagnostics is not None:
+                            self._diagnostics.state(
+                                "vad_worker",
+                                "failed" if errors else "ended",
+                                reason="worker_returned",
+                                source="audio",
+                                generation=self._diagnostic_generation,
+                            )
 
                 def read_events() -> Iterator[LiveSpeechEvent]:
                     while not self._stop_requested.is_set():
@@ -310,6 +365,10 @@ class LiveSpeechPipeline:
                             return
                         try:
                             event = events.get(timeout=0.05)
+                            if self._diagnostics is not None:
+                                self._diagnostics.queue(
+                                    "speech_events", events.qsize(), 256, "events"
+                                )
                             if not self._stop_requested.is_set():
                                 yield event
                         except Empty:
@@ -322,6 +381,8 @@ class LiveSpeechPipeline:
                         self.source,
                         max_chunks=self.max_capture_chunks,
                         clock_ns=self._clock_ns,
+                        diagnostics=self._diagnostics,
+                        diagnostic_generation=self._diagnostic_generation,
                     ) as capture:
                         vad_thread = Thread(
                             target=vad_worker,

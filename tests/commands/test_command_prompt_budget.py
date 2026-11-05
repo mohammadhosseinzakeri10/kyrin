@@ -7,6 +7,7 @@ import pytest
 
 from kyrin.commands.app_names import ModelAppOption
 from kyrin.commands.models import CommandContext
+from kyrin.commands.ollama_device import DeviceObservation
 from kyrin.commands.ollama_engine import CommandModelError, OllamaCommandEngine
 from kyrin.commands.understanding import UnderstandingInput
 from kyrin.commands.visible_options import VisibleOption
@@ -22,8 +23,10 @@ def _engine(
     def transport(url: str, payload: dict[str, Any], timeout: float) -> object:
         sent.append(payload)
         if url.endswith("/api/generate"):
-            return {"done": True, "done_reason": "unload"}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
         return {
+            "model": payload["model"],
+            "done": True,
             "prompt_eval_count": len(
                 json.dumps(payload["messages"], ensure_ascii=False).encode()
             )
@@ -36,6 +39,7 @@ def _engine(
         "fake",
         DevicePreference.AUTO,
         transport=transport,
+        device_probe=lambda *args: DeviceObservation(),
         resources=ModelResources(memory=lambda: MemorySnapshot()),
     )
     # A deterministic tokenizer stands in for the selected model + chat template.
@@ -247,8 +251,13 @@ def test_qwen_uses_exact_counted_template_without_chat_parser(
     def transport(url: str, payload: dict[str, object], timeout: float) -> object:
         requests.append((url, payload))
         if payload.get("keep_alive") == 0:
-            return {"done": True, "done_reason": "unload"}
-        return {"prompt_eval_count": 10, "response": '{"route":"no_action","steps":[]}'}
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
+        return {
+            "model": payload["model"],
+            "done": True,
+            "prompt_eval_count": 10,
+            "response": '{"route":"no_action","steps":[]}',
+        }
 
     engine = OllamaCommandEngine(
         "http://127.0.0.1:11435",
@@ -256,6 +265,7 @@ def test_qwen_uses_exact_counted_template_without_chat_parser(
         DevicePreference.AUTO,
         transport=transport,
         token_counter=Counter(),
+        device_probe=lambda *args: DeviceObservation(),
         resources=ModelResources(memory=lambda: MemorySnapshot()),
     )
     engine.understand(

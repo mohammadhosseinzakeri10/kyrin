@@ -1,5 +1,12 @@
 # KYRIN command-understanding reference cases
 
+English is the primary V1 command/acceptance language. Retain the existing
+multilingual reference cases and report language-specific results separately;
+do not translate a fixture and reuse its identity as new evidence. The L04
+corpus and its evaluation contract remain separate from these historical
+semantic cases. See the [language policy](../../docs/LANGUAGE_POLICY.md) and
+[English command guide](../../docs/commands/USER_COMMAND_GUIDE.md).
+
 `semantic_cases.jsonl` defines intended behavior independently of the current
 demo interpreter and any future STT, translator, or understanding model. Each
 line is one JSON object with:
@@ -29,21 +36,15 @@ names, system power, and dependent steps. A safe implementation must never
 turn `clarify`, `no_action`, or `unsupported` into an executable action merely
 because an STT or language model produced a plausible command.
 
-`verified_speech_links.jsonl` links eight separately consented, locally stored
-recordings to the reference wording and intended route. It contains no audio.
-`scripts/commands/audit_speech_replay.py` checks those links against local STT
-manifests, the STT text sent to command models, and a proposal-only decision
-replay. This is how a transcript that changes one valid app name to another is
-counted as unsafe relative to what was spoken, even if text-only target
-grounding accepts the mistaken transcript. The output is kept under ignored
-`results/`; the script does not open a microphone or execute a command.
-The four additional safety recordings cover closing Telegram, opening the
-browser, a Persian browser request, and its negated form. The owner confirmed
-the wording and intentional repetitions. The selected single-utterance crops
-and transcript report are described in `datasets/stt/README.md`.
+## Designed L04 replay
 
-Each of the eight verified links now carries the same pseudonymous
-`speaker_id`, `speaker-01`. This records the actual one-speaker coverage
-without publishing a personal identity. Additional consented speakers use
-separate local, ignored link files. See
-`docs/stt/MULTI_SPEAKER_SAFETY_EVALUATION.md`.
+`l04_cases.jsonl`, `l04_followup_cases.jsonl` and
+`l04_turn_references.jsonl` supply the designed text corpus and its per-turn
+references. `l04_baseline_summary.json` stores the frozen rules-only summary
+used by the deterministic regression. The generic evaluation plan is in
+`evaluation/plan.v1.json`.
+
+Offline audio and spoken-reference audit tools require separately prepared,
+consented inputs. The linked recordings, recording manifests, and machine
+results stay private. See the [STT templates](../stt/README.md) and
+[data-handling decision](../../docs/decisions/DR-0009-evaluation-integrity-and-data-handling.md).

@@ -31,7 +31,7 @@ channel without vulnerability details.
   App selection, capability grants, operating-system consent and the live
   portal session are separate. A saved restore token can allow a later startup
   restoration attempt. Revocation and disconnect have different effects.
-  See [shared input sessions](docs/actions/SHARED_INPUT_SESSION_FA.md).
+  See [shared input sessions](docs/actions/SHARED_INPUT_SESSION.md).
 - **Model output:** recognition can change meaning. Local command models
   propose structured intent; permission checks, target grounding and selected
   confirmations remain independent. These checks do not guarantee that every
@@ -50,7 +50,7 @@ channel without vulnerability details.
 
 Review [control policy](docs/actions/CONTROL_POLICY.md),
 [postconditions](docs/actions/ACTION_POSTCONDITIONS.md),
-[shared input sessions](docs/actions/SHARED_INPUT_SESSION_FA.md) and
+[shared input sessions](docs/actions/SHARED_INPUT_SESSION.md) and
 [document OCR protection](docs/vision/DOCUMENT_MODEL_PROTECTION.md) before
 changing security-relevant behavior. Use a disposable test account and
 synthetic content when validating desktop actions.

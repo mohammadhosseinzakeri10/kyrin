@@ -10,6 +10,7 @@ from kyrin.actions.telegram_verification import (
     ChatSearchMatch,
     assess_visible_chat_choices,
     chat_header_visible,
+    same_operation_window,
     search_choices,
     telegram_left_label,
     telegram_menu_item,
@@ -53,6 +54,8 @@ class _Request:
     search_query: bool = False
     visible_control: bool = False
     visible_inventory: bool = False
+    # The operation-bound window token; None keeps process-level identity only.
+    window_token: str | None = None
     operation: Operation | None = None
     finished: Event = field(default_factory=Event)
     result: (
@@ -94,33 +97,59 @@ class QtChatVerifier(QObject):
         """Require current screen permission before requesting keyboard input."""
         return self._ask(_Request(None, None), timeout_s=6) is True
 
-    def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
+    def verify(
+        self,
+        app_id: str,
+        pid: int,
+        target: str = "Saved Messages",
+        *,
+        window_token: str | None = None,
+    ) -> bool:
         """Return false for an uncertain, stale, or missing chat header."""
-        return self._ask(_Request(app_id, pid, target), timeout_s=18) is True
+        return (
+            self._ask(
+                _Request(app_id, pid, target, window_token=window_token),
+                timeout_s=18,
+            )
+            is True
+        )
 
     def find_search_result(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None:
         """Return one exact visible result without authorizing a click."""
-        result = self._ask(_Request(app_id, pid, target, search=True), timeout_s=18)
+        result = self._ask(
+            _Request(app_id, pid, target, search=True, window_token=window_token),
+            timeout_s=18,
+        )
         return result if isinstance(result, ChatSearchMatch) else None
 
     def find_search_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None:
         """Read local and numbered global rows without granting a click."""
         self._last_choice_status = "pending"
-        result = self._ask(_Request(app_id, pid, target, choices=True), timeout_s=18)
+        result = self._ask(
+            _Request(app_id, pid, target, choices=True, window_token=window_token),
+            timeout_s=18,
+        )
         if self._last_choice_status == "pending":
             self._last_choice_status = "timeout"
         return result if isinstance(result, ChatSearchChoices) else None
 
     def find_visible_chat_choices(
-        self, app_id: str, pid: int, target: str
+        self, app_id: str, pid: int, target: str, *, window_token: str | None = None
     ) -> ChatSearchChoices | None:
         self._last_choice_status = "pending"
         result = self._ask(
-            _Request(app_id, pid, target, choices=True, visible_choices=True),
+            _Request(
+                app_id,
+                pid,
+                target,
+                choices=True,
+                visible_choices=True,
+                window_token=window_token,
+            ),
             timeout_s=18,
         )
         if self._last_choice_status == "pending":
@@ -149,35 +178,70 @@ class QtChatVerifier(QObject):
         return primary, alternate
 
     def find_left_label(
-        self, app_id: str, pid: int, label: str, *, menu: bool = False
+        self,
+        app_id: str,
+        pid: int,
+        label: str,
+        *,
+        menu: bool = False,
+        window_token: str | None = None,
     ) -> ChatSearchMatch | None:
         result = self._ask(
-            _Request(app_id, pid, label, left_label=True, menu=menu),
+            _Request(
+                app_id,
+                pid,
+                label,
+                left_label=True,
+                menu=menu,
+                window_token=window_token,
+            ),
             timeout_s=18,
         )
         return result if isinstance(result, ChatSearchMatch) else None
 
     def find_settings_item(
-        self, app_id: str, pid: int, label: str
+        self, app_id: str, pid: int, label: str, *, window_token: str | None = None
     ) -> ChatSearchMatch | None:
         result = self._ask(
-            _Request(app_id, pid, label, settings_item=True), timeout_s=18
+            _Request(
+                app_id, pid, label, settings_item=True, window_token=window_token
+            ),
+            timeout_s=18,
         )
         return result if isinstance(result, ChatSearchMatch) else None
 
-    def settings_page_header(self, app_id: str, pid: int) -> str | None:
-        result = self._ask(_Request(app_id, pid, settings_header=True), timeout_s=18)
+    def settings_page_header(
+        self, app_id: str, pid: int, *, window_token: str | None = None
+    ) -> str | None:
+        result = self._ask(
+            _Request(app_id, pid, settings_header=True, window_token=window_token),
+            timeout_s=18,
+        )
         return result if isinstance(result, str) else None
 
-    def has_view_title(self, app_id: str, pid: int, title: str) -> bool:
+    def has_view_title(
+        self, app_id: str, pid: int, title: str, *, window_token: str | None = None
+    ) -> bool:
         return (
-            self._ask(_Request(app_id, pid, title, view_title=True), timeout_s=18)
+            self._ask(
+                _Request(
+                    app_id, pid, title, view_title=True, window_token=window_token
+                ),
+                timeout_s=18,
+            )
             is True
         )
 
-    def has_search_query(self, app_id: str, pid: int, query: str) -> bool:
+    def has_search_query(
+        self, app_id: str, pid: int, query: str, *, window_token: str | None = None
+    ) -> bool:
         return (
-            self._ask(_Request(app_id, pid, query, search_query=True), timeout_s=18)
+            self._ask(
+                _Request(
+                    app_id, pid, query, search_query=True, window_token=window_token
+                ),
+                timeout_s=18,
+            )
             is True
         )
 
@@ -389,6 +453,22 @@ class QtChatVerifier(QObject):
             | tuple[VisibleTextOption, ...]
             | None
         ) = None
+        if (
+            isinstance(observation, IdentifiedWindowText)
+            and pending.app_id is not None
+            and pending.pid is not None
+            and pending.window_token is not None
+            and not same_operation_window(
+                observation, pending.app_id, pending.pid, pending.window_token
+            )
+        ):
+            # Another window of the same process is not this operation's
+            # target. Its text never becomes evidence, and no fallback read
+            # is started for it.
+            if pending.choices:
+                self._last_choice_status = "window_changed"
+            self._finish(None)
+            return
         if (
             isinstance(observation, IdentifiedWindowText)
             and pending.app_id is not None

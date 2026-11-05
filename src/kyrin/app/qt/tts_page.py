@@ -124,8 +124,13 @@ class _VoiceEditor(QWidget):
         layout.addLayout(form)
 
         self.sample_label = QLabel()
+        primary_language = (
+            language.strip().replace("_", "-").split("-", 1)[0].casefold()
+        )
         self.sample = QLineEdit(
-            "سلام، من کایرین هستم." if language == "fa" else "Hello. This is KYRIN."
+            "سلام، من کایرین هستم."
+            if primary_language == "fa"
+            else "Hello. This is KYRIN."
         )
         layout.addWidget(self.sample_label)
         layout.addWidget(self.sample)

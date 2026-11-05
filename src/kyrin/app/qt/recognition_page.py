@@ -72,7 +72,8 @@ class RecognitionPage(QWidget):
         self.diagnostics_output = QPlainTextEdit()
         self.diagnostics_output.setMinimumHeight(180)
         self.diagnostics_output.setReadOnly(True)
-        self.diagnostics_output.setMaximumBlockCount(40)
+        # Keep this app run's text until explicit clear or process exit.
+        self.diagnostics_output.setMaximumBlockCount(0)
         self.diagnostics_output.setAccessibleName("Speech command diagnostics")
         layout.addWidget(self.diagnostics_output)
         layout.addWidget(label("listening_diagnostics"))

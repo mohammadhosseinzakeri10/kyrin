@@ -1,68 +1,113 @@
-<div dir="rtl" lang="fa">
+# General control policy and persistent consent
 
-# سیاست کنترل عمومی و رضایت ماندگار
+(English migration of a previously Persian-only note; the original is preserved
+in the private migration pre-images and in Git history.)
 
-از ۲۰۲۶/۱۰/۲۵، طبق تصمیم صریح مالک، مجوز ذخیره‌شدهٔ کنترل دسکتاپ رضایت
-عملیات تحت پوشش است. قرارداد قبلی F02/F11 که دکمهٔ جداگانه برای هر عملیات
-می‌خواست، با [قرارداد مشترک مجوز](PERSISTENT_PERMISSIONS_FA.md) جایگزین شد.
+Since 2026-10-25, by explicit owner decision, the stored desktop-control
+permission is consent for the operations it covers. The earlier F02/F11
+contract, which required a separate button per operation, was replaced by the
+[shared permission contract](PERSISTENT_PERMISSIONS.md).
 
-`PermissionPolicy` در دروازه و پس از گرفتن نوبت ورودی اعمال می‌شود. در مسیر
-اصلی، کنترل با پیامد ناشناخته همچنان مشاهدهٔ مستقل و یکتای هدف می‌خواهد، اما
-`ControlConfirmer` را دوباره صدا نمی‌زند. مجوز، token ورودی سیستم‌عامل و قابلیت
-ابزار لازم‌اند. مدل و برچسب کنترل مجوز صادر نمی‌کنند. ارسال، حذف و پرداخت
-هنوز ابزار دارای قرارداد پیامد و مجوز اختصاصی می‌خواهند؛ اعتماد کلی ابزار
-پیاده‌سازی‌نشده ایجاد نمی‌کند.
+## Enforcement
 
-مشاهده به درخواست، قابلیت، نام و شواهد هدف، برنامه/PID/token/نسل و وضعیت مطلوب
-متصل است. `ControlApproval` یک‌بارمصرف و مهلت اصلی ده‌ثانیه‌ای حفظ شده‌اند.
-پیش از پیمایش، اگر API استاندارد ویژگی‌های پنجره موجود باشد، خوانده می‌شود
-تا ارائه‌دهندهٔ دارای صدور برحسب تقاضا فرصت آماده‌سازی داشته باشد. مقدار
-ویژگی‌ها نگه‌داری یا وارد مدل نمی‌شود. برای اولین فرزند غایب، حداکثر سه
-خواندنِ آمادگی و دو مکث ۵۰ میلی‌ثانیه‌ای انجام می‌شود؛ پس از آن پنجرهٔ فعال
-دوباره انتخاب و درخت کامل با تمام قیود اعتبارسنجی می‌شود. نتیجهٔ آمادگی به‌تنهایی
-شاهد کنترل نیست؛ فرزندِ همچنان غایب یا شمار ناخوانا اجازهٔ اجرا نمی‌دهد.
-واژه‌های پایانیِ نقش مانند button و option جزئی از نام کامل باقی می‌مانند؛
-نام کوتاهِ متفاوت به‌جای نام گفته‌شده انتخاب نمی‌شود. نام، نقش، وضعیت و مسیر
-ساختاری فیلدهای جدا هستند. کنترل دارای هویت ساختاری AT-SPI می‌تواند بدون
-مختصات، از Action خودش اجرا شود؛ این استثنا مجوز مختصات حدسی ایجاد نمی‌کند.
-اگر محدودهٔ SCREEN برنامه مبدأ صفر بدهد و با قاب GNOME جا نشود، مسیر
-معنایی فقط با پنجرهٔ فعال یکتا از همان PID، تطابق دقیق اندازهٔ مثبت قاب
-و محدودهٔ صریح WINDOW با مبدأ صفر پذیرفته می‌شود. محدودهٔ WINDOW هر کنترل
-باید مثبت و تماماً داخل همان پنجره باشد. در این حالت مختصات سراسری تولید
-نمی‌شود و این شواهد مجوز کلیک مختصاتی نیستند. اختلاف اندازه یا محدودهٔ نسبی
-نامعتبر همچنان رد می‌شود؛ این قاعده به نام برنامه وابسته نیست.
-هدف دوباره resolve و با شواهد قبلی مقایسه می‌شود: ساختار، نقش، موقعیت و وضعیت
-AT-SPI یا کادر و هندسهٔ OCR. helper درست پیش از تغییر، هویت، تمرکز، موقعیت،
-وضعیت، نسل مجوز و لغو را بررسی می‌کند. OCR وضعیت boolean را حدس نمی‌زند.
+`PermissionPolicy` is applied in the gate and again after the input turn is
+acquired. In the main path a control with an unknown outcome still requires an
+independent, unique observation of the target but does not call
+`ControlConfirmer` again. Permission, the OS input token and the tool capability
+are all required. A model and a control label never grant permission. Send,
+delete and payment still require a tool with its own outcome and permission
+contract; a general tool trust implements none of them.
 
-عمل‌های جهت‌دار `check` و `uncheck` فقط با وضعیت boolean خوانای کنترل
-پذیرفته می‌شوند: روشن‌کردن از خاموش با `check` و خاموش‌کردن از روشن با
-`uncheck`. برای کلیک صریح روی چنین گزینه‌ای، جهت از معکوس وضعیت مشاهده‌شده
-به دست می‌آید. نام عمل از API غیربومی‌سازی‌شده خوانده می‌شود؛ شاخص صفر فرض
-نمی‌شود و بیش از یک عمل سازگار همچنان ابهام است. وضعیتِ ازقبل برقرار، بدون
-اجرای عمل تأیید می‌شود. پس از عمل، موفقیت تغییر وضعیت فقط با بازخوانی همان
-کنترل تأیید می‌شود؛ پاسخ موفق API به‌تنهایی کافی نیست.
+An observation is bound to the request, capability, name and target evidence,
+application/PID/token/generation and desired state. The single-use
+`ControlApproval` and its original ten-second budget are kept.
 
-فهرست مشترک کنترل‌ها، نتیجهٔ نسخه‌دار شامل وضعیت پیمایش، کنترل‌های معتبر و
-نام‌های ردشده دارد. خطای خواندن، درخت ناقص یا پاسخ خراب helper با «فهرست
-موفق و خالی» یکسان نیست و به OCR منتقل نمی‌شود. نام تکراری یا نامعتبر نیز
-از مسیر OCR دوباره معتبر نمی‌شود. نبود صریح برنامه در AT-SPI با شکست
-پیمایش تفکیک می‌شود؛ مسیر تصویری موجود فقط با شواهد معتبر و قیود قبلی قابل
-استفاده است. علت ثابت خطای اجرا در `visible_control_observation:<reason>`
-به پیام فارسی یا انگلیسی تبدیل می‌شود؛ متن پنجره و خطای خام منتشر نمی‌شوند.
-این قرارداد برای همهٔ برنامه‌ها مشترک است؛ وجود قابلیت کنترل در همهٔ آن‌ها
-از این قرارداد نتیجه نمی‌شود.
+## Observation rules
 
-بستن پنجره از ابزار اختصاصی و `CloseAuthorizedWindow` استفاده می‌کند؛ کلیک
-عمومی روی Close با این مجوز پشتیبانی‌شده نمی‌شود. روش‌های قدیمی تأیید Qt/بومی
-برای سازگاری و آزمون مستقل باقی‌اند؛ ترکیب اصلی سیاست ماندگار را تزریق می‌کند.
-رضایت از تنظیمات می‌آید و اتصال یک‌بارمصرف، اعتبار همان درخواست را نگه می‌دارد.
+- Before scrolling, if the standard window-properties API is available it is
+  read so a provider with on-demand export has time to prepare. Property values
+  are not retained or passed to a model.
+- For the first absent child, at most three readiness reads and two 50 ms pauses
+  are made; then the active window is selected again and the full tree is
+  validated with every constraint. A readiness result alone is not evidence of a
+  control; a still-absent child or an unreadable count does not permit
+  execution.
+- Trailing role words such as *button* and *option* remain part of the full
+  name; a different shorter name is not selected in place of the spoken one.
+  Name, role, state and structural path are separate fields.
+- A control with AT-SPI structural identity may run through its own Action
+  without coordinates. This exception does not permit guessed coordinates.
+- If the source application's SCREEN extents are zero-origin and do not fit the
+  GNOME frame, the semantic path is accepted only with a unique active window of
+  the same PID, an exact positive frame-size match and explicit zero-origin
+  WINDOW extents. Every control's WINDOW extents must be positive and entirely
+  inside that window. No global coordinates are produced in this case and this
+  evidence does not authorize a coordinate click. A size mismatch or invalid
+  relative extents is still rejected. The rule does not depend on an application
+  name.
+- The target is resolved again and compared with earlier evidence: AT-SPI
+  structure, role, position and state, or OCR box and geometry. Just before the
+  change the helper rechecks identity, focus, position, state, permission
+  generation and cancellation. OCR does not guess boolean state.
 
-اجرای ورودی لزوماً موفقیت نیست؛ [قرارداد پس‌شرط](ACTION_POSTCONDITIONS.md)
-حفظ شده است. آزمون‌های هدف تغییریافته، لغو، انقضا و نبود دیالوگ در
-[گزارش پیاده‌سازی](../development/PERSISTENT_PERMISSIONS_2026-10-25_FA.md) آمده‌اند.
-آزمون زندهٔ کلیک در همهٔ برنامه‌ها و مسیرهای OCR/AT-SPI ادعا نشده است.
-ابزار فقط‌خواندنیِ اختیاری و وضعیت مانع مشترک کنترل برنامه‌ها در
-[گزارش L04](../development/L04_VISIBLE_CONTROL_2026-10-26_FA.md) آمده‌اند.
+## Directed check / uncheck
 
-</div>
+`check` and `uncheck` are accepted only with a readable boolean state:
+`check` turns an off control on and `uncheck` turns an on control off. For an
+explicit click on such an option, the direction is derived from the inverse of
+the observed state. The action name is read from the non-localized API; index
+zero is not assumed and more than one compatible action is still ambiguous.
+An already-satisfied state is confirmed without action. After the action, a
+change is confirmed only by re-reading the same control; a successful API reply
+alone is insufficient.
+
+## Shared control list
+
+The shared list is a versioned result with traversal state, valid controls and
+rejected names. A read error, incomplete tree or malformed helper reply is not
+equivalent to a "successful, empty list" and does not fall through to OCR. A
+duplicate or invalid name is not made valid again via OCR. An explicit absence of
+the application in AT-SPI is distinguished from a traversal failure; the
+existing visual path is usable only with valid evidence and its earlier
+constraints. A stable execution-failure cause is converted to a Persian or
+English message from `visible_control_observation:<reason>`; window text and raw
+errors are not published. This contract is shared by all applications; it does
+not follow that every application has the control capability.
+
+## Focused scroll and More
+
+A final scroll request carries the `WindowObservation` (application, PID,
+window token, generation and deadline) read before interpretation, in
+`CommandIntent.scroll_observation`. The coordinator rejects the request when
+that evidence is missing, expired or belongs to another application. The
+evidence is never refreshed: it travels unchanged through the action queue and
+input admission, and its deadline bounds the whole operation.
+`DesktopScrollExecutor` rechecks identity and the original token before
+admission, and `desktop_scroll_helper.py` rechecks them after acquiring the
+input session and before every input event. A replacement window of the same
+application or process, a changed PID or an expired deadline sends no scroll
+and yields `failed` / `scroll_focus_changed`; a stop after the first event stays
+`unknown`. A scroll step inside a multi-step plan has no such evidence and is
+rejected.
+
+`More` / `Again` reuses the recent direction, amount and area only within 30
+seconds and only when the newly observed window has the same identity and token
+as the scroll it repeats; the repeated request carries its own new evidence.
+Telegram's internal list scrolls are unchanged by this rule; their window
+binding across helper calls is tracked separately.
+
+## Close
+
+Window close uses the dedicated tool and `CloseAuthorizedWindow`; a generic
+click on Close is unsupported with this permission. Older Qt/native confirmation
+methods remain for compatibility and isolated tests; the main composition
+injects the persistent policy. Consent comes from settings and the one-use
+binding keeps the validity of that request.
+
+Input dispatch is not necessarily success; the
+[postcondition contract](ACTION_POSTCONDITIONS.md) is kept. Tests for changed
+target, cancellation, expiry and absent dialog are in the
+implementation report (`PERSISTENT_PERMISSIONS_2026-10-25_FA.md`, source repository only).
+Live click testing in all applications and OCR/AT-SPI paths is not claimed. The
+optional read-only tool and the shared blocker state of application control are
+in the L04 report (`L04_VISIBLE_CONTROL_2026-10-26_FA.md`, source repository only).

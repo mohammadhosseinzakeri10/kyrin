@@ -17,6 +17,7 @@ from kyrin.actions.models import (
     ActionRequest,
     ActionResult,
 )
+from kyrin.actions.platforms.open_windows import OpenWindowPickerExecutor
 from kyrin.actions.platforms.telegram import ChatVerifier
 from kyrin.actions.telegram_selection import TelegramChatSelection
 from kyrin.actions.telegram_verification import ChatSearchChoices, ChatSearchMatch
@@ -623,6 +624,7 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
 
     monkeypatch.setattr(ubuntu, "SpeechSessionController", ScrollSpeechController)
     monkeypatch.setattr(ubuntu, "DesktopScrollExecutor", ScrollExecutor)
+    monkeypatch.setattr(ubuntu, "read_active_window_token", lambda: "window-7")
     factory = ubuntu.UbuntuSessionFactory(
         stt_openers={"fake": lambda selection: FakeEngine()},
         on_event=on_event,
@@ -643,6 +645,11 @@ def test_scroll_reaches_unselected_focused_app_without_window_controls(
         runtime.run()
 
     assert [request.intent.target for request in requested] == ["unselected.desktop"]
+    # Scroll-only permission still binds the request to its observed window.
+    evidence = requested[0].intent.scroll_observation
+    assert evidence is not None
+    assert evidence.identity == ("unselected.desktop", 42)
+    assert evidence.window_token == "window-7"
     assert any(
         isinstance(event, ActionFeedback)
         and event.outcome is ActionOutcome.LAUNCH_ACCEPTED
@@ -1034,6 +1041,59 @@ def test_ubuntu_terminal_menu_reaches_authorized_dry_run(
     ] == [CommandKind.NEW_APP_WINDOW]
 
 
+@pytest.mark.parametrize("check", ["capability", "picker_allowlist"])
+def test_generic_app_previews_work_without_terminal_and_respect_window_permissions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, check: str
+) -> None:
+    picker_ids: list[dict[str, str]] = []
+    original_picker = OpenWindowPickerExecutor
+
+    def picker(
+        fallback: ActionExecutor,
+        desktop_ids: Mapping[str, str],
+        close_desktop_ids: Mapping[str, str] | None = None,
+        *,
+        legacy_picker_app: str | None = None,
+    ) -> ActionExecutor:
+        picker_ids.append(dict(desktop_ids))
+        return original_picker(fallback, desktop_ids, close_desktop_ids)
+
+    monkeypatch.setattr(ubuntu, "OpenWindowPickerExecutor", picker)
+
+    class Presence:
+        def observe(self, app_id: str) -> WindowPresence:
+            return WindowPresence.OPEN
+
+        def count(self, app_id: str) -> int:
+            return 2
+
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda _: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        executor_factory=lambda _: RecordingExecutor(),
+        window_presence_factory=lambda _: Presence(),
+    )
+    settings = _settings(
+        tmp_path,
+        action_execution_enabled=True,
+        allowed_apps=(
+            AllowedApp("telegram", "telegram.desktop"),
+            AllowedApp("browser", "browser.desktop"),
+        ),
+        allowed_window_apps=("browser",),
+    )
+    with factory(settings) as session:
+        runtime = cast(LiveCommandRuntime, session)
+        assert runtime._gate is not None
+        if check == "capability":
+            assert CommandKind.SHOW_APP_WINDOWS in runtime._gate.policy.supported_kinds
+        else:
+            assert picker_ids == [{"browser": "browser.desktop"}]
+
+
 def test_enabled_actions_use_only_exact_registered_allowlist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1119,6 +1179,151 @@ def test_optional_foreground_observer_and_mascot_report_confirmed_action(
     )
     assert VisualStatus.EXECUTING in {item.status for item in visuals}
     assert VisualStatus.CONFIRMED in {item.status for item in visuals}
+
+
+def test_mascot_voice_controls_restore_ready_and_standby_captions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visuals: list[VisualPresentation] = []
+
+    class ControlledSpeech(FakeSpeechController):
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
+            yield TranscriptUpdate(0, "Start listening", TranscriptStatus.FINAL, "en")
+            assert visuals[-1] == VisualPresentation(
+                VisualStatus.READY, "Ready to listen…"
+            )
+            yield TranscriptUpdate(1, "Stop listening", TranscriptStatus.FINAL, "en")
+            assert visuals[-1].status is VisualStatus.READY
+            assert "Start listening" in visuals[-1].caption
+            assert "Standby" in visuals[-1].caption
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", ControlledSpeech)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        source_factory=lambda config: FakeAudioInput(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        visual_publish=visuals.append,
+        voice_standby=True,
+    )
+    with factory(_settings(tmp_path)) as runtime:
+        runtime.run()
+
+
+def test_mascot_tracks_capture_and_gui_mode_without_speech(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", FakeSpeechController)
+    visuals: list[VisualPresentation] = []
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        source_factory=lambda config: FakeAudioInput(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        visual_publish=visuals.append,
+        voice_standby=True,
+    )
+    with factory(_settings(tmp_path)) as session:
+        assert "Starting microphone" in visuals[-1].caption
+        runtime = cast(LiveCommandRuntime, session)
+        source = cast(FakeSpeechController, runtime._controller)
+        pipeline = source.factory()
+        assert pipeline.on_audio_ready is not None
+        pipeline.on_audio_ready()
+        assert "Standby" in visuals[-1].caption
+        runtime.set_commands_active(True)
+        assert visuals[-1] == VisualPresentation(VisualStatus.READY, "Ready to listen…")
+        runtime.set_commands_active(False)
+        assert "Standby" in visuals[-1].caption
+    assert "Microphone off" in visuals[-1].caption
+
+
+def test_mascot_repeated_start_acknowledges_after_partial_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visuals: list[VisualPresentation] = []
+
+    class ControlledSpeech(FakeSpeechController):
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
+            yield TranscriptUpdate(0, "start", TranscriptStatus.PARTIAL, "en")
+            assert visuals[-1].status is VisualStatus.PROCESSING
+            yield TranscriptUpdate(0, "Start listening", TranscriptStatus.FINAL, "en")
+            assert visuals[-1].caption == "Ready to listen…"
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", ControlledSpeech)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        source_factory=lambda config: FakeAudioInput(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        visual_publish=visuals.append,
+    )
+    with factory(_settings(tmp_path)) as runtime:
+        runtime.run()
+
+
+def test_mascot_retry_rejects_capture_ready_from_the_previous_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visuals: list[VisualPresentation] = []
+
+    class RecoveringSpeech(FakeSpeechController):
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
+            old_pipeline = self.factory()
+            assert old_pipeline.on_audio_ready is not None
+            old_pipeline.on_audio_ready()
+            assert visuals[-1].caption == "Ready to listen…"
+            yield SpeechSessionEnded(0, SpeechToTextError("synthetic"), 0)
+            assert "reconnecting" in visuals[-1].caption
+            old_pipeline.on_audio_ready()
+            assert "reconnecting" in visuals[-1].caption
+            current = self.factory()
+            assert current.on_audio_ready is not None
+            current.on_audio_ready()
+            assert visuals[-1].caption == "Ready to listen…"
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", RecoveringSpeech)
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=FakeMicrophones(),
+        source_factory=lambda config: FakeAudioInput(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        visual_publish=visuals.append,
+    )
+    with factory(_settings(tmp_path)) as runtime:
+        runtime.run()
+
+
+def test_mascot_startup_failure_does_not_leave_a_ready_message(tmp_path: Path) -> None:
+    visuals: list[VisualPresentation] = []
+    microphones = FakeMicrophones()
+    microphones.missing = True
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda selection: FakeEngine()},
+        on_event=lambda _: None,
+        microphones=microphones,
+        source_factory=lambda config: FakeAudioInput(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        visual_publish=visuals.append,
+    )
+    with pytest.raises(MicrophoneError):
+        with factory(_settings(tmp_path)):
+            pytest.fail("missing microphone must not open a session")
+    assert visuals[0].caption == "Starting microphone…"
+    assert visuals[-1].status is VisualStatus.FAILED
 
 
 def test_registered_existing_window_is_activated_without_relaunch(
@@ -1233,7 +1438,14 @@ def test_chat_capability_requires_saved_permission_and_verification_dependencies
         def ready(self) -> bool:
             return True
 
-        def verify(self, app_id: str, pid: int, target: str = "Saved Messages") -> bool:
+        def verify(
+            self,
+            app_id: str,
+            pid: int,
+            target: str = "Saved Messages",
+            *,
+            window_token: str | None = None,
+        ) -> bool:
             return True
 
     class TelegramObserver:
@@ -1313,13 +1525,15 @@ def test_all_input_routes_share_compound_ownership(
         def ready(self) -> bool:
             return True
 
-        def find_search_choices(self, *_args: object) -> ChatSearchChoices:
+        def find_search_choices(
+            self, *_args: object, **_kwargs: object
+        ) -> ChatSearchChoices:
             return choices
 
         def choice_status(self) -> str:
             return "classified"
 
-        def verify(self, *_args: object) -> bool:
+        def verify(self, *_args: object, **_kwargs: object) -> bool:
             return True
 
         def find_visible_control(self, *_args: object) -> VisibleControlTarget:
@@ -1379,10 +1593,11 @@ def test_all_input_routes_share_compound_ownership(
             )
         return subprocess.CompletedProcess(args, 0, marker, "")
 
-    monkeypatch.setattr(
-        "kyrin.actions.platforms.desktop_control.read_active_window_token",
-        lambda: "window-7",
-    )
+    for adapter in ("desktop_control", "desktop_scroll", "telegram"):
+        monkeypatch.setattr(
+            f"kyrin.actions.platforms.{adapter}.read_active_window_token",
+            lambda: "window-7",
+        )
     original_runtime = LiveCommandRuntime
 
     def capture_runtime(*args: object, **kwargs: object) -> LiveCommandRuntime:
@@ -1440,6 +1655,11 @@ def test_all_input_routes_share_compound_ownership(
                             _window_evidence_for_control()
                             if contender is CommandKind.VISIBLE_CONTROL
                             else None
+                        ),
+                        scroll_observation=(
+                            None
+                            if contender is CommandKind.VISIBLE_CONTROL
+                            else _window_evidence_for_control()
                         ),
                     ),
                 )
@@ -1652,3 +1872,119 @@ def test_selected_microphone_barge_in_wiring_never_authorizes_actions(
     assert (sources[0] is source) is aec_available
     assert isinstance(sources[0], PlaybackGuardInput) is (not aec_available)
     assert executor.requests == []
+
+
+@pytest.mark.parametrize(
+    ("utterance", "expected_reports"),
+    [
+        ("Hello Kairin", 2),
+        ("open Telegram", 0),
+    ],
+)
+@pytest.mark.parametrize("file_source", [False, True])
+def test_real_command_device_report_reaches_session_event_without_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    utterance: str,
+    expected_reports: int,
+    file_source: bool,
+) -> None:
+    from kyrin.app.events import CommandDeviceReported
+    from kyrin.commands.ollama_device import (
+        CommandDeviceReport,
+        DeviceObservation,
+        InferenceState,
+        ModelPlacement,
+        ModelPresence,
+    )
+    from kyrin.commands.ollama_engine import OllamaCommandEngine
+
+    class GreetingSpeech(FakeSpeechController):
+        def events(self) -> Iterator[LiveSpeechEvent | SpeechSessionEnded]:
+            yield TranscriptUpdate(0, utterance, TranscriptStatus.FINAL, "en")
+
+    class FakeServer:
+        def __enter__(self) -> str:
+            return "http://127.0.0.1:11435"
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+    order: list[str] = []
+
+    def transport(url: str, payload: dict[str, object], timeout: float) -> object:
+        if payload.get("keep_alive") == 0:
+            order.append("unload")
+            return {"model": payload["model"], "done": True, "done_reason": "unload"}
+        order.append("infer")
+        return {
+            "model": "qwen3.5:4b",
+            "done": True,
+            "prompt_eval_count": 10,
+            "message": {"content": '{"route":"respond","steps":[],"reply":"Hello!"}'},
+        }
+
+    def engine(
+        url: str, model: str, device: DevicePreference, **kwargs: object
+    ) -> OllamaCommandEngine:
+        callback = cast(
+            Callable[[CommandDeviceReport], None], kwargs["on_device_report"]
+        )
+        return OllamaCommandEngine(
+            url,
+            model,
+            device,
+            transport=transport,
+            token_counter=lambda _: 10,
+            device_probe=lambda *args: DeviceObservation(
+                ModelPlacement.MIXED, ModelPresence.LOADED, "ollama_ps_memory"
+            ),
+            on_device_report=callback,
+            resources=ModelResources(memory=lambda: MemorySnapshot()),
+        )
+
+    monkeypatch.setattr(ubuntu, "SpeechSessionController", GreetingSpeech)
+    monkeypatch.setattr(ubuntu, "OllamaCommandEngine", engine)
+    monkeypatch.setattr(ubuntu, "installed_ollama_models", lambda path: ("qwen3.5:4b",))
+    events: list[ApplicationEvent] = []
+    executor = RecordingExecutor()
+    factory = ubuntu.UbuntuSessionFactory(
+        stt_openers={"fake": lambda _: FakeEngine()},
+        on_event=events.append,
+        microphones=FakeMicrophones(),
+        catalog=_catalog(tmp_path),
+        detector_factory=FakeDetector,
+        executor_factory=lambda _: executor,
+        command_server_factory=lambda _: FakeServer(),
+    )
+    settings = _settings(
+        tmp_path,
+        command_model=CommandModelSelection(
+            "ollama", "qwen3.5:4b", tmp_path, DevicePreference.GPU
+        ),
+    )
+    captured: list[CommandDeviceReported] = []
+    selected_factory = (
+        factory.for_audio_file(
+            tmp_path / "unused.wav", on_command_device=captured.append
+        )
+        if file_source
+        else factory
+    )
+    with selected_factory(settings) as runtime:
+        assert isinstance(runtime, LiveCommandRuntime)
+        session_id = runtime.listening_diagnostics.session_id
+        runtime.run()
+    reports = [e for e in events if isinstance(e, CommandDeviceReported)]
+    assert len(reports) == expected_reports
+    assert captured == (reports if file_source else [])
+    if not expected_reports:
+        assert not order
+        assert not executor.requests
+        return
+    assert all(e.session_id == session_id and e.store_path == tmp_path for e in reports)
+    assert reports[-1].report.observation.placement is ModelPlacement.MIXED
+    assert reports[-1].report.state is InferenceState.COMPLETED
+    assert reports[-1].report.residency is ModelPresence.UNKNOWN
+    assert order == ["infer", "unload"]
+    assert not executor.requests

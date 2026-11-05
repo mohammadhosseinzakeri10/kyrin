@@ -1,51 +1,66 @@
-<div dir="rtl" lang="fa">
+# Model admission and residency (F19)
 
-# پذیرش و اقامت مدل‌ها — F19
+(English migration of a previously Persian-only note; the original is
+preserved in the private migration pre-images and in Git history.)
 
-در پردازهٔ برنامه، `MODEL_RESOURCES` میان نشست STT، مدل فرمان، خواندن OCR
-در `ScreenTextReader`، OCR سند و تولید TTS مشترک است؛ پیش‌نمایش TTS و
-نشست فایل نیز همین سیاست را مصرف می‌کنند. قراردادهای میکروفون، مجوز عمل و
-اعتبارسنجی مستقل خروجی مدل تغییر نکرده‌اند. استفادهٔ مستقیم از backendهای
-STT یا OCR خارج از این ترکیب، خودبه‌خود مدیریت نمی‌شود.
+- **Status:** current policy for models inside the application process; code
+  checked in `src/kyrin/model_resources.py` and
+  `src/kyrin/commands/{ollama_engine,token_budget}.py`. Real cold/warm
+  baselines, hardware peak memory and live concurrency were never measured; no
+  speed or memory improvement is claimed.
 
-هر بارگذاری یا فراخوانی مدل فقط یک مالک دارد. ترتیب انتظار STT، فرمان، OCR
-تعاملی، TTS و سپس OCR سند است؛ ترتیب در هر اولویت FIFO است. چهار انتظار
-عادی و یک جای اضافی برای STT مجازند. انتظار عادی پنج ثانیه و STT صدوبیست
-ثانیه سقف دارد؛ مهلت/لغو عملیات موجود نیز بررسی می‌شود. صف پر، انقضا و کمبود
-حافظه پیش از بارگذاری خطا می‌دهند. فراخوانی بومیِ شروع‌شده پیش‌دستی نمی‌شود؛
-لغو منطقی به‌تنهایی مجوز آزادکردن مالکیت آن نیست. توقف و لغو STT از صف عبور
-نمی‌کنند. این سیاست تضمین تأخیر بلادرنگ نیست.
+## Scope and ownership
 
-در اصلاح L01، ترکیب زندهٔ Whisper و Omnilingual هنگام بی‌گفتاری، سکوت را
-در بافر محدودِ پیش‌گفتار نگه می‌دارد تا انتظار پشت فراخوانی مدل فرمان به‌تنهایی
-صف STT را پر نکند. این تغییر در خط صوت است؛ مالکیت و نوبت مدل‌ها را دور
-نمی‌زند و انتظار طولانی همراه گفتار واقعی همچنان می‌تواند به سقف صف برسد.
-جزئیات در [قرارداد خط صوت](../audio/LIVE_SPEECH_PIPELINE_FA.md) آمده است.
+In the application process, `MODEL_RESOURCES` is shared by the STT session, the
+command model, `ScreenTextReader` OCR, document OCR and TTS generation; TTS
+preview and file sessions use the same policy. Microphone, action permission and
+independent validation of model output are unchanged. Direct use of STT or OCR
+backends outside this composition is not managed automatically.
 
-STT تا بسته‌شدن واقعی موتور در نشست مقیم می‌ماند؛ نشست STT دوم تا آزادشدن
-اولی پذیرفته نمی‌شود. مدل فرمان فقط در محدودهٔ درخواست نگه داشته می‌شود و
-حتی پس از شکست شمارش یا inference، تخلیهٔ صریح انجام می‌شود. پاسخ تخلیه باید
-تکمیل را تأیید کند؛ شکست پاک‌سازی، پذیرش کار مدل‌های بعدی را تا راه‌اندازی
-مجدد مسدود می‌کند. OCRهای داخلی در پردازهٔ موقت اجرا می‌شوند. TTS پس از هر
-تولید، مدل را پیش از پخش آزاد می‌کند؛ فراخوانی بعدی دوباره بارگذاری می‌کند.
-انتخاب خودکار خانواده‌های سبک ONNX به CPU می‌رود؛ انتخاب صریح CPU/GPU و
-انتخاب خانواده/زبان حفظ می‌شود. سرویس گفتار سیستم زیر مدیریت مدل محلی نیست.
+A model load or call has exactly one owner. Wait order: STT, command, interactive
+OCR, TTS, then document OCR; FIFO within a priority. Four normal waiters and one
+extra place for STT are allowed. A normal wait is capped at five seconds, STT at
+120 seconds (`ResourceLimits.wait_seconds`, `stt_wait_seconds`); the existing
+operation deadline/cancel is also checked. A full queue, expiry and low memory
+fail before loading. A native call already started is not pre-empted; logical
+cancel alone does not release its ownership. STT stop and cancel do not pass
+through the queue. The policy is not a real-time latency guarantee.
 
-`ResourceLimits` و `PeakMemory` با تزریق یک `ModelResources` مشترک قابل
-تنظیم‌اند. پروفایل، peak اندازه‌گیری‌شدهٔ RAM/VRAM و اقامت بیکار را می‌گیرد؛
-باید runtime، activation، KV cache و حاشیهٔ اندازه‌گیری را برای محدودهٔ واقعی
-ورودی و تنظیمات پوشش دهد. اندازهٔ فایل وزن ورودی این سیاست نیست. سقف صریح
-با peak نامعلوم رد می‌شود. peak کار جاری به اقامت مدل‌های دیگر افزوده و با
-سقف مقایسه می‌شود؛ حافظهٔ آزاد نیز هنگام پذیرش دوباره بررسی می‌شود و اقامت
-خود مدل دوبار حساب نمی‌شود. پیش‌فرض برای RAM حداقل ۵۱۲ مگابایتِ دودویی
-حاشیه می‌خواهد؛ خواندن RAM از `MemAvailable` است و VRAM فقط با probe تزریقی
-دریافت می‌شود. پروفایل واقعی peak یا سقف ساختگی برای این دستگاه ثبت نشده؛
-در حالت بدون پروفایل، اجرای سری و تخلیه اعمال می‌شوند، اما جلوگیری قطعی از
-OOM تضمین نمی‌شود. تغییر مدل، دستگاه، context یا دامنهٔ تصویر/صوت نیازمند
-بازبینی پروفایل است. کلیدها به‌ترتیب زیر ساخته می‌شوند؛ برای OCR تعاملی،
-پروفایل باید همهٔ مدل‌ها و اندازه‌های مجاز همان کلاس backend را پوشش دهد.
+In the L01 correction, the live Whisper and Omnilingual composition keeps
+silence in the bounded pre-speech buffer when there is no speech, so waiting
+behind a command-model call alone does not fill the STT queue. This is in the
+audio line; it does not bypass model ownership or turn order, and a long wait
+with real speech can still reach the queue limit. See the
+[live speech pipeline](../audio/LIVE_SPEECH_PIPELINE.md).
 
-</div>
+## Residency
+
+STT stays resident until the engine is actually closed; a second STT session is
+not accepted until the first is released. The command model is held only for the
+request scope and is explicitly unloaded even after a failure in counting or
+inference. The unload answer must confirm completion; a cleanup failure blocks
+admission of later model work until restart. Built-in OCRs run in a short-lived
+process. TTS releases its model before playback after each generation; the next
+call reloads it. Automatic selection of light ONNX families goes to CPU; an
+explicit CPU/GPU choice and family/language choice are kept. The system speech
+service is not under local-model management.
+
+## Limits and profiles
+
+`ResourceLimits` and `PeakMemory` can be configured by injecting one shared
+`ModelResources`. A profile carries the measured RAM/VRAM peak and idle
+residency; it must cover runtime, activation, KV cache and measurement margin for
+the real input range and settings. Weight file size is not the policy input. An
+explicit limit with an unknown peak is rejected. The current work's peak is added
+to the residency of other models and compared with the limit; free memory is
+rechecked at admission, and a model's own residency is not counted twice. By
+default RAM needs at least 512 binary megabytes of headroom
+(`ram_headroom_bytes`); RAM is read from `MemAvailable` and VRAM only through an
+injected probe. No real peak profile or limit is recorded for this machine; with
+no profile, serial execution and unload apply but OOM prevention is not
+guaranteed. A change of model, device, context or image/audio scope requires
+re-reviewing the profile. Keys are built as below; for interactive OCR the
+profile must cover all models and sizes allowed for the backend class.
 
 ```text
 stt:{backend}:{model_path}:{device}
@@ -55,41 +70,60 @@ tts:{backend}:{model_path}:{provider}
 document_ocr:{backend}:{device}
 ```
 
-<div dir="rtl" lang="fa">
+## Command-model token budget
 
-بودجهٔ فرمان از `CommandTokenBudget` می‌آید: پیش‌فرض ۴۰۹۶ توکن context،
-۷۶۸ توکن پاسخ و ۳۲ توکن حاشیه. پرسش تأیید پاسخ ۶۴توکنی دارد. قالب کامل
-گفت‌وگو از Ollama با برش غیرفعال گرفته می‌شود و `llama-tokenize` نصب‌شده،
-واژگان همان لایهٔ GGUF در manifest مدل انتخاب‌شده را مصرف می‌کند. متن خصوصی
-با ورودی استاندارد منتقل می‌شود؛ در فایل یا خط فرمان نوشته نمی‌شود.
-شمار نویسه یا گزینه، جای شمار توکن نیست. ابزار در PATH، مسیر صریح
-`KYRIN_COMMAND_TOKENIZER` یا runtime محلی موجود کشف می‌شود؛ نصب یا دانلود
-خودکار وجود ندارد. API رندر نسخه‌وابسته است: قرارداد نسخهٔ ۰٫۳۱٫۱ بررسی
-شده و نسخهٔ قدیمی‌تر، نبود ابزار، قالب نامعتبر یا ناسازگاری شمارش موجب رد
-مسیر مدل می‌شود. پشتیبانی عملی همهٔ مدل‌ها/نسخه‌های آینده تأیید نشده است.
+`CommandTokenBudget` (`ollama_engine.py`) defaults to 4096 context tokens, 768
+output tokens and 32 safety tokens; the confirmation question has a 64-token
+answer. The full chat template is obtained from Ollama with truncation disabled,
+and an installed `llama-tokenize` uses the vocabulary of the GGUF layer in the
+selected model's manifest. Private text is passed on standard input, not written
+to a file or command line. Character or option counts do not replace token
+counts. The tool is discovered in `PATH`, through the explicit path
+`KYRIN_COMMAND_TOKENIZER`, or an existing local runtime; nothing is installed or
+downloaded automatically. The render API is version-dependent: the contract of
+version 0.31.1 was checked, and an older version, a missing tool, an invalid
+template or a counting mismatch rejects the model path. Practical support for
+all models/future versions is unverified.
 
-متن جاری، زبان، مشاهدهٔ برنامه، فهرست کامل شناسهٔ برنامه‌های مجاز، عملیات مجاز و قابلیت کنترل حذف
-نمی‌شوند. پرسش و پاسخ تأیید نیز کامل می‌مانند. برنامه‌ها و کنترل‌ها براساس
-ارتباط با متن جاری رتبه‌بندی و سپس با شمارش قالب کامل بسته می‌شوند؛ همهٔ
-تطبیق‌های صریح، از جمله تکرارهای مبهم، حفظ می‌شوند یا کل درخواست رد می‌شود.
-history پس‌زمینهٔ اختیاری و دارای اولویت آخر است. حذف گزینه با نشانگر ناقص‌بودن
-همراه است و به مجوز کشف یا هدف تازه تبدیل نمی‌شود. اگر شواهد الزامی جا نشوند،
-inference اجرا نمی‌شود. `truncate=false` و `shift=false` ارسال و شمار واقعی
-`prompt_eval_count` با شمارش پیش از درخواست کنترل می‌شود؛ اختلاف بیش از یک
-توکن، خروجی را رد می‌کند. مدل همچنان فقط پیشنهاد معنا می‌دهد و مجوز اجرا نیست.
+The current text, language, application observation, the full list of allowed
+application ids, allowed operations and control capability are not dropped; the
+confirmation question and answer also stay complete. Applications and controls
+are ranked by relevance to the current text and then fitted with full-template
+counting; all explicit matches, including ambiguous duplicates, are kept or the
+whole request is rejected. Background history is optional and last priority.
+Dropping an option comes with an incompleteness marker and never becomes a
+discovery permission or a fresh target. If mandatory evidence does not fit,
+inference does not run. `truncate=false` and `shift=false` are sent, and the
+real `prompt_eval_count` is compared with the count before the request; a
+difference of more than one token rejects the output. The model still only
+proposes meaning and is not execution permission.
 
-مرزهای `model_resource_wait` و `model_resource_run` به سازوکار زمان‌سنجی
-مرحلهٔ F18 متصل‌اند و محتوای خصوصی ثبت نمی‌کنند. زمان اجرا شامل بارگذاری،
-شمارش و پاک‌سازی است. آزمون‌های fake، رقابت، فشار صف، لغو، کمبود حافظه، OOM،
-بارگذاری مجدد و حفظ شواهد prompt را پوشش می‌دهند. هیچ baseline واقعی سرد/گرم،
-peak سخت‌افزاری یا آزمون زندهٔ هم‌زمانی مدل‌ها در این اصلاح اجرا نشده؛ ادعای
-افزایش سرعت یا کاهش حافظه نداریم. گام بعد، سنجش کنترل‌شده با مدل‌های نصب‌شده و
-ثبت peak و تأخیر در شرایط ثابت با ابزار [F18](COMMAND_LATENCY.md) است.
+In the E06 correction the template is still rendered for each fresh request;
+only the real count of an identical full template, with fixed vocabulary-file and
+counter-program identity, can be reused within that counter's memory. Retention
+is limited to 32 entries of at most 64 KiB; larger text is fully counted but not
+retained. A change or loss of file identity stops reuse and no invalid output is
+cached. This cache is not a model or runner response; fresh inference, the
+`prompt_eval_count` check, budget, cancellation and unload are kept. A limited
+before/after comparison showed an effect for two repeated templates; the gain
+for fresh input and the true peak are unknown (the evaluation report is a
+private development note).
 
-منابع رسمی قرارداد:
-[چرخهٔ اقامت و شمار مصرف Ollama](https://docs.ollama.com/api/chat)،
-[نوع‌های نسخهٔ بررسی‌شده](https://github.com/ollama/ollama/blob/v0.31.1/api/types.go)،
-[رندر بدون inference](https://github.com/ollama/ollama/blob/v0.31.1/server/routes.go)،
-[توکن‌ساز محلی با بارگذاری واژگان](https://github.com/ggml-org/llama.cpp/blob/master/tools/tokenize/tokenize.cpp).
+## Timing and tests
 
-</div>
+The `model_resource_wait` and `model_resource_run` boundaries are connected to
+the F18 timing mechanism ([command latency](COMMAND_LATENCY.md)) and record no
+private content. Run time includes loading, counting and cleanup. Fake-model,
+race, queue-pressure, cancellation, low-memory, OOM, reload and prompt-evidence
+tests cover the behavior. No real cold/warm baseline, hardware peak or live
+concurrency test was run in F19. The next step is a controlled measurement with
+installed models, recording peak and latency under fixed conditions with the F18
+tool. Later limited measurements of existing models and the validity range of
+memory/time are recorded in private E45/E06 development notes; real peak and
+live acceptance remain separate from sampled peak and file/text replay.
+
+Official sources for the contract:
+[Ollama residency and usage counts](https://docs.ollama.com/api/chat),
+[checked version types](https://github.com/ollama/ollama/blob/v0.31.1/api/types.go),
+[render without inference](https://github.com/ollama/ollama/blob/v0.31.1/server/routes.go),
+[local tokenizer with vocabulary loading](https://github.com/ggml-org/llama.cpp/blob/master/tools/tokenize/tokenize.cpp).

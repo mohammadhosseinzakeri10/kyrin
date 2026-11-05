@@ -95,6 +95,16 @@ class QueuedActionDispatcher:
         with self._lock:
             return self._context.generation
 
+    def snapshot(self) -> tuple[str, ...]:
+        with self._lock:
+            return (
+                f"pending={self._queue.qsize()} limit={self._queue.maxsize} "
+                "unit=commands "
+                f"generation={self._context.generation} closed={self._closed} "
+                f"alive={self._thread is not None and self._thread.is_alive()} "
+                f"failed={self._error is not None}",
+            )
+
     def start(self) -> None:
         with self._lock:
             if self._thread is not None or self._closed:

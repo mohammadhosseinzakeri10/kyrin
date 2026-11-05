@@ -1,43 +1,23 @@
 # Documentation
 
-Start with the public guides below. KYRIN v0.1.0 is an experimental source
-release for Ubuntu/GNOME, with local models configured separately. These
-guides describe the tagged source and any documentation corrections to it.
+Start with [Getting started](GETTING_STARTED.md), then use the
+[English command guide](commands/USER_COMMAND_GUIDE.md). The current source
+targets Ubuntu/GNOME. Configure local speech models and desktop permissions
+separately.
 
-| Guide | Purpose |
+| Topic | References |
 | --- | --- |
-| [Getting started](GETTING_STARTED.md) | Install, configure a first speech session, and add desktop integration |
-| [Architecture](architecture/OVERVIEW.md) | Current components, contracts and data flow |
-| [Validation](VALIDATION.md) | Deterministic checks, live evidence and known limits |
-| [Release policy](RELEASE_POLICY.md) | Scope of the public snapshot and future private development |
-| [Project layout](development/PROJECT_LAYOUT.md) | Source, tests, scripts, models and local data |
-| [Local data](app/LOCAL_DATA_STORAGE.md) | Settings, installed model library, history and ignored development paths |
-| [Contributing](../CONTRIBUTING.md) | Development and review expectations |
-| [Security](../SECURITY.md) | Trust boundaries and private vulnerability reporting |
-| [Changelog](../CHANGELOG.md) | Published version history |
+| Project and milestones | [Roadmap](ROADMAP.md), [current context](../PROJECT_CONTEXT.md), [release policy](RELEASE_POLICY.md), [changelog](../CHANGELOG.md) |
+| Architecture | [Overview](architecture/OVERVIEW.md), [source layout](development/PROJECT_LAYOUT.md), [decision records](decisions/README.md) |
+| Recognition | [Live pipeline](audio/LIVE_SPEECH_PIPELINE.md), [Vosk](stt/VOSK_ADAPTER.md), [whisper.cpp](stt/WHISPER_LIVE_ADAPTER.md), [Omnilingual](stt/OMNILINGUAL_ASR.md), [model setup](../models/README.md) |
+| Commands | [Understanding](commands/COMMAND_UNDERSTANDING.md), [semantic contract](commands/SEMANTIC_UNDERSTANDING_CONTRACT.md), [recovery](commands/L04_RECOVERY_POLICY.md), [conversation memory](commands/CONVERSATION_MEMORY.md) |
+| Desktop authority | [Action gate](actions/ACTION_GATE.md), [permissions](actions/PERSISTENT_PERMISSIONS.md), [control policy](actions/CONTROL_POLICY.md), [shared input](actions/SHARED_INPUT_SESSION.md), [outcomes](actions/ACTION_POSTCONDITIONS.md) |
+| GNOME and applications | [Backend protocol](desktop/BACKEND_PROTOCOL.md), [window and app observation](desktop/ACTIVE_APP_OBSERVATION.md), [window group close](actions/APP_WINDOW_GROUP_CLOSE.md), [Ptyxis tabs](actions/TERMINAL_TAB_TARGETING.md), [Telegram](actions/TELEGRAM_CHAT_NAVIGATION_DESIGN.md) |
+| Screen observation | [Screen observation](desktop/SCREEN_OBSERVATION.md), [OCR architecture](vision/OCR_ARCHITECTURE.md), [document-model isolation](vision/DOCUMENT_MODEL_PROTECTION.md) |
+| Settings and feedback | [Local data](app/LOCAL_DATA_STORAGE.md), [model library](app/MODEL_LIBRARY.md), [model resources](app/MODEL_RESOURCE_POLICY.md), [language policy](LANGUAGE_POLICY.md), [speech output](responses/TTS_MODEL_MANAGEMENT.md), [visual status](desktop/VISUAL_STATUS.md) |
+| Development and safety | [Contributing](../CONTRIBUTING.md), [quality gate](development/QUALITY_GATE.md), [validation and limits](VALIDATION.md), [security reporting](../SECURITY.md), [third-party notices](../THIRD_PARTY_NOTICES.md) |
+| Evaluation | [Command cases](../datasets/commands/README.md), [STT evaluation](stt/STT_EVALUATION.md), [STT manifest templates](../datasets/stt/README.md) |
 
-## Feature references
-
-| Topic | Documents |
-| --- | --- |
-| Commands | [English examples](GETTING_STARTED.md#example-commands), [User command guide (Persian)](commands/USER_COMMAND_GUIDE_FA.md), [semantic contract](commands/SEMANTIC_UNDERSTANDING_CONTRACT.md), [local command models](app/COMMAND_MODEL_LIVE_INTEGRATION.md) |
-| Speech input | [Live pipeline (Persian)](audio/LIVE_SPEECH_PIPELINE_FA.md), [Whisper adapter](stt/WHISPER_LIVE_ADAPTER.md), [GPU execution](stt/WHISPER_GPU_EXECUTION.md), [local models](../models/README.md) |
-| Desktop actions | [Control policy](actions/CONTROL_POLICY.md), [postconditions](actions/ACTION_POSTCONDITIONS.md), [shared input session (Persian)](actions/SHARED_INPUT_SESSION_FA.md) |
-| Observation | [Active app](desktop/ACTIVE_APP_OBSERVATION.md), [OCR architecture](vision/OCR_ARCHITECTURE.md), [document model protection](vision/DOCUMENT_MODEL_PROTECTION.md) |
-| Application | [Model library](app/MODEL_LIBRARY.md), [UI languages](app/UI_LANGUAGE_PACKS.md), [TTS models](responses/TTS_MODEL_MANAGEMENT.md), [conversation memory](commands/CONVERSATION_MEMORY.md) |
-| Quality | [Pinned environment and gate (Persian)](development/QUALITY_CHECKS.md), [command evaluation](../datasets/commands/README.md), [STT evaluation](../datasets/stt/README.md) |
-
-## Reading the engineering history
-
-[PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md), `docs/development/` reports and
-[REVIEW.md](../REVIEW.md) preserve development stages, experiments, owner
-reports and open questions. Newer entries may supersede earlier ones. They
-include workstation-specific examples and references to ignored local logs;
-those paths are not files shipped in a fresh clone. An owner report is not
-an automated acceptance result.
-
-The [original Voice Core requirements](architecture/v1-voice-core-analysis.md)
-remain useful historical context; the current architecture is broader.
-Documentation ending in `_FA.md` is generally Persian. Public entry guides
-are English so reviewers can navigate the implementation without reading the
-entire development history.
+Dated engineering notes document specific earlier changes and experiments.
+Use the current guides for setup and consult the [validation guide](VALIDATION.md)
+for the distinction between deterministic checks and live observations.
