@@ -7,60 +7,108 @@
 
 <h1 align="center">KYRIN</h1>
 <p align="center">
-  A local-first voice desktop agent with permission-gated actions.<br>
+  A voice assistant for Ubuntu GNOME that turns locally recognized speech
+  into permission-checked desktop actions.<br>
   Built by <a href="https://github.com/mohammadhosseinzakeri10">Mohammad Hossein Zakeri</a> · Kailarin
 </p>
 <p align="center">
   <a href="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml"><img src="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml/badge.svg?branch=main" alt="Python quality checks"></a>
-  <a href="LICENSE">MIT license</a> · Python 3.14+ · Ubuntu / GNOME · Alpha
+  <a href="LICENSE">MIT license</a> · Python 3.14+ · Ubuntu 26.04 · GNOME Shell 50 · Alpha
 </p>
 <p align="center">
-  <a href="#try-it">Try it</a> · <a href="docs/architecture/OVERVIEW.md">Architecture</a> ·
-  <a href="docs/README.md">Documentation</a> · <a href="CONTRIBUTING.md">Contributing</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="#quick-start">Quick start</a> · <a href="docs/GETTING_STARTED.md">Setup guide</a> ·
+  <a href="docs/architecture/OVERVIEW.md">Architecture</a> · <a href="SECURITY.md">Security</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-KYRIN turns local speech into bounded desktop commands on Ubuntu/GNOME.
-Its speech engines are replaceable, and its command interpreter proposes
-actions that a separate authorization layer can reject. The Qt control
-center configures audio, models, and desktop permissions.
+You say a command such as `Open Calculator`. KYRIN transcribes it with a
+speech model running on your machine, interprets it, and acts on the desktop
+only if you have granted that capability and the target can be identified.
+It runs from source on Ubuntu with GNOME Shell 50, and its Qt control center
+manages audio, models and permissions.
 
-**KYRIN is an open-source alpha.** This branch carries the current
-reviewed source. The original [v0.1.0 pre-release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
-remains a separate milestone with its own artifacts.
-See the [release policy](docs/RELEASE_POLICY.md) and [roadmap](docs/ROADMAP.md).
+A fresh installation starts with the microphone off and desktop actions
+disabled. KYRIN downloads no speech models; you choose and install one.
+To try it, follow the [quick start](#quick-start).
 
-## Try it
+![The KYRIN control center: a sidebar with Audio Input, Speech Recognition, Model Library, Desktop Actions and other pages, a welcome panel, and controls to start listening or quit](docs/images/control-center.png)
 
-Use Python 3.14 or later on Linux to open the Qt control center. The desktop
-instructions target Ubuntu 26.04 with GNOME Shell 50 on Wayland. Portal
-helpers also require the system Python and GObject Introspection bindings.
-Follow [Getting started](docs/GETTING_STARTED.md) for the pinned installation,
-model setup, and example commands. A fresh configuration opens without
-microphone capture or desktop action authority.
+*The Qt control center with default settings, before a speech model or
+microphone is configured.*
 
-![KYRIN control center](docs/images/control-center.png)
+## What you can do
 
-The actual Qt control window rendered in an isolated preview with default
-settings. The image shows the interface before a model or microphone session.
+- **Speak to it locally.** Use a microphone or an audio file with a
+  whisper.cpp, Vosk or Omnilingual recognizer. You provide a compatible model
+  and runtime for the engine you choose.
+- **Open and arrange apps.** Launch or activate installed apps, then minimize,
+  restore, maximize or close their windows. Window operations need the
+  bundled GNOME Shell extension and a grant for each app.
+- **Scroll and use named controls.** Scroll the active window or ask for a
+  visible control by name, such as `Click Advanced`. Each action needs its own
+  capability and prepared input access. Named controls also need fresh
+  accessibility or OCR evidence and may ask you to confirm.
+- **Navigate Telegram Desktop.** Open Saved Messages or select a chat after
+  KYRIN verifies the Telegram window. Navigation never sends a message. It
+  needs its own capability, and some paths need GNOME accessibility, screen
+  access or OCR.
+- **Try experimental window control.** Choose among windows of one app, close
+  all windows of an app normally, and work with Ptyxis terminal tabs. Live
+  coverage of these routes is still limited.
+- **Get feedback your way.** Use an English or Persian interface, optional
+  local speech output, and an optional on-screen status character provided
+  by a separate GNOME extension.
 
-## Capabilities in the current source
+Once recognition and the relevant permissions are set up, try these phrases:
 
-| Area | What this snapshot implements | What to expect |
-| --- | --- | --- |
-| Speech input | Microphone capture, local-file input, voice activity detection, and Vosk, whisper.cpp, and Omnilingual adapters | Recognition needs a compatible local model and runtime. Start with the documented English examples. |
-| Command understanding | Deterministic phrases, optional loopback Ollama proposals, bounded recovery and numbered clarification | Coverage depends on the recognized text, supported action and target. |
-| Desktop control | App launch and activation, selected window operations, scrolling and named visible controls | Requires explicit permissions. Accessibility, GNOME extensions, portal consent and OCR requirements vary by operation. |
-| Experimental window control | Same-app window selection, app-scoped normal close, and targeted Ptyxis tab operations | Requires a fresh GNOME target and the relevant grants. Live coverage varies by route. |
-| Telegram Desktop | Selected navigation, including Saved Messages and guarded chat selection | Coverage depends on the window and readable targets. Semantic routes require the documented accessibility setup. Navigation does not send messages. |
-| Feedback | Qt output, English/Persian interface, optional local speech output and GNOME status character | Speech output requires its own runtime and model. UI language and recognition language are separate settings. |
+| Say | What happens |
+| --- | --- |
+| `Start listening` | KYRIN leaves standby and accepts commands. |
+| `Open Calculator` | Opens or activates Calculator, if desktop actions are enabled and the app is allowed. |
+| `Minimize Calculator` | Minimizes its window, if window control is granted for the app. |
+| `Stop listening` | KYRIN returns to standby. `Turn off microphone completely` stops capture. |
 
-See the [supported examples](docs/GETTING_STARTED.md#example-commands) and
-[validation and limits](docs/VALIDATION.md). Selected owner observations cover
-individual scenarios on one desktop. The deterministic suite covers software
-contracts with test doubles and synthetic evidence.
+The [command guide](docs/commands/USER_COMMAND_GUIDE.md) lists every supported
+phrase and its prerequisites.
 
-## Architecture at a glance
+## Quick start
+
+You need:
+
+- Ubuntu 26.04 with a GNOME Shell 50 Wayland session for desktop integration.
+  Windows and macOS are not supported.
+- Python 3.14 or later. GNOME portal and accessibility helpers also use the
+  system `/usr/bin/python3`, which must be 3.14 or later.
+- A local speech model for one supported engine. The control center opens
+  without one.
+
+Install the system libraries, then build and launch the control center from
+source:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libportaudio2 libegl1 libopengl0 ffmpeg speech-dispatcher
+git clone --branch main https://github.com/mohammadhosseinzakeri10/kyrin.git
+cd kyrin
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements/bootstrap.txt
+.venv/bin/python -m pip install -r requirements/core.txt -r requirements/test-ui.txt
+.venv/bin/python -m pip install --no-build-isolation --no-deps -e .
+.venv/bin/python -m pip check
+.venv/bin/kyrin-desktop
+```
+
+Run it as your normal user, not as root. The first launch only opens the
+control center. Continue with the [setup guide](docs/GETTING_STARTED.md):
+
+1. [Configure speech input](docs/GETTING_STARTED.md#2-configure-speech-input):
+   import a model and choose a microphone.
+2. [Add desktop integration](docs/GETTING_STARTED.md#desktop-integration):
+   install the GNOME extension and grant only the capabilities you need.
+3. [Try example commands](docs/GETTING_STARTED.md#example-commands) and see
+   [troubleshooting](docs/GETTING_STARTED.md#settings-shutdown-and-troubleshooting).
+
+## How it works
 
 ```mermaid
 flowchart LR
@@ -77,27 +125,59 @@ flowchart LR
     G --> I[Optional speech and status feedback]
 ```
 
-Local model output can propose a target. The action path independently checks
-capability, target identity and operation lifetime. A reported dispatch can
-have an unverified effect. See the [architecture](docs/architecture/OVERVIEW.md),
-[source map](docs/development/PROJECT_LAYOUT.md), [control policy](docs/actions/CONTROL_POLICY.md)
-and [security boundaries](SECURITY.md).
+- **Interpretation proposes; the action gate decides.** Deterministic rules
+  or an optional local Ollama model turn a transcript into a proposed action.
+  The action gate then checks the saved capability, the target's identity and
+  the operation's deadline before anything runs.
+- **Permissions are layered.** App selection, per-capability grants and
+  GNOME's own consent prompts are separate, and each can be revoked.
+  See [persistent permissions](docs/actions/PERSISTENT_PERMISSIONS.md).
+- **Dispatch is not success.** KYRIN distinguishes a verified result from
+  input that was only delivered. These checks reduce but do not eliminate
+  the effect of misrecognized speech.
 
-## Development and support
+Read the [architecture overview](docs/architecture/OVERVIEW.md),
+[control policy](docs/actions/CONTROL_POLICY.md) and
+[trust boundaries](SECURITY.md#trust-boundaries) for the details.
 
-[Contributing](CONTRIBUTING.md) describes the pinned development environment
-and how to run the same syntax, Ruff, strict mypy and pytest gate used in CI.
-[Validation](docs/VALIDATION.md) separates current checks, the tagged release, and live evidence. The [documentation index](docs/README.md)
-distinguishes current guides from historical engineering notes.
+## Project status
 
-Use [issues](https://github.com/mohammadhosseinzakeri10/kyrin/issues) for
-reproducible reports about the public snapshot. Follow [SECURITY.md](SECURITY.md)
-for private vulnerability reporting and [community conduct](CODE_OF_CONDUCT.md)
-for participation expectations.
+KYRIN is an open-source alpha. Public `main` carries the current reviewed
+source, and changes since the
+[v0.1.0 pre-release](https://github.com/mohammadhosseinzakeri10/kyrin/releases/tag/v0.1.0)
+are unreleased. There is no portable installer. Automated checks run headless
+with test doubles; live checks cover selected scenarios on one Ubuntu desktop.
+See [validation and known limits](docs/VALIDATION.md), the
+[roadmap](docs/ROADMAP.md) and the [release policy](docs/RELEASE_POLICY.md).
 
-## License and attribution
+## Documentation
 
-KYRIN source is distributed under the [MIT License](LICENSE). The bundled
-Silero VAD model retains its own MIT notice. See [third-party notices](THIRD_PARTY_NOTICES.md)
-for the boundary between project code, dependencies and separately acquired
-models. The project was developed with AI assistance under maintainer direction.
+- [Setup guide](docs/GETTING_STARTED.md): installation, models, desktop integration
+- [Command guide](docs/commands/USER_COMMAND_GUIDE.md): supported phrases and conditions
+- [Architecture overview](docs/architecture/OVERVIEW.md) and [source map](docs/development/PROJECT_LAYOUT.md)
+- [Security policy](SECURITY.md): trust boundaries and private reporting
+- [Validation](docs/VALIDATION.md), [roadmap](docs/ROADMAP.md) and [changelog](CHANGELOG.md)
+- [Documentation index](docs/README.md): current guides and historical notes
+
+## Development and tests
+
+The quality gate runs syntax checks, Ruff, strict mypy and the deterministic
+pytest suite, the same checks used in CI. After the quick start install:
+
+```bash
+.venv/bin/python -m pip install -r requirements/dev.txt
+PYTHONPATH="$PWD/src" .venv/bin/python scripts/development/check.py
+```
+
+The full suite needs extra Ubuntu packages listed in
+[Contributing](CONTRIBUTING.md#development-setup), which also covers the review
+expectations for changes. Use [issues](https://github.com/mohammadhosseinzakeri10/kyrin/issues)
+for reproducible bug reports and follow the [code of conduct](CODE_OF_CONDUCT.md).
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+KYRIN is distributed under the [MIT License](LICENSE). The bundled Silero VAD
+model keeps its own MIT notice; see [third-party notices](THIRD_PARTY_NOTICES.md)
+for dependencies and separately acquired models. The project was developed with
+AI assistance under maintainer direction.
