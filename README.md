@@ -9,7 +9,7 @@
 <p align="center">
   A voice assistant for Ubuntu GNOME that turns locally recognized speech
   into permission-checked desktop actions.<br>
-  Built by <a href="https://github.com/mohammadhosseinzakeri10">Mohammad Hossein Zakeri</a> · Kailarin
+  Built by <a href="https://github.com/mohammadhosseinzakeri10">Mohammad Hossein Zakeri</a> · <a href="https://github.com/kailarin">Kailarin</a>
 </p>
 <p align="center">
   <a href="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml"><img src="https://github.com/mohammadhosseinzakeri10/kyrin/actions/workflows/quality.yml/badge.svg?branch=main" alt="Python quality checks"></a>
