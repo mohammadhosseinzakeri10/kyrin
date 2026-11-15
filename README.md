@@ -181,10 +181,13 @@ KYRIN is distributed under the [MIT License](LICENSE). The bundled Silero VAD
 model keeps its own MIT notice; see [third-party notices](THIRD_PARTY_NOTICES.md)
 for dependencies and separately acquired models. The project was developed with
 AI assistance under maintainer direction.
+
 ## Kailarin and project management
+
 KYRIN is a [Kailarin](https://github.com/kailarin) project. Kailarin is the
 company brand behind our AI agents; its account is the central home for
 project introductions and company information.
+
 [Mohammad Hossein Zakeri](https://github.com/mohammadhosseinzakeri10) leads
 Kailarin and maintains KYRIN. The source repository is currently hosted on
 his personal account. For project support and contributions, use this
